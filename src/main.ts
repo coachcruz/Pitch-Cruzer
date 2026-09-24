@@ -235,6 +235,15 @@ app.innerHTML = `
         </label>
       </div>
 
+      <div class="pitchRangeRow">
+        <span class="coachLabel">TUNER RANGE</span>
+        <button type="button" class="rangeMode active" data-pitch-range-mode="song">Follow song</button>
+        <button type="button" class="rangeMode" data-pitch-range-mode="key">Explore key</button>
+        <button type="button" class="rangeMode" data-pitch-range-mode="open">Open range</button>
+        <span id="songRangeLabel" class="rangeLabel">Song range: analyzing…</span>
+      </div>
+      <div id="keyGuide" class="keyGuide">Load a song to build its key guide.</div>
+
       <div id="sectionChips" class="sectionChips"></div>
 
       <div class="selectedReference">
@@ -411,6 +420,9 @@ const selectChorusesButton = qs<HTMLButtonElement>('#selectChoruses');
 const clearSectionsButton = qs<HTMLButtonElement>('#clearSections');
 const loopCountEl = qs<HTMLSelectElement>('#loopCount');
 const referenceSequenceEl = qs<HTMLElement>('#referenceSequence');
+const songRangeLabelEl = qs<HTMLElement>('#songRangeLabel');
+const keyGuideEl = qs<HTMLElement>('#keyGuide');
+const pitchRangeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pitch-range-mode]'));
 const backingVocalLevelEl = qs<HTMLInputElement>('#backingVocalLevel');
 const backingVocalLevelValueEl = qs<HTMLElement>('#backingVocalLevelValue');
 const instrumentalLevelEl = qs<HTMLInputElement>('#instrumentalLevel');
@@ -428,7 +440,7 @@ targetNoteEl.innerHTML = NOTE_NAMES.map(
   name => '<option value="' + name + '">' + name + '</option>'
 ).join('');
 targetNoteEl.value = 'G';
-targetOctaveEl.innerHTML = [1, 2, 3, 4, 5]
+targetOctaveEl.innerHTML = [0, 1, 2, 3, 4, 5, 6, 7]
   .map(octave => '<option value="' + octave + '">' + octave + '</option>')
   .join('');
 targetOctaveEl.value = '2';
@@ -463,6 +475,19 @@ let leadVocalBuffer: AudioBuffer | null = null;
 let backingVocalBuffer: AudioBuffer | null = null;
 let instrumentalBuffer: AudioBuffer | null = null;
 let derivedReferenceNotes: string[] = [];
+
+type PitchBounds = { minHz: number; maxHz: number };
+type PitchRangeMode = 'song' | 'key' | 'open';
+type DetectedKey = {
+  tonic: number;
+  mode: 'major' | 'minor';
+  confidence: number;
+};
+
+const OPEN_VOCAL_BOUNDS: PitchBounds = { minHz: 27.5, maxHz: 2093 };
+let songPitchBounds: PitchBounds | null = null;
+let detectedSongKey: DetectedKey | null = null;
+let pitchRangeMode: PitchRangeMode = 'song';
 
 type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'outro' | 'section';
 type SongSection = {
@@ -740,7 +765,8 @@ function pitchFrames(
   buffer: AudioBuffer,
   startSeconds: number,
   durationSeconds: number,
-  stepSeconds = 0.14
+  stepSeconds = 0.14,
+  bounds: PitchBounds = OPEN_VOCAL_BOUNDS
 ): Array<number | null> {
   const sampleRate = buffer.sampleRate;
   const frameSize = 4096;
@@ -759,7 +785,7 @@ function pitchFrames(
       }
       frame[i] = sample / buffer.numberOfChannels;
     }
-    const result = estimatePitch(frame, sampleRate);
+    const result = estimatePitch(frame, sampleRate, bounds);
     values.push(result ? frequencyToMidi(result.frequency) : null);
   }
   return values;
@@ -953,6 +979,122 @@ function selectedSections(): SongSection[] {
   return songSections.filter(section => selectedSectionIds.has(section.id));
 }
 
+function pitchBoundsText(bounds: PitchBounds): string {
+  return midiToNote(frequencyToMidi(bounds.minHz)) + '–' + midiToNote(frequencyToMidi(bounds.maxHz));
+}
+
+function getActivePitchBounds(): PitchBounds {
+  if (appMode === 'reference' && pitchRangeMode === 'song' && songPitchBounds) {
+    return songPitchBounds;
+  }
+  return OPEN_VOCAL_BOUNDS;
+}
+
+function keyName(key: DetectedKey): string {
+  return NOTE_NAMES[key.tonic] + ' ' + key.mode;
+}
+
+function scalePitchClasses(key: DetectedKey): number[] {
+  const intervals = key.mode === 'major'
+    ? [0, 2, 4, 5, 7, 9, 11]
+    : [0, 2, 3, 5, 7, 8, 10];
+  return intervals.map(interval => (key.tonic + interval) % 12);
+}
+
+function updatePitchRangeUi(): void {
+  pitchRangeButtons.forEach(button => {
+    button.classList.toggle('active', button.dataset.pitchRangeMode === pitchRangeMode);
+  });
+
+  songRangeLabelEl.textContent = songPitchBounds
+    ? 'Song range: ' + pitchBoundsText(songPitchBounds)
+    : 'Song range: analyzing…';
+
+  if (!detectedSongKey) {
+    keyGuideEl.textContent = 'Load a song to build its key guide.';
+    return;
+  }
+
+  const scale = scalePitchClasses(detectedSongKey).map(pc => NOTE_NAMES[pc]);
+  const third = scale[2];
+  const fifth = scale[4];
+  keyGuideEl.innerHTML =
+    '<strong>' + keyName(detectedSongKey) + '</strong>' +
+    '<span>Strong tones: ' + scale[0] + ' · ' + third + ' · ' + fifth + '</span>' +
+    '<span>Scale: ' + scale.join(' · ') + '</span>';
+}
+
+function deriveSongPitchBounds(buffer: AudioBuffer): PitchBounds | null {
+  const frames = pitchFrames(buffer, 0, buffer.duration, 0.1, OPEN_VOCAL_BOUNDS)
+    .filter((value): value is number => value !== null);
+  if (!frames.length) return null;
+
+  const counts = new Map<number, number>();
+  frames.forEach(value => {
+    const rounded = Math.round(value);
+    counts.set(rounded, (counts.get(rounded) ?? 0) + 1);
+  });
+
+  const supported = [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .map(([midi]) => midi)
+    .sort((a, b) => a - b);
+  const source = supported.length
+    ? supported
+    : frames.map(value => Math.round(value)).sort((a, b) => a - b);
+
+  const lowMidi = source[0];
+  const highMidi = source[source.length - 1];
+  const openLowMidi = frequencyToMidi(OPEN_VOCAL_BOUNDS.minHz);
+  const openHighMidi = frequencyToMidi(OPEN_VOCAL_BOUNDS.maxHz);
+
+  return {
+    minHz: midiToFrequency(Math.max(openLowMidi, lowMidi - 2)),
+    maxHz: midiToFrequency(Math.min(openHighMidi, highMidi + 2))
+  };
+}
+
+function detectSongKey(buffer: AudioBuffer): DetectedKey | null {
+  const frames = pitchFrames(buffer, 0, buffer.duration, 0.1, OPEN_VOCAL_BOUNDS)
+    .filter((value): value is number => value !== null);
+  if (frames.length < 8) return null;
+
+  const histogram = new Array<number>(12).fill(0);
+  frames.forEach(midi => {
+    const pc = ((Math.round(midi) % 12) + 12) % 12;
+    histogram[pc] += 1;
+  });
+
+  const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
+  const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+
+  const cosine = (a: number[], b: number[]): number => {
+    let dot = 0;
+    let aa = 0;
+    let bb = 0;
+    for (let i = 0; i < 12; i += 1) {
+      dot += a[i] * b[i];
+      aa += a[i] * a[i];
+      bb += b[i] * b[i];
+    }
+    return dot / (Math.sqrt(aa * bb) + 1e-9);
+  };
+
+  let best: DetectedKey | null = null;
+  for (let tonic = 0; tonic < 12; tonic += 1) {
+    for (const mode of ['major', 'minor'] as const) {
+      const profile = mode === 'major' ? majorProfile : minorProfile;
+      const rotated = new Array<number>(12);
+      for (let pc = 0; pc < 12; pc += 1) {
+        rotated[pc] = profile[((pc - tonic) % 12 + 12) % 12];
+      }
+      const confidence = cosine(histogram, rotated);
+      if (!best || confidence > best.confidence) best = { tonic, mode, confidence };
+    }
+  }
+  return best;
+}
+
 function syncSelectedNotes(): void {
   const sections = selectedSections();
   derivedReferenceNotes = sections.flatMap(section => section.notes).slice(0, 72);
@@ -1010,6 +1152,10 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
   leadVocalBuffer = null;
   backingVocalBuffer = null;
   instrumentalBuffer = null;
+  songPitchBounds = null;
+  detectedSongKey = null;
+  pitchRangeMode = 'song';
+  updatePitchRangeUi();
 
   try {
     setAnalysisProgress(4, 'Reading source audio…');
@@ -1037,6 +1183,11 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
     leadVocalBuffer = leadBuffer;
     instrumentalBuffer = instrumentalLoaded;
     backingVocalBuffer = backingBuffer;
+
+    setAnalysisProgress(82, 'Mapping vocal range and key…');
+    songPitchBounds = deriveSongPitchBounds(leadVocalBuffer);
+    detectedSongKey = detectSongKey(leadVocalBuffer);
+    updatePitchRangeUi();
 
     songSections = await buildSongSections(leadVocalBuffer);
     if (!songSections.length) throw new Error('No usable song sections were detected.');
@@ -1580,7 +1731,8 @@ function getTargetFrequency(): number {
 
 function estimatePitch(
   buffer: Float32Array,
-  sampleRate: number
+  sampleRate: number,
+  bounds: PitchBounds = OPEN_VOCAL_BOUNDS
 ): { frequency: number; clarity: number } | null {
   let mean = 0;
   for (let i = 0; i < buffer.length; i += 1) mean += buffer[i];
@@ -1596,9 +1748,9 @@ function estimatePitch(
   rms = Math.sqrt(rms / buffer.length);
   if (rms < 0.008) return null;
 
-  const minHz = 55;
-  const maxHz = 420;
-  const minLag = Math.floor(sampleRate / maxHz);
+  const minHz = Math.max(20, bounds.minHz);
+  const maxHz = Math.min(sampleRate / 4, Math.max(minHz + 1, bounds.maxHz));
+  const minLag = Math.max(2, Math.floor(sampleRate / maxHz));
   const maxLag = Math.min(
     Math.floor(sampleRate / minHz),
     Math.floor(centered.length / 2)
@@ -2062,7 +2214,8 @@ function processAudio(timestamp: number): void {
 
   const buffer = new Float32Array(analyser.fftSize);
   analyser.getFloatTimeDomainData(buffer);
-  const result = estimatePitch(buffer, audioContext.sampleRate);
+  const activeBounds = getActivePitchBounds();
+  const result = estimatePitch(buffer, audioContext.sampleRate, activeBounds);
 
   if (!result) {
     recentFrequencies = [];
@@ -2077,9 +2230,9 @@ function processAudio(timestamp: number): void {
   if (previous) {
     const ratio = candidate / previous;
 
-    if (ratio > 1.88 && ratio < 2.12 && candidate / 2 >= 55) {
+    if (ratio > 1.88 && ratio < 2.12 && candidate / 2 >= activeBounds.minHz) {
       candidate /= 2;
-    } else if (ratio > 0.47 && ratio < 0.53 && candidate * 2 <= 420) {
+    } else if (ratio > 0.47 && ratio < 0.53 && candidate * 2 <= activeBounds.maxHz) {
       const currentDistance = Math.abs(
         centsBetween(candidate, targetFrequency)
       );
@@ -2251,6 +2404,17 @@ clearSectionsButton.addEventListener('click', () => {
   syncSelectedNotes();
 });
 
+pitchRangeButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    const mode = button.dataset.pitchRangeMode as PitchRangeMode | undefined;
+    if (!mode) return;
+    pitchRangeMode = mode;
+    recentFrequencies = [];
+    previousStableFrequency = null;
+    updatePitchRangeUi();
+  });
+});
+
 artistPresetButtons.forEach(button => {
   button.addEventListener('click', () => {
     artistLevel = Math.max(0, Math.min(1, Number(button.dataset.artistLevel ?? 0) / 100));
@@ -2320,5 +2484,6 @@ if ('serviceWorker' in navigator) {
 
 renderSequence();
 applyModeVisibility();
+updatePitchRangeUi();
 void checkLalalConnection();
 setNoPitch();
