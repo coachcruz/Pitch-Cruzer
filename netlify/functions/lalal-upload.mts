@@ -1,4 +1,5 @@
 import type { Config } from '@netlify/functions';
+declare const Netlify: { env: { get(name: string): string | undefined } };
 
 function apiKey(): string | null {
   return Netlify.env.get('LALAL_API_KEY') ?? null;
