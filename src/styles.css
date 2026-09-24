@@ -2523,6 +2523,8 @@ footer {
   }
 
   .shell.mode-reference {
+    min-height: 0;
+    padding-bottom: 16px;
     grid-template-rows: 44px 40px auto 0 auto;
   }
 
@@ -2699,11 +2701,11 @@ footer {
     padding-bottom: 30px;
   }
 
-    .shell.mode-reference {
+  .shell.mode-reference {
     padding-bottom: 16px;
   }
 
-.sourceLaunchHint {
+  .sourceLaunchHint {
     flex-basis: 100%;
   }
 
