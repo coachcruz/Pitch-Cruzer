@@ -205,7 +205,7 @@ app.innerHTML = `
       <span id="sourceTimer" class="captureState">00:00</span>
       <label class="fileAction">
         <span>or upload audio / video</span>
-        <input id="referenceFile" type="file" accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.flac,.mp4,.webm">
+        <input id="referenceFile" type="file" accept=".mp3,.ogg,.wav,.flac,.aiff,.aif,.aac,.m4a,.avi,.mp4,.mkv,.mov,.m4v">
       </label>
     </div>
 
@@ -512,8 +512,12 @@ let artistLevel = 1;
 type SourceUiState = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'processing';
 
 let sourceCaptureStream: MediaStream | null = null;
-let sourceRecorder: MediaRecorder | null = null;
-let sourceChunks: Blob[] = [];
+let sourceCaptureContext: AudioContext | null = null;
+let sourceCaptureSource: MediaStreamAudioSourceNode | null = null;
+let sourceCaptureProcessor: ScriptProcessorNode | null = null;
+let sourceCaptureSink: GainNode | null = null;
+let sourcePcmChunks: Int16Array[] = [];
+let sourceCaptureSampleRate = 48000;
 let sourceCaptureStartedAt = 0;
 let sourceTimerHandle: number | null = null;
 let sourceUiState: SourceUiState = 'idle';
@@ -670,11 +674,33 @@ function getRecorderMimeType(): string {
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
 }
 
-function recorderFileExtension(mimeType: string): string {
-  const normalized = mimeType.toLowerCase();
-  if (normalized.includes('ogg')) return 'ogg';
-  if (normalized.includes('mp4')) return 'm4a';
-  return 'webm';
+function writeWaveText(view: DataView, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    view.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function pcmChunksToWave(chunks: Int16Array[], sampleRate: number): Blob {
+  const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  const dataBytes = sampleCount * 2;
+  const header = new ArrayBuffer(44);
+  const view = new DataView(header);
+
+  writeWaveText(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataBytes, true);
+  writeWaveText(view, 8, 'WAVE');
+  writeWaveText(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeWaveText(view, 36, 'data');
+  view.setUint32(40, dataBytes, true);
+
+  return new Blob([header, ...chunks], { type: 'audio/wav' });
 }
 
 async function decodeReferenceBytes(bytes: ArrayBuffer): Promise<AudioBuffer> {
@@ -1262,26 +1288,63 @@ function updateSourceTimer(): void {
   sourceTimerEl.textContent = formatTime(elapsed);
 }
 
-function stopSourceCapture(): void {
+async function cleanupSourceCapture(): Promise<void> {
   if (sourceTimerHandle !== null) {
     window.clearInterval(sourceTimerHandle);
     sourceTimerHandle = null;
   }
 
-  if (sourceRecorder?.state === 'recording') {
-    setSourceUiState('finalizing');
-    setReferenceStatus('Finalizing captured tab audio…', 'FINALIZING');
-    sourceRecorder.stop();
-    return;
+  if (sourceCaptureProcessor) {
+    sourceCaptureProcessor.onaudioprocess = null;
+    try { sourceCaptureProcessor.disconnect(); } catch { /* disconnected */ }
+  }
+  if (sourceCaptureSource) {
+    try { sourceCaptureSource.disconnect(); } catch { /* disconnected */ }
+  }
+  if (sourceCaptureSink) {
+    try { sourceCaptureSink.disconnect(); } catch { /* disconnected */ }
   }
 
   sourceCaptureStream?.getTracks().forEach(track => track.stop());
   sourceCaptureStream = null;
-  setSourceUiState('idle');
+  sourceCaptureSource = null;
+  sourceCaptureProcessor = null;
+  sourceCaptureSink = null;
+
+  const context = sourceCaptureContext;
+  sourceCaptureContext = null;
+  if (context && context.state !== 'closed') {
+    await context.close().catch(() => undefined);
+  }
+}
+
+async function finalizeSourceCapture(): Promise<void> {
+  const chunks = sourcePcmChunks;
+  const sampleRate = sourceCaptureSampleRate;
+  sourcePcmChunks = [];
+
+  await cleanupSourceCapture();
+
+  const sampleCount = chunks.reduce((total, chunk) => total + chunk.length, 0);
+  if (sampleCount < Math.max(1, Math.floor(sampleRate * 0.25))) {
+    setSourceUiState('idle');
+    setReferenceStatus('No usable tab audio was captured. Make sure Share tab audio is enabled.', 'NO AUDIO');
+    return;
+  }
+
+  const blob = pcmChunksToWave(chunks, sampleRate);
+  await prepareSong(blob, 'recorded-source.wav');
+}
+
+function stopSourceCapture(): void {
+  if (sourceUiState !== 'recording') return;
+  setSourceUiState('finalizing');
+  setReferenceStatus('Finalizing captured tab audio as WAV…', 'FINALIZING');
+  void finalizeSourceCapture();
 }
 
 async function startSourceCapture(): Promise<void> {
-  if (!navigator.mediaDevices?.getDisplayMedia || !('MediaRecorder' in window)) {
+  if (!navigator.mediaDevices?.getDisplayMedia || !('AudioContext' in window)) {
     setReferenceStatus('This browser cannot record tab audio.', 'UNSUPPORTED');
     return;
   }
@@ -1289,6 +1352,7 @@ async function startSourceCapture(): Promise<void> {
   try {
     setSourceUiState('requesting');
     setReferenceStatus('Choose the source tab and enable Share tab audio.', 'CHOOSE TAB');
+
     const capture = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     const audioTrack = capture.getAudioTracks()[0];
     if (!audioTrack) {
@@ -1299,56 +1363,52 @@ async function startSourceCapture(): Promise<void> {
     }
 
     sourceCaptureStream = capture;
+    sourceCaptureContext = new AudioContext();
+    await sourceCaptureContext.resume();
+    sourceCaptureSampleRate = sourceCaptureContext.sampleRate;
+    sourcePcmChunks = [];
+
     const audioOnly = new MediaStream([audioTrack]);
-    const mimeType = getRecorderMimeType();
-    sourceRecorder = mimeType ? new MediaRecorder(audioOnly, { mimeType }) : new MediaRecorder(audioOnly);
-    sourceChunks = [];
-    sourceRecorder.addEventListener('dataavailable', event => {
-      if (event.data.size > 0) sourceChunks.push(event.data);
-    });
-    sourceRecorder.addEventListener('stop', () => {
-      const type = sourceRecorder?.mimeType || mimeType || 'audio/webm';
-      const blob = new Blob(sourceChunks, { type });
-      sourceRecorder = null;
-      const extension = recorderFileExtension(type);
-      sourceChunks = [];
+    sourceCaptureSource = sourceCaptureContext.createMediaStreamSource(audioOnly);
+    sourceCaptureProcessor = sourceCaptureContext.createScriptProcessor(4096, 2, 1);
+    sourceCaptureSink = sourceCaptureContext.createGain();
+    sourceCaptureSink.gain.value = 0;
 
-      sourceCaptureStream?.getTracks().forEach(track => track.stop());
-      sourceCaptureStream = null;
+    sourceCaptureProcessor.onaudioprocess = event => {
+      if (sourceUiState !== 'recording') return;
+      const input = event.inputBuffer;
+      const channels = Math.max(1, input.numberOfChannels);
+      const data = Array.from({ length: channels }, (_, channel) => input.getChannelData(channel));
+      const mono = new Int16Array(input.length);
 
-      if (blob.size > 0) {
-        void prepareSong(blob, 'recorded-source.' + extension);
-      } else {
-        setSourceUiState('idle');
-        setReferenceStatus('No usable tab audio was captured. Make sure Share tab audio is enabled.', 'NO AUDIO');
+      for (let frame = 0; frame < input.length; frame += 1) {
+        let sample = 0;
+        for (let channel = 0; channel < channels; channel += 1) {
+          sample += data[channel][frame] ?? 0;
+        }
+        sample /= channels;
+        sample = Math.max(-1, Math.min(1, sample));
+        mono[frame] = sample < 0 ? Math.round(sample * 0x8000) : Math.round(sample * 0x7fff);
       }
-    });
+      sourcePcmChunks.push(mono);
+    };
 
-    sourceRecorder.addEventListener('error', () => {
-      if (sourceTimerHandle !== null) {
-        window.clearInterval(sourceTimerHandle);
-        sourceTimerHandle = null;
-      }
-      sourceCaptureStream?.getTracks().forEach(track => track.stop());
-      sourceCaptureStream = null;
-      sourceRecorder = null;
-      sourceChunks = [];
-      setSourceUiState('idle');
-      setReferenceStatus('The browser recorder failed before the audio could be finalized.', 'CAPTURE ERROR');
-    });
+    sourceCaptureSource.connect(sourceCaptureProcessor);
+    sourceCaptureProcessor.connect(sourceCaptureSink);
+    sourceCaptureSink.connect(sourceCaptureContext.destination);
+
     audioTrack.addEventListener('ended', () => {
-      if (sourceRecorder?.state === 'recording') stopSourceCapture();
+      if (sourceUiState === 'recording') stopSourceCapture();
     });
 
     sourceCaptureStartedAt = performance.now();
     sourceTimerEl.textContent = '0:00';
     sourceTimerHandle = window.setInterval(updateSourceTimer, 250);
-    sourceRecorder.start();
     setSourceUiState('recording');
     setReferenceStatus('Recording tab audio. When you have what you want, press Stop & analyze.', 'RECORDING');
   } catch {
-    sourceCaptureStream?.getTracks().forEach(track => track.stop());
-    sourceCaptureStream = null;
+    sourcePcmChunks = [];
+    await cleanupSourceCapture();
     setSourceUiState('idle');
     setReferenceStatus('Tab recording was cancelled or blocked.', 'CAPTURE CANCELLED');
   }
@@ -2465,7 +2525,17 @@ stopSourceAudioButton.addEventListener('click', stopSourceCapture);
 
 referenceFileEl.addEventListener('change', () => {
   const file = referenceFileEl.files?.[0];
-  if (file) void prepareSong(file, file.name || 'uploaded-source');
+  if (!file) return;
+
+  const extension = file.name.toLowerCase().split('.').pop() ?? '';
+  const supported = new Set(['mp3', 'ogg', 'wav', 'flac', 'aiff', 'aif', 'aac', 'm4a', 'avi', 'mp4', 'mkv', 'mov', 'm4v']);
+  if (!supported.has(extension)) {
+    referenceFileEl.value = '';
+    setReferenceStatus('That file type is not supported for separation. Use MP3, OGG, WAV, FLAC, AIFF, AAC, M4A, AVI, MP4, MKV, MOV, or M4V.', 'UNSUPPORTED FILE');
+    return;
+  }
+
+  void prepareSong(file, file.name || 'uploaded-source');
 });
 
 selectVersesButton.addEventListener('click', () => selectKinds(['verse']));
