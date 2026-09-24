@@ -2614,3 +2614,70 @@ footer {
     font-size: 10px;
   }
 }
+
+
+.pitchRangeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 0 2px;
+}
+
+.rangeMode {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  color: #8f9aa8;
+  background: #0f1318;
+  font-size: 8px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.rangeMode.active {
+  color: #061310;
+  border-color: transparent;
+  background: #22e6c2;
+}
+
+.rangeLabel {
+  margin-left: auto;
+  color: #7f8a98;
+  font-size: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.keyGuide {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 0 7px;
+  color: #788493;
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.keyGuide strong {
+  color: #dfe5ec;
+  font-size: 10px;
+}
+
+.keyGuide span:last-child {
+  color: #9aa6b4;
+}
+
+@media (max-width: 759px) {
+  .rangeLabel {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .keyGuide {
+    display: grid;
+    gap: 3px;
+  }
+}
