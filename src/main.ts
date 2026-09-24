@@ -193,24 +193,24 @@ app.innerHTML = `
     </div>
 
     <div class="sourceLaunchRow" aria-label="Open a song source">
-      <span>Source</span>
+      <span class="sourceLaunchLabel">OPEN SOURCE</span>
       <a class="sourceLink" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">YouTube ↗</a>
       <a class="sourceLink" href="https://suno.com/" target="_blank" rel="noopener noreferrer">Suno ↗</a>
-      <span class="sourceLaunchHint">Open the song in another tab, start it, then use Record tab.</span>
+      <span class="sourceLaunchHint">Open the song in another tab, then come back here.</span>
     </div>
 
-    <div class="matchSourceRow">
-      <label class="fileAction">Upload audio / video
+    <div class="captureBar">
+      <button id="recordSourceAudio" class="primaryButton capturePrimary">Record browser tab</button>
+      <button id="stopSourceAudio" class="captureStop hidden" disabled>Stop & analyze</button>
+      <span id="sourceTimer" class="captureState">00:00</span>
+      <label class="fileAction">
+        <span>or upload audio / video</span>
         <input id="referenceFile" type="file" accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.flac,.mp4,.webm">
       </label>
-      <button id="recordSourceAudio" class="primaryButton">Record tab audio</button>
-      <button id="stopSourceAudio" class="secondaryButton" disabled>Stop recording</button>
-      <span id="sourceTimer" class="captureState">00:00</span>
     </div>
 
     <div class="captureInstruction">
-      <strong>Tab capture:</strong>
-      click Record tab audio → choose the YouTube/Suno/browser tab → turn on <strong>Share tab audio</strong>.
+      Chrome will open a picker. Choose the actual YouTube/Suno tab and turn on <strong>Share tab audio</strong>.
     </div>
 
     <div id="referenceStatus" class="referenceStatus">Upload a song, or record audio from another browser tab. Pitch Cruzer prepares it automatically.</div>
@@ -509,11 +509,14 @@ let songSections: SongSection[] = [];
 let selectedSectionIds = new Set<string>();
 let lastSectionIndex: number | null = null;
 let artistLevel = 1;
+type SourceUiState = 'idle' | 'requesting' | 'recording' | 'finalizing' | 'processing';
+
 let sourceCaptureStream: MediaStream | null = null;
 let sourceRecorder: MediaRecorder | null = null;
 let sourceChunks: Blob[] = [];
 let sourceCaptureStartedAt = 0;
 let sourceTimerHandle: number | null = null;
+let sourceUiState: SourceUiState = 'idle';
 let practiceContext: AudioContext | null = null;
 let practiceSources: AudioBufferSourceNode[] = [];
 let practiceArtistGain: GainNode | null = null;
@@ -702,7 +705,10 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 async function uploadToLalal(blob: Blob, filename: string): Promise<string> {
   const response = await requestJson<{ id?: string }>('/api/lalal/upload', {
     method: 'POST',
-    headers: { 'X-File-Name': filename },
+    headers: {
+      'X-File-Name': filename,
+      'X-File-Type': blob.type || 'application/octet-stream'
+    },
     body: blob
   });
   if (!response.id) throw new Error('LALAL upload did not return a source id.');
@@ -1148,6 +1154,7 @@ function selectKinds(kinds: SectionKind[]): void {
 }
 
 async function prepareSong(blob: Blob, filename: string): Promise<void> {
+  setSourceUiState('processing');
   stopPracticePlayback(false);
   songWorkspaceEl.classList.add('hidden');
   reviewPanelEl.classList.add('hidden');
@@ -1213,6 +1220,7 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
       'Ready. Lead vocal, backing vocals, and instrumental stay synchronized. Pick any sections and practice.',
       'READY'
     );
+    setSourceUiState('idle');
   } catch (error) {
     clearAnalysisProgress();
     const message = error instanceof Error ? error.message : 'Song preparation failed.';
@@ -1223,6 +1231,32 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
         : message,
       keyMissing ? 'LALAL KEY NEEDED' : 'PROCESSING ERROR'
     );
+    setSourceUiState('idle');
+  }
+}
+
+function setSourceUiState(state: SourceUiState): void {
+  sourceUiState = state;
+  referenceCardEl.dataset.captureState = state;
+
+  const idle = state === 'idle';
+  const recording = state === 'recording';
+
+  recordSourceAudioButton.classList.toggle('hidden', recording || state === 'finalizing');
+  recordSourceAudioButton.disabled = !idle;
+  stopSourceAudioButton.classList.toggle('hidden', !recording);
+  stopSourceAudioButton.disabled = !recording;
+  referenceFileEl.disabled = !idle;
+  sourceTimerEl.classList.toggle('recording', recording);
+
+  if (state === 'requesting') {
+    recordSourceAudioButton.classList.remove('hidden');
+    recordSourceAudioButton.textContent = 'Choose source tab…';
+  } else if (state === 'processing') {
+    recordSourceAudioButton.classList.remove('hidden');
+    recordSourceAudioButton.textContent = 'Analyzing source…';
+  } else if (state === 'idle') {
+    recordSourceAudioButton.textContent = 'Record browser tab';
   }
 }
 
@@ -1238,7 +1272,7 @@ function stopSourceCapture(): void {
   }
 
   if (sourceRecorder?.state === 'recording') {
-    stopSourceAudioButton.disabled = true;
+    setSourceUiState('finalizing');
     setReferenceStatus('Finalizing captured tab audio…', 'FINALIZING');
     sourceRecorder.stop();
     return;
@@ -1246,8 +1280,7 @@ function stopSourceCapture(): void {
 
   sourceCaptureStream?.getTracks().forEach(track => track.stop());
   sourceCaptureStream = null;
-  recordSourceAudioButton.disabled = false;
-  stopSourceAudioButton.disabled = true;
+  setSourceUiState('idle');
 }
 
 async function startSourceCapture(): Promise<void> {
@@ -1257,11 +1290,14 @@ async function startSourceCapture(): Promise<void> {
   }
 
   try {
+    setSourceUiState('requesting');
+    setReferenceStatus('Choose the source tab and enable Share tab audio.', 'CHOOSE TAB');
     const capture = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     const audioTrack = capture.getAudioTracks()[0];
     if (!audioTrack) {
       capture.getTracks().forEach(track => track.stop());
-      setReferenceStatus('Choose a browser tab and enable Share tab audio.', 'NO AUDIO');
+      setSourceUiState('idle');
+      setReferenceStatus('No tab audio was shared. Choose the source tab and enable Share tab audio.', 'NO AUDIO');
       return;
     }
 
@@ -1281,14 +1317,21 @@ async function startSourceCapture(): Promise<void> {
 
       sourceCaptureStream?.getTracks().forEach(track => track.stop());
       sourceCaptureStream = null;
-      recordSourceAudioButton.disabled = false;
-      stopSourceAudioButton.disabled = true;
 
       if (blob.size > 0) {
         void prepareSong(blob, 'recorded-source.' + extension);
       } else {
+        setSourceUiState('idle');
         setReferenceStatus('No usable tab audio was captured. Make sure Share tab audio is enabled.', 'NO AUDIO');
       }
+    });
+
+    sourceRecorder.addEventListener('error', () => {
+      sourceCaptureStream?.getTracks().forEach(track => track.stop());
+      sourceCaptureStream = null;
+      sourceChunks = [];
+      setSourceUiState('idle');
+      setReferenceStatus('The browser recorder failed before the audio could be finalized.', 'CAPTURE ERROR');
     });
     audioTrack.addEventListener('ended', () => {
       if (sourceRecorder?.state === 'recording') stopSourceCapture();
@@ -1298,10 +1341,12 @@ async function startSourceCapture(): Promise<void> {
     sourceTimerEl.textContent = '0:00';
     sourceTimerHandle = window.setInterval(updateSourceTimer, 250);
     sourceRecorder.start();
-    recordSourceAudioButton.disabled = true;
-    stopSourceAudioButton.disabled = false;
-    setReferenceStatus('Recording the selected tab audio. Stop when you have the song or section you want.', 'RECORDING SOURCE');
+    setSourceUiState('recording');
+    setReferenceStatus('Recording tab audio. When you have what you want, press Stop & analyze.', 'RECORDING');
   } catch {
+    sourceCaptureStream?.getTracks().forEach(track => track.stop());
+    sourceCaptureStream = null;
+    setSourceUiState('idle');
     setReferenceStatus('Tab recording was cancelled or blocked.', 'CAPTURE CANCELLED');
   }
 }
@@ -2508,6 +2553,7 @@ if ('serviceWorker' in navigator) {
 
 renderSequence();
 applyModeVisibility();
+setSourceUiState('idle');
 updatePitchRangeUi();
 void checkLalalConnection();
 setNoPitch();
