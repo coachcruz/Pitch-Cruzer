@@ -2101,3 +2101,329 @@ footer {
   gap: 5px;
   align-items: center;
 }
+
+
+/* Responsive workstation correction */
+@media (min-width: 1280px) {
+  .shell {
+    padding: 12px 14px;
+    gap: 10px;
+    grid-template-columns:
+      minmax(330px, 0.9fr)
+      minmax(470px, 1.35fr)
+      minmax(260px, 0.75fr);
+    grid-template-rows: 44px 40px minmax(0, 1fr) clamp(150px, 21vh, 190px);
+  }
+
+  .topbar {
+    padding: 0 6px;
+  }
+
+  .modeChooser {
+    height: 40px;
+  }
+
+  .modeButtons {
+    height: 38px;
+  }
+
+  .modeButton {
+    min-width: 88px;
+    height: 38px;
+    padding: 0 15px;
+  }
+
+  .phraseCard,
+  .referenceCard {
+    padding: 14px;
+  }
+
+  .mode-reference .referenceCard,
+  .mode-phrase .phraseCard {
+    min-width: 0;
+  }
+
+  .mode-reference .heroCard,
+  .mode-phrase .heroCard {
+    min-width: 0;
+  }
+
+  .mode-reference .referenceCard label,
+  .mode-reference .referenceStatus,
+  .mode-reference .takeStatus {
+    font-size: 10px;
+  }
+
+  .mode-reference .primaryButton,
+  .mode-reference .secondaryButton {
+    min-height: 36px;
+    font-size: 10px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  html,
+  body,
+  #app {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  .shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 12px;
+    gap: 10px;
+    grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.18fr);
+    grid-template-rows: 44px 40px auto 170px auto;
+  }
+
+  .topbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .modeChooser {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 40px;
+  }
+
+  .mode-reference .referenceCard,
+  .mode-phrase .phraseCard {
+    grid-column: 1;
+    grid-row: 3 / 5;
+  }
+
+  .mode-reference .heroCard,
+  .mode-phrase .heroCard {
+    grid-column: 2;
+    grid-row: 3;
+    min-height: 420px;
+  }
+
+  .mode-reference .traceCard,
+  .mode-phrase .traceCard {
+    grid-column: 2;
+    grid-row: 4;
+    min-height: 170px;
+  }
+
+  .mode-reference.advanced-open .heroCard,
+  .mode-phrase.advanced-open .heroCard {
+    grid-column: 2;
+  }
+
+  .mode-reference.advanced-open .controlsGrid,
+  .mode-phrase.advanced-open .controlsGrid {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
+  .mode-single .heroCard {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    min-height: 430px;
+  }
+
+  .mode-single .traceCard {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    min-height: 170px;
+  }
+
+  .mode-single .controlsGrid {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .controlsGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .controlsGrid .panel {
+    margin: 0;
+  }
+}
+
+@media (min-width: 760px) and (max-width: 1023px) {
+  html,
+  body,
+  #app {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  .shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 12px;
+    gap: 10px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+
+  .topbar,
+  .modeChooser,
+  .heroCard,
+  .traceCard,
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid,
+  .mode-single .heroCard,
+  .mode-single .traceCard,
+  .mode-single .controlsGrid,
+  .mode-phrase .phraseCard,
+  .mode-phrase .heroCard,
+  .mode-phrase .traceCard,
+  .mode-reference .referenceCard,
+  .mode-reference .heroCard,
+  .mode-reference .traceCard,
+  .mode-phrase.advanced-open .heroCard,
+  .mode-reference.advanced-open .heroCard,
+  .mode-phrase.advanced-open .controlsGrid,
+  .mode-reference.advanced-open .controlsGrid {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .heroCard {
+    min-height: 420px;
+  }
+
+  .traceCard {
+    min-height: 170px;
+  }
+
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .controlsGrid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .controlsGrid .panel {
+    margin: 0;
+  }
+}
+
+/* Match should reflow inside its own available width, not squeeze controls. */
+@media (min-width: 760px) and (max-width: 1279px) {
+  .mode-reference .referenceCard {
+    padding: 14px;
+  }
+
+  .matchSourceRow {
+    grid-template-columns: 1fr 1fr;
+    align-items: stretch;
+  }
+
+  .matchSourceRow .fileAction {
+    grid-column: 1 / -1;
+  }
+
+  .matchSourceRow .fileAction input {
+    min-height: 38px;
+  }
+
+  .matchSourceRow #sourceTimer {
+    display: flex;
+    min-height: 36px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .sectionToolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .sectionToolbar label {
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr 90px;
+    justify-content: stretch;
+  }
+
+  .artistPresets {
+    flex-wrap: wrap;
+  }
+
+  .practiceActions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .practiceActions #stopPractice {
+    grid-column: 1 / -1;
+  }
+
+  .reviewDetails {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-reference .referenceCard label,
+  .mode-reference .referenceStatus,
+  .mode-reference .takeStatus {
+    font-size: 10px;
+  }
+
+  .mode-reference .primaryButton,
+  .mode-reference .secondaryButton {
+    min-height: 36px;
+    font-size: 10px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .matchSourceRow {
+    grid-template-columns: minmax(0, 1fr) minmax(88px, auto);
+  }
+
+  .matchSourceRow .fileAction {
+    grid-column: 1 / -1;
+  }
+
+  .matchSourceRow #recordSourceAudio {
+    grid-column: 1;
+  }
+
+  .matchSourceRow #stopSourceAudio {
+    grid-column: 2;
+  }
+
+  .matchSourceRow #sourceTimer {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .sectionToolbar {
+    grid-template-columns: repeat(3, auto) minmax(110px, 1fr);
+  }
+
+  .artistPresets {
+    flex-wrap: wrap;
+  }
+}
