@@ -1,4 +1,5 @@
 import type { Config } from '@netlify/functions';
+declare const Netlify: { env: { get(name: string): string | undefined } };
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
