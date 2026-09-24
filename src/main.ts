@@ -192,16 +192,28 @@ app.innerHTML = `
       </div>
     </div>
 
+    <div class="sourceLaunchRow" aria-label="Open a song source">
+      <span>Source</span>
+      <a class="sourceLink" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">YouTube ↗</a>
+      <a class="sourceLink" href="https://suno.com/" target="_blank" rel="noopener noreferrer">Suno ↗</a>
+      <span class="sourceLaunchHint">Open the song in another tab, start it, then use Record tab.</span>
+    </div>
+
     <div class="matchSourceRow">
-      <label class="fileAction">Upload song
+      <label class="fileAction">Upload audio / video
         <input id="referenceFile" type="file" accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.flac,.mp4,.webm">
       </label>
-      <button id="recordSourceAudio" class="primaryButton">Record tab</button>
-      <button id="stopSourceAudio" class="secondaryButton" disabled>Stop</button>
+      <button id="recordSourceAudio" class="primaryButton">Record tab audio</button>
+      <button id="stopSourceAudio" class="secondaryButton" disabled>Stop recording</button>
       <span id="sourceTimer" class="captureState">00:00</span>
     </div>
 
-    <div id="referenceStatus" class="referenceStatus">Upload a song or record a tab. Pitch Cruzer prepares the song automatically.</div>
+    <div class="captureInstruction">
+      <strong>Tab capture:</strong>
+      click Record tab audio → choose the YouTube/Suno/browser tab → turn on <strong>Share tab audio</strong>.
+    </div>
+
+    <div id="referenceStatus" class="referenceStatus">Upload a song, or record audio from another browser tab. Pitch Cruzer prepares it automatically.</div>
 
     <div id="analysisProgress" class="analysisProgress hidden">
       <div class="progressTrack"><div id="analysisProgressFill" class="progressFill"></div></div>
