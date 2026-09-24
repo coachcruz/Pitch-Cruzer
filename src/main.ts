@@ -1024,15 +1024,20 @@ function updatePitchRangeUi(): void {
     '<span>Scale: ' + scale.join(' · ') + '</span>';
 }
 
-function deriveSongPitchBounds(buffer: AudioBuffer): PitchBounds | null {
-  const frames = pitchFrames(buffer, 0, buffer.duration, 0.1, OPEN_VOCAL_BOUNDS)
+function analyzeSongPitchProfile(buffer: AudioBuffer): {
+  bounds: PitchBounds | null;
+  key: DetectedKey | null;
+} {
+  const frames = pitchFrames(buffer, 0, buffer.duration, 0.14, OPEN_VOCAL_BOUNDS)
     .filter((value): value is number => value !== null);
-  if (!frames.length) return null;
+  if (!frames.length) return { bounds: null, key: null };
 
   const counts = new Map<number, number>();
+  const histogram = new Array<number>(12).fill(0);
   frames.forEach(value => {
     const rounded = Math.round(value);
     counts.set(rounded, (counts.get(rounded) ?? 0) + 1);
+    histogram[((rounded % 12) + 12) % 12] += 1;
   });
 
   const supported = [...counts.entries()]
@@ -1043,27 +1048,14 @@ function deriveSongPitchBounds(buffer: AudioBuffer): PitchBounds | null {
     ? supported
     : frames.map(value => Math.round(value)).sort((a, b) => a - b);
 
-  const lowMidi = source[0];
-  const highMidi = source[source.length - 1];
   const openLowMidi = frequencyToMidi(OPEN_VOCAL_BOUNDS.minHz);
   const openHighMidi = frequencyToMidi(OPEN_VOCAL_BOUNDS.maxHz);
-
-  return {
-    minHz: midiToFrequency(Math.max(openLowMidi, lowMidi - 2)),
-    maxHz: midiToFrequency(Math.min(openHighMidi, highMidi + 2))
+  const bounds: PitchBounds = {
+    minHz: midiToFrequency(Math.max(openLowMidi, source[0] - 2)),
+    maxHz: midiToFrequency(Math.min(openHighMidi, source[source.length - 1] + 2))
   };
-}
 
-function detectSongKey(buffer: AudioBuffer): DetectedKey | null {
-  const frames = pitchFrames(buffer, 0, buffer.duration, 0.1, OPEN_VOCAL_BOUNDS)
-    .filter((value): value is number => value !== null);
-  if (frames.length < 8) return null;
-
-  const histogram = new Array<number>(12).fill(0);
-  frames.forEach(midi => {
-    const pc = ((Math.round(midi) % 12) + 12) % 12;
-    histogram[pc] += 1;
-  });
+  if (frames.length < 8) return { bounds, key: null };
 
   const majorProfile = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
   const minorProfile = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
@@ -1080,7 +1072,7 @@ function detectSongKey(buffer: AudioBuffer): DetectedKey | null {
     return dot / (Math.sqrt(aa * bb) + 1e-9);
   };
 
-  let best: DetectedKey | null = null;
+  let key: DetectedKey | null = null;
   for (let tonic = 0; tonic < 12; tonic += 1) {
     for (const mode of ['major', 'minor'] as const) {
       const profile = mode === 'major' ? majorProfile : minorProfile;
@@ -1089,10 +1081,11 @@ function detectSongKey(buffer: AudioBuffer): DetectedKey | null {
         rotated[pc] = profile[((pc - tonic) % 12 + 12) % 12];
       }
       const confidence = cosine(histogram, rotated);
-      if (!best || confidence > best.confidence) best = { tonic, mode, confidence };
+      if (!key || confidence > key.confidence) key = { tonic, mode, confidence };
     }
   }
-  return best;
+
+  return { bounds, key };
 }
 
 function syncSelectedNotes(): void {
@@ -1185,8 +1178,9 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
     backingVocalBuffer = backingBuffer;
 
     setAnalysisProgress(82, 'Mapping vocal range and key…');
-    songPitchBounds = deriveSongPitchBounds(leadVocalBuffer);
-    detectedSongKey = detectSongKey(leadVocalBuffer);
+    const songProfile = analyzeSongPitchProfile(leadVocalBuffer);
+    songPitchBounds = songProfile.bounds;
+    detectedSongKey = songProfile.key;
     updatePitchRangeUi();
 
     songSections = await buildSongSections(leadVocalBuffer);
