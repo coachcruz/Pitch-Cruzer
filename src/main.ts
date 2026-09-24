@@ -185,79 +185,76 @@ app.innerHTML = `
 
   <section id="referenceCard" class="referenceCard hidden">
     <div class="sectionHeading">
-      <div>
-        <p class="eyebrow">SONG COMPARISON</p>
-        <h2>Reference Match</h2>
-      </div>
-      <span id="referenceCapability" class="tinyLabel">NO SOURCE</span>
+      <div><p class="eyebrow">SONG PRACTICE</p><h2>Match</h2></div>
+      <span id="referenceCapability" class="tinyLabel">NO SONG</span>
     </div>
 
-    <p class="phraseIntro">
-      Paste a YouTube, Spotify, Suno, or direct-audio link. Streaming embeds can be used as a listening reference; accessible audio and imported clips can also be analyzed into target notes.
-    </p>
-
-    <div class="desktopCapturePanel">
-      <div class="captureActions">
-        <button id="captureDesktopAudio" class="primaryButton">Capture tab audio</button>
-        <button id="stopDesktopAudio" class="secondaryButton" disabled>Stop</button>
-        <span id="desktopCaptureStatus" class="captureState">OFF</span>
-      </div>
-      <div class="captureMixControls">
-        <label>Vocal reduce <span id="vocalReduceValue">85%</span>
-          <input id="vocalReduce" type="range" min="0" max="100" step="1" value="85">
-        </label>
-        <label>Backing <span id="backingLevelValue">80%</span>
-          <input id="backingLevel" type="range" min="0" max="100" step="1" value="80">
-        </label>
-      </div>
-      <div class="captureHint">Use headphones. Fast mode reduces center-panned vocals; it is not full AI stem separation.</div>
+    <div class="matchSourceRow">
+      <label class="fileAction">Upload song
+        <input id="referenceFile" type="file" accept="audio/*,video/*,.mp3,.m4a,.wav,.aac,.ogg,.flac,.mp4,.webm">
+      </label>
+      <button id="recordSourceAudio" class="primaryButton">Record tab</button>
+      <button id="stopSourceAudio" class="secondaryButton" disabled>Stop</button>
+      <span id="sourceTimer" class="captureState">00:00</span>
     </div>
 
-    <div class="referenceDivider"><span>LINK / FILE</span></div>
+    <div id="referenceStatus" class="referenceStatus">Upload a song or record a tab. Pitch Cruzer prepares the song automatically.</div>
 
-    <label>Reference URL
-      <div class="referenceUrlRow">
-        <input id="referenceUrl" type="url" placeholder="https://youtube.com/... or https://suno.com/song/...">
-        <button id="loadReference" class="primaryButton compactButton">Load reference</button>
-      </div>
-    </label>
-
-    <div class="referenceDivider"><span>OR</span></div>
-
-    <label class="fileLabel">Import reference audio
-      <input id="referenceFile" type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg">
-    </label>
-
-    <div id="referenceStatus" class="referenceStatus">
-      Add a song link or audio clip to start.
+    <div id="analysisProgress" class="analysisProgress hidden">
+      <div class="progressTrack"><div id="analysisProgressFill" class="progressFill"></div></div>
+      <span id="analysisProgressText">Preparing song…</span>
     </div>
 
-    <div id="referencePlayer" class="referencePlayer hidden"></div>
-
-    <div id="referenceAnalysis" class="referenceAnalysis hidden">
-      <div class="analysisControls">
-        <label>Start (sec)
-          <input id="referenceStart" type="number" min="0" step="0.1" value="0">
+    <div id="songWorkspace" class="songWorkspace hidden">
+      <div class="sectionToolbar">
+        <button id="selectVerses" class="textButton">Verses</button>
+        <button id="selectChoruses" class="textButton">Choruses</button>
+        <button id="clearSections" class="textButton">Clear</button>
+        <label>Repeat
+          <select id="loopCount">
+            <option value="1" selected>1×</option>
+            <option value="2">2×</option>
+            <option value="3">3×</option>
+            <option value="5">5×</option>
+          </select>
         </label>
-        <label>Analyze (sec)
-          <input id="referenceDuration" type="number" min="3" max="20" step="1" value="12">
-        </label>
-        <button id="useCurrentTime" class="secondaryButton">Use player time</button>
-        <button id="analyzeReference" class="primaryButton">Analyze selection</button>
       </div>
 
-      <div id="analysisProgress" class="analysisProgress hidden">
-        <div class="progressTrack"><div id="analysisProgressFill" class="progressFill"></div></div>
-        <span id="analysisProgressText">Analyzing…</span>
+      <div id="sectionChips" class="sectionChips"></div>
+
+      <div class="selectedReference">
+        <span class="coachLabel">SELECTED NOTES</span>
+        <div id="referenceSequence" class="derivedSequence">Select a section.</div>
       </div>
 
-      <div id="referenceSequenceWrap" class="referenceSequenceWrap hidden">
-        <span class="coachLabel">DERIVED TARGETS</span>
-        <div id="referenceSequence" class="derivedSequence"></div>
-        <div class="buttonRow referenceActions">
-          <button id="sendReferenceToCruise" class="primaryButton">Send to Cruise</button>
-          <button id="sendReferenceToPhrase" class="secondaryButton">Use with lyrics</button>
+      <div class="stemMixer">
+        <div class="stemRow">
+          <span>Artist</span>
+          <div class="artistPresets">
+            <button type="button" data-artist-level="100" class="stemPreset active">100</button>
+            <button type="button" data-artist-level="50" class="stemPreset">50</button>
+            <button type="button" data-artist-level="20" class="stemPreset">20</button>
+            <button type="button" data-artist-level="0" class="stemPreset">Mute</button>
+          </div>
         </div>
+        <label>Backing vocals <span id="backingVocalLevelValue">100%</span>
+          <input id="backingVocalLevel" type="range" min="0" max="100" step="1" value="100">
+        </label>
+        <label>Instrumental <span id="instrumentalLevelValue">100%</span>
+          <input id="instrumentalLevel" type="range" min="0" max="100" step="1" value="100">
+        </label>
+      </div>
+
+      <div class="practiceActions">
+        <button id="playSelection" class="secondaryButton">Play selection</button>
+        <button id="recordTake" class="primaryButton">Record take</button>
+        <button id="stopPractice" class="secondaryButton" disabled>Stop</button>
+      </div>
+      <div id="takeStatus" class="takeStatus">Choose one or more sections. Click several, or Shift-click a range.</div>
+
+      <div id="reviewPanel" class="reviewPanel hidden">
+        <div class="reviewTop"><span class="coachLabel">TAKE REVIEW</span><strong id="reviewSummary">—</strong></div>
+        <div id="reviewDetails" class="reviewDetails"></div>
       </div>
     </div>
   </section>
@@ -382,33 +379,36 @@ const pitchCueEl = qs<HTMLElement>('#pitchCue');
 const phraseNowEl = qs<HTMLElement>('#phraseNow');
 const phraseNowWordEl = qs<HTMLElement>('#phraseNowWord');
 const phraseNowVowelEl = qs<HTMLElement>('#phraseNowVowel');
-const captureDesktopAudioButton = qs<HTMLButtonElement>('#captureDesktopAudio');
-const stopDesktopAudioButton = qs<HTMLButtonElement>('#stopDesktopAudio');
-const desktopCaptureStatusEl = qs<HTMLElement>('#desktopCaptureStatus');
-const vocalReduceSlider = qs<HTMLInputElement>('#vocalReduce');
-const vocalReduceValueEl = qs<HTMLElement>('#vocalReduceValue');
-const backingLevelSlider = qs<HTMLInputElement>('#backingLevel');
-const backingLevelValueEl = qs<HTMLElement>('#backingLevelValue');
-const referenceUrlEl = qs<HTMLInputElement>('#referenceUrl');
-const loadReferenceButton = qs<HTMLButtonElement>('#loadReference');
 const referenceFileEl = qs<HTMLInputElement>('#referenceFile');
+const recordSourceAudioButton = qs<HTMLButtonElement>('#recordSourceAudio');
+const stopSourceAudioButton = qs<HTMLButtonElement>('#stopSourceAudio');
+const sourceTimerEl = qs<HTMLElement>('#sourceTimer');
 const referenceStatusEl = qs<HTMLElement>('#referenceStatus');
-const referencePlayerEl = qs<HTMLElement>('#referencePlayer');
 const referenceCapabilityEl = qs<HTMLElement>('#referenceCapability');
-const referenceAnalysisEl = qs<HTMLElement>('#referenceAnalysis');
-const referenceStartEl = qs<HTMLInputElement>('#referenceStart');
-const referenceDurationEl = qs<HTMLInputElement>('#referenceDuration');
-const useCurrentTimeButton = qs<HTMLButtonElement>('#useCurrentTime');
-const analyzeReferenceButton = qs<HTMLButtonElement>('#analyzeReference');
 const analysisProgressEl = qs<HTMLElement>('#analysisProgress');
 const analysisProgressFillEl = qs<HTMLElement>('#analysisProgressFill');
 const analysisProgressTextEl = qs<HTMLElement>('#analysisProgressText');
-const referenceSequenceWrapEl = qs<HTMLElement>('#referenceSequenceWrap');
+const songWorkspaceEl = qs<HTMLElement>('#songWorkspace');
+const sectionChipsEl = qs<HTMLElement>('#sectionChips');
+const selectVersesButton = qs<HTMLButtonElement>('#selectVerses');
+const selectChorusesButton = qs<HTMLButtonElement>('#selectChoruses');
+const clearSectionsButton = qs<HTMLButtonElement>('#clearSections');
+const loopCountEl = qs<HTMLSelectElement>('#loopCount');
 const referenceSequenceEl = qs<HTMLElement>('#referenceSequence');
-const sendReferenceToCruiseButton = qs<HTMLButtonElement>('#sendReferenceToCruise');
-const sendReferenceToPhraseButton = qs<HTMLButtonElement>('#sendReferenceToPhrase');
+const backingVocalLevelEl = qs<HTMLInputElement>('#backingVocalLevel');
+const backingVocalLevelValueEl = qs<HTMLElement>('#backingVocalLevelValue');
+const instrumentalLevelEl = qs<HTMLInputElement>('#instrumentalLevel');
+const instrumentalLevelValueEl = qs<HTMLElement>('#instrumentalLevelValue');
+const artistPresetButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-artist-level]'));
+const playSelectionButton = qs<HTMLButtonElement>('#playSelection');
+const recordTakeButton = qs<HTMLButtonElement>('#recordTake');
+const stopPracticeButton = qs<HTMLButtonElement>('#stopPractice');
+const takeStatusEl = qs<HTMLElement>('#takeStatus');
+const reviewPanelEl = qs<HTMLElement>('#reviewPanel');
+const reviewSummaryEl = qs<HTMLElement>('#reviewSummary');
+const reviewDetailsEl = qs<HTMLElement>('#reviewDetails');
 
-targetNoteEl.innerHTML = NOTE_NAMES.map(
+targetNoteEl.innerHTML = NOTE_NAMES.map(targetNoteEl.innerHTML = NOTE_NAMES.map(
   name => '<option value="' + name + '">' + name + '</option>'
 ).join('');
 targetNoteEl.value = 'G';
@@ -444,21 +444,50 @@ let cadenceIndex = 0;
 let cadenceTimers: number[] = [];
 let cueAudioContext: AudioContext | null = null;
 let referenceAudioBuffer: AudioBuffer | null = null;
-let referenceAudioElement: HTMLAudioElement | null = null;
-let referenceObjectUrl: string | null = null;
+let leadVocalBuffer: AudioBuffer | null = null;
+let backingVocalBuffer: AudioBuffer | null = null;
+let instrumentalBuffer: AudioBuffer | null = null;
 let derivedReferenceNotes: string[] = [];
 
-let desktopCaptureStream: MediaStream | null = null;
-let desktopCaptureContext: AudioContext | null = null;
-let desktopVocalSubtractLeft: GainNode | null = null;
-let desktopVocalSubtractRight: GainNode | null = null;
-let desktopBackingGain: GainNode | null = null;
-let desktopRecorder: MediaRecorder | null = null;
-let desktopRecorderChunks: Blob[] = [];
-let desktopCaptureStopping = false;
-let desktopCaptureStereo = true;
+type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'outro' | 'section';
+type SongSection = {
+  id: string;
+  label: string;
+  kind: SectionKind;
+  start: number;
+  end: number;
+  notes: string[];
+  activity: number;
+};
+type PracticeSegment = {
+  sourceStart: number;
+  duration: number;
+  label: string;
+};
 
-type VowelProfile = {
+let songSections: SongSection[] = [];
+let selectedSectionIds = new Set<string>();
+let lastSectionIndex: number | null = null;
+let artistLevel = 1;
+let sourceCaptureStream: MediaStream | null = null;
+let sourceRecorder: MediaRecorder | null = null;
+let sourceChunks: Blob[] = [];
+let sourceCaptureStartedAt = 0;
+let sourceTimerHandle: number | null = null;
+let practiceContext: AudioContext | null = null;
+let practiceSources: AudioBufferSourceNode[] = [];
+let practiceArtistGain: GainNode | null = null;
+let practiceBackingVocalGain: GainNode | null = null;
+let practiceInstrumentalGain: GainNode | null = null;
+let practiceStopTimer: number | null = null;
+let practiceSegments: PracticeSegment[] = [];
+let takeMicStream: MediaStream | null = null;
+let takeRecorder: MediaRecorder | null = null;
+let takeChunks: Blob[] = [];
+let takeLeadInSeconds = 0;
+let takeTotalDuration = 0;
+
+type VowelProfile = {type VowelProfile = {
   label: string;
   mouth: string;
   resonance: string;
@@ -553,276 +582,25 @@ function parseNoteList(value: string): string[] {
     .filter(item => item.length > 0 && noteToMidi(item) !== null);
 }
 
-function parseYouTubeId(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (url.hostname.includes('youtu.be')) return url.pathname.split('/').filter(Boolean)[0] ?? null;
-    if (url.hostname.includes('youtube.com')) {
-      if (url.pathname.startsWith('/shorts/')) return url.pathname.split('/')[2] ?? null;
-      if (url.pathname.startsWith('/embed/')) return url.pathname.split('/')[2] ?? null;
-      return url.searchParams.get('v');
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function parseSpotifyEmbed(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (!url.hostname.includes('spotify.com')) return null;
-    const parts = url.pathname.split('/').filter(Boolean);
-    const embedIndex = parts[0] === 'embed' ? 1 : 0;
-    const type = parts[embedIndex];
-    const id = parts[embedIndex + 1];
-    if (!type || !id) return null;
-    return 'https://open.spotify.com/embed/' + type + '/' + id.split('?')[0];
-  } catch {
-    return null;
-  }
-}
-
-function isSunoUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.hostname === 'suno.com' || url.hostname.endsWith('.suno.com');
-  } catch {
-    return false;
-  }
-}
-
-function looksLikeDirectAudio(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return /\.(mp3|m4a|wav|aac|ogg|flac)(?:$|\?)/i.test(url.pathname + url.search);
-  } catch {
-    return false;
-  }
-}
-
-function clearReferencePlayer(): void {
-  referencePlayerEl.innerHTML = '';
-  referencePlayerEl.classList.add('hidden');
-  referenceAudioElement = null;
-  referenceAudioBuffer = null;
-  derivedReferenceNotes = [];
-  referenceSequenceWrapEl.classList.add('hidden');
-  referenceAnalysisEl.classList.add('hidden');
-  if (referenceObjectUrl) {
-    URL.revokeObjectURL(referenceObjectUrl);
-    referenceObjectUrl = null;
-  }
-}
-
 function setReferenceStatus(message: string, capability: string): void {
   referenceStatusEl.textContent = message;
   referenceCapabilityEl.textContent = capability;
 }
 
-function updateDesktopMix(): void {
-  const reduction = Math.max(0, Math.min(1, Number(vocalReduceSlider.value) / 100));
-  const backing = Math.max(0, Math.min(1, Number(backingLevelSlider.value) / 100));
-  vocalReduceValueEl.textContent = Math.round(reduction * 100) + '%';
-  backingLevelValueEl.textContent = Math.round(backing * 100) + '%';
+function setAnalysisProgress(percent: number, message: string): void {
+  analysisProgressEl.classList.remove('hidden');
+  analysisProgressFillEl.style.width = Math.max(0, Math.min(100, percent)).toFixed(0) + '%';
+  analysisProgressTextEl.textContent = message;
+}
 
-  const effectiveReduction = desktopCaptureStereo ? reduction : 0;
-  if (desktopVocalSubtractLeft) desktopVocalSubtractLeft.gain.value = -effectiveReduction;
-  if (desktopVocalSubtractRight) desktopVocalSubtractRight.gain.value = -effectiveReduction;
-  if (desktopBackingGain) desktopBackingGain.gain.value = backing;
+function clearAnalysisProgress(): void {
+  analysisProgressEl.classList.add('hidden');
 }
 
 function getRecorderMimeType(): string {
   if (!('MediaRecorder' in window)) return '';
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus'
-  ];
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
-}
-
-async function finalizeDesktopRecording(): Promise<void> {
-  if (desktopRecorderChunks.length === 0) return;
-
-  const type = desktopRecorder?.mimeType || getRecorderMimeType() || 'audio/webm';
-  const blob = new Blob(desktopRecorderChunks, { type });
-  desktopRecorderChunks = [];
-
-  try {
-    referenceAudioBuffer = await decodeReferenceBytes(await blob.arrayBuffer());
-    referenceAnalysisEl.classList.remove('hidden');
-    setReferenceStatus(
-      'Captured audio is ready for pitch analysis. The saved reference is the original captured mix; vocal reduction only affects what you hear while practicing.',
-      'CAPTURE READY'
-    );
-    updateListeningContext();
-  } catch {
-    setReferenceStatus(
-      'Capture ended. Live backing worked, but this browser could not decode the captured recording for offline pitch analysis.',
-      'CAPTURE ENDED'
-    );
-  }
-}
-
-function stopDesktopCapture(): void {
-  if (!desktopCaptureStream && !desktopCaptureContext) return;
-
-  desktopCaptureStopping = true;
-  if (desktopRecorder?.state === 'recording') {
-    desktopRecorder.stop();
-  }
-
-  desktopCaptureStream?.getTracks().forEach(track => track.stop());
-  desktopCaptureStream = null;
-
-  desktopCaptureContext?.close().catch(() => undefined);
-  desktopCaptureContext = null;
-  desktopVocalSubtractLeft = null;
-  desktopVocalSubtractRight = null;
-  desktopBackingGain = null;
-
-  captureDesktopAudioButton.disabled = false;
-  stopDesktopAudioButton.disabled = true;
-  desktopCaptureStatusEl.textContent = 'OFF';
-  desktopCaptureStatusEl.classList.remove('active');
-  desktopCaptureStopping = false;
-}
-
-async function startDesktopCapture(): Promise<void> {
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    setReferenceStatus('This browser does not support tab/system audio capture.', 'UNSUPPORTED');
-    return;
-  }
-
-  stopDesktopCapture();
-  setReferenceStatus(
-    'Choose the tab/window that is playing the song and make sure Share audio is enabled.',
-    'CHOOSE SOURCE'
-  );
-
-  try {
-    const supported = navigator.mediaDevices.getSupportedConstraints() as MediaTrackSupportedConstraints & {
-      suppressLocalAudioPlayback?: boolean;
-    };
-    const audioConstraints: MediaTrackConstraints & {
-      suppressLocalAudioPlayback?: boolean;
-    } = {};
-
-    if (supported.suppressLocalAudioPlayback) {
-      audioConstraints.suppressLocalAudioPlayback = true;
-    }
-
-    const capture = await navigator.mediaDevices.getDisplayMedia({
-      video: true,
-      audio: audioConstraints
-    });
-
-    const audioTrack = capture.getAudioTracks()[0];
-    if (!audioTrack) {
-      capture.getTracks().forEach(track => track.stop());
-      setReferenceStatus(
-        'The selected source did not provide an audio track. Choose a browser tab and enable Share tab audio.',
-        'NO AUDIO'
-      );
-      return;
-    }
-
-    desktopCaptureStream = capture;
-    const audioOnly = new MediaStream([audioTrack]);
-    const settings = audioTrack.getSettings() as MediaTrackSettings & {
-      channelCount?: number;
-      suppressLocalAudioPlayback?: boolean;
-    };
-    desktopCaptureStereo = settings.channelCount !== 1;
-
-    const context = new AudioContext();
-    await context.resume();
-    desktopCaptureContext = context;
-
-    const sourceNode = context.createMediaStreamSource(audioOnly);
-    const splitter = context.createChannelSplitter(2);
-    const merger = context.createChannelMerger(2);
-
-    const leftBase = context.createGain();
-    const rightBase = context.createGain();
-    const midLeft = context.createGain();
-    const midRight = context.createGain();
-    const midBus = context.createGain();
-    const subtractLeft = context.createGain();
-    const subtractRight = context.createGain();
-    const backingGain = context.createGain();
-
-    leftBase.gain.value = 1;
-    rightBase.gain.value = 1;
-    midLeft.gain.value = 0.5;
-    midRight.gain.value = 0.5;
-
-    sourceNode.connect(splitter);
-    splitter.connect(leftBase, 0);
-    splitter.connect(rightBase, desktopCaptureStereo ? 1 : 0);
-    leftBase.connect(merger, 0, 0);
-    rightBase.connect(merger, 0, 1);
-
-    splitter.connect(midLeft, 0);
-    splitter.connect(midRight, desktopCaptureStereo ? 1 : 0);
-    midLeft.connect(midBus);
-    midRight.connect(midBus);
-    midBus.connect(subtractLeft);
-    midBus.connect(subtractRight);
-    subtractLeft.connect(merger, 0, 0);
-    subtractRight.connect(merger, 0, 1);
-
-    merger.connect(backingGain);
-    backingGain.connect(context.destination);
-
-    desktopVocalSubtractLeft = subtractLeft;
-    desktopVocalSubtractRight = subtractRight;
-    desktopBackingGain = backingGain;
-    updateDesktopMix();
-
-    desktopRecorderChunks = [];
-    if ('MediaRecorder' in window) {
-      const mimeType = getRecorderMimeType();
-      desktopRecorder = mimeType
-        ? new MediaRecorder(audioOnly, { mimeType })
-        : new MediaRecorder(audioOnly);
-      desktopRecorder.addEventListener('dataavailable', event => {
-        if (event.data.size > 0) desktopRecorderChunks.push(event.data);
-      });
-      desktopRecorder.addEventListener('stop', () => {
-        void finalizeDesktopRecording();
-      });
-      desktopRecorder.start(250);
-    }
-
-    audioTrack.addEventListener('ended', () => {
-      if (!desktopCaptureStopping) stopDesktopCapture();
-    });
-
-    captureDesktopAudioButton.disabled = true;
-    stopDesktopAudioButton.disabled = false;
-    desktopCaptureStatusEl.textContent = 'LIVE';
-    desktopCaptureStatusEl.classList.add('active');
-
-    const suppressed = settings.suppressLocalAudioPlayback === true;
-    const reductionNote = desktopCaptureStereo
-      ? 'Center vocal reduction is active.'
-      : 'The captured source is mono, so center vocal reduction is disabled.';
-
-    setReferenceStatus(
-      reductionNote + (suppressed
-        ? ' Original local playback is suppressed; you are hearing Pitch Cruzer’s processed backing.'
-        : ' If you hear both the original and processed mix, this browser did not suppress the source playback.'),
-      'LIVE CAPTURE'
-    );
-  } catch {
-    setReferenceStatus(
-      'Desktop audio capture was cancelled or blocked. Chrome or Edge desktop works best for this mode.',
-      'CAPTURE OFF'
-    );
-    stopDesktopCapture();
-  }
 }
 
 async function decodeReferenceBytes(bytes: ArrayBuffer): Promise<AudioBuffer> {
@@ -834,146 +612,135 @@ async function decodeReferenceBytes(bytes: ArrayBuffer): Promise<AudioBuffer> {
   }
 }
 
-function installAudioPlayer(src: string): HTMLAudioElement {
-  const audio = document.createElement('audio');
-  audio.controls = true;
-  audio.preload = 'metadata';
-  audio.crossOrigin = 'anonymous';
-  audio.src = src;
-  referencePlayerEl.innerHTML = '';
-  referencePlayerEl.appendChild(audio);
-  referencePlayerEl.classList.remove('hidden');
-  referenceAudioElement = audio;
-  return audio;
-}
-
-async function loadDirectAudio(value: string): Promise<void> {
-  setReferenceStatus('Trying to load analyzable audio…', 'LOADING AUDIO');
+async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let data: unknown = {};
   try {
-    const response = await fetch(value, { mode: 'cors' });
-    if (!response.ok) throw new Error('Audio request failed');
-    const bytes = await response.arrayBuffer();
-    referenceAudioBuffer = await decodeReferenceBytes(bytes);
-    installAudioPlayer(value);
-    referenceAnalysisEl.classList.remove('hidden');
-    setReferenceStatus('Raw audio is accessible. Pitch extraction is available.', 'FULL ANALYSIS');
+    data = text ? JSON.parse(text) : {};
   } catch {
-    installAudioPlayer(value);
-    setReferenceStatus(
-      'The link can be played if the host allows it, but its raw audio is blocked by cross-origin rules. Import the clip for exact pitch analysis.',
-      'PLAYER ONLY'
-    );
+    data = { error: text || 'Unexpected server response' };
   }
+  if (!response.ok) {
+    const value = data as { error?: string; detail?: string };
+    throw new Error(value.error || value.detail || 'Request failed (' + response.status + ')');
+  }
+  return data as T;
 }
 
-function loadReferenceLink(): void {
-  const value = referenceUrlEl.value.trim();
-  if (!value) {
-    setReferenceStatus('Paste a reference link first.', 'NO SOURCE');
-    return;
-  }
-
-  clearReferencePlayer();
-  const youtubeId = parseYouTubeId(value);
-  const spotifyEmbed = parseSpotifyEmbed(value);
-
-  if (youtubeId) {
-    const iframe = document.createElement('iframe');
-    iframe.src = 'https://www.youtube.com/embed/' + encodeURIComponent(youtubeId);
-    iframe.title = 'YouTube reference';
-    iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
-    iframe.allowFullscreen = true;
-    referencePlayerEl.appendChild(iframe);
-    referencePlayerEl.classList.remove('hidden');
-    setReferenceStatus(
-      'YouTube is loaded as a listening reference. The iframe does not expose decoded audio samples, so import the clip for automatic pitch extraction.',
-      'PLAYER ONLY'
-    );
-    return;
-  }
-
-  if (spotifyEmbed) {
-    const iframe = document.createElement('iframe');
-    iframe.src = spotifyEmbed;
-    iframe.title = 'Spotify reference';
-    iframe.allow = 'autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
-    iframe.loading = 'lazy';
-    referencePlayerEl.appendChild(iframe);
-    referencePlayerEl.classList.remove('hidden');
-    setReferenceStatus(
-      'Spotify is loaded as a listening reference. The embed does not expose decoded audio samples, so import the clip for automatic pitch extraction.',
-      'PLAYER ONLY'
-    );
-    return;
-  }
-
-  if (isSunoUrl(value)) {
-    const frame = document.createElement('iframe');
-    frame.src = value;
-    frame.title = 'Suno reference';
-    referencePlayerEl.appendChild(frame);
-
-    const link = document.createElement('a');
-    link.href = value;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'Open Suno reference in a new tab';
-    link.className = 'referenceOpenLink';
-    referencePlayerEl.appendChild(link);
-    referencePlayerEl.classList.remove('hidden');
-    setReferenceStatus(
-      'Suno link loaded as a reference. If the page blocks embedding or raw-audio access, import your Suno audio file for exact pitch extraction.',
-      'LINK REFERENCE'
-    );
-    return;
-  }
-
-  if (looksLikeDirectAudio(value)) {
-    void loadDirectAudio(value);
-    return;
-  }
-
-  const link = document.createElement('a');
-  link.href = value;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  link.textContent = 'Open reference link';
-  link.className = 'referenceOpenLink';
-  referencePlayerEl.appendChild(link);
-  referencePlayerEl.classList.remove('hidden');
-  setReferenceStatus(
-    'This source is saved as a reference link. Import audio if you want Pitch Cruzer to derive the target notes.',
-    'LINK REFERENCE'
-  );
+async function uploadToLalal(blob: Blob, filename: string): Promise<string> {
+  const response = await requestJson<{ id?: string }>('/api/lalal/upload', {
+    method: 'POST',
+    headers: { 'X-File-Name': filename },
+    body: blob
+  });
+  if (!response.id) throw new Error('LALAL upload did not return a source id.');
+  return response.id;
 }
 
-async function loadReferenceFile(file: File): Promise<void> {
-  clearReferencePlayer();
-  setReferenceStatus('Decoding imported audio…', 'LOADING AUDIO');
+async function startLalalSplit(sourceId: string): Promise<string> {
+  const response = await requestJson<{ task_id?: string }>('/api/lalal/split', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_id: sourceId })
+  });
+  if (!response.task_id) throw new Error('LALAL split did not return a task id.');
+  return response.task_id;
+}
 
-  try {
-    const bytes = await file.arrayBuffer();
-    referenceAudioBuffer = await decodeReferenceBytes(bytes);
-    referenceObjectUrl = URL.createObjectURL(file);
-    installAudioPlayer(referenceObjectUrl);
-    referenceAnalysisEl.classList.remove('hidden');
-    setReferenceStatus(
-      'Reference audio loaded. Choose the section you want Pitch Cruzer to turn into target notes.',
-      'FULL ANALYSIS'
-    );
-  } catch {
-    setReferenceStatus('I could not decode that audio file in this browser.', 'UNREADABLE');
+type LalalTrack = { label: string; type: string; url: string };
+type LalalCheckItem = {
+  status: 'progress' | 'success' | 'error' | 'cancelled' | 'server_error';
+  progress?: number;
+  error?: string | { detail?: string };
+  result?: { duration?: number; tracks?: LalalTrack[] };
+};
+
+async function waitForLalal(taskId: string): Promise<LalalTrack[]> {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const payload = await requestJson<{ result?: Record<string, LalalCheckItem> }>('/api/lalal/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId })
+    });
+    const item = payload.result?.[taskId];
+    if (!item) throw new Error('LALAL returned no task status.');
+
+    if (item.status === 'success') return item.result?.tracks ?? [];
+    if (item.status === 'error' || item.status === 'server_error' || item.status === 'cancelled') {
+      const detail = typeof item.error === 'string' ? item.error : item.error?.detail;
+      throw new Error(detail || 'LALAL separation failed.');
+    }
+
+    const progress = item.progress ?? 0;
+    setAnalysisProgress(18 + progress * 0.62, 'Separating lead vocal, backing vocals, and instrumental… ' + progress + '%');
+    await new Promise(resolve => window.setTimeout(resolve, 2100));
   }
+  throw new Error('Stem separation is taking longer than expected.');
+}
+
+async function fetchTrackBuffer(url: string): Promise<AudioBuffer> {
+  const response = await fetch('/api/lalal/track?url=' + encodeURIComponent(url));
+  if (!response.ok) throw new Error('Could not load a separated track.');
+  return decodeReferenceBytes(await response.arrayBuffer());
+}
+
+function rmsFrame(buffer: AudioBuffer, startSample: number, frameSamples: number): number {
+  const end = Math.min(buffer.length, startSample + frameSamples);
+  if (end <= startSample) return 0;
+  let sum = 0;
+  let count = 0;
+  for (let i = startSample; i < end; i += 1) {
+    let value = 0;
+    for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+      value += buffer.getChannelData(channel)[i] ?? 0;
+    }
+    value /= buffer.numberOfChannels;
+    sum += value * value;
+    count += 1;
+  }
+  return count ? Math.sqrt(sum / count) : 0;
+}
+
+function pitchFrames(
+  buffer: AudioBuffer,
+  startSeconds: number,
+  durationSeconds: number,
+  stepSeconds = 0.14
+): Array<number | null> {
+  const sampleRate = buffer.sampleRate;
+  const frameSize = 4096;
+  const step = Math.max(1, Math.floor(sampleRate * stepSeconds));
+  const start = Math.max(0, Math.floor(startSeconds * sampleRate));
+  const end = Math.min(buffer.length, Math.floor((startSeconds + durationSeconds) * sampleRate));
+  const values: Array<number | null> = [];
+
+  for (let position = start; position + frameSize < end; position += step) {
+    const frame = new Float32Array(frameSize);
+    for (let i = 0; i < frameSize; i += 1) {
+      let sample = 0;
+      const index = position + i;
+      for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
+        sample += buffer.getChannelData(channel)[index] ?? 0;
+      }
+      frame[i] = sample / buffer.numberOfChannels;
+    }
+    const result = estimatePitch(frame, sampleRate);
+    values.push(result ? frequencyToMidi(result.frequency) : null);
+  }
+  return values;
 }
 
 function collapseReferencePitches(midis: Array<number | null>): string[] {
-  const groups: Array<{ midi: number; count: number }> = [];
-  let currentMidi: number | null = null;
+  const notes: string[] = [];
+  let current: number | null = null;
   let count = 0;
-
   const flush = () => {
-    if (currentMidi !== null && count >= 2) groups.push({ midi: currentMidi, count });
-    currentMidi = null;
+    if (current !== null && count >= 2) {
+      const note = midiToNote(current);
+      if (notes[notes.length - 1] !== note) notes.push(note);
+    }
+    current = null;
     count = 0;
   };
 
@@ -983,113 +750,608 @@ function collapseReferencePitches(midis: Array<number | null>): string[] {
       return;
     }
     const rounded = Math.round(value);
-    if (currentMidi === null) {
-      currentMidi = rounded;
-      count = 1;
-      return;
-    }
-    if (rounded === currentMidi) {
+    if (current === rounded) {
       count += 1;
       return;
     }
     flush();
-    currentMidi = rounded;
+    current = rounded;
     count = 1;
   });
   flush();
+  return notes.slice(0, 48);
+}
 
-  const notes: string[] = [];
-  groups.forEach(group => {
-    const note = midiToNote(group.midi);
-    if (notes[notes.length - 1] !== note) notes.push(note);
+function noteBigramSimilarity(a: string[], b: string[]): number {
+  if (a.length < 2 || b.length < 2) return 0;
+  const grams = (values: string[]) => new Set(values.slice(0, -1).map((value, index) => value + '>' + values[index + 1]));
+  const ga = grams(a);
+  const gb = grams(b);
+  let intersection = 0;
+  ga.forEach(value => { if (gb.has(value)) intersection += 1; });
+  const union = new Set([...ga, ...gb]).size;
+  return union ? intersection / union : 0;
+}
+
+function sectionActivity(buffer: AudioBuffer, start: number, end: number): number {
+  const frameSeconds = 0.25;
+  const frameSamples = Math.max(1, Math.floor(buffer.sampleRate * frameSeconds));
+  const startSample = Math.floor(start * buffer.sampleRate);
+  const endSample = Math.floor(end * buffer.sampleRate);
+  const values: number[] = [];
+  for (let position = startSample; position < endSample; position += frameSamples) {
+    values.push(rmsFrame(buffer, position, frameSamples));
+  }
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const high = sorted[Math.floor(sorted.length * 0.75)] ?? 0;
+  const threshold = Math.max(0.0035, high * 0.22);
+  return values.filter(value => value > threshold).length / values.length;
+}
+
+async function buildSongSections(buffer: AudioBuffer): Promise<SongSection[]> {
+  const duration = buffer.duration;
+  if (duration <= 0) return [];
+
+  const frameSeconds = 0.25;
+  const frameSamples = Math.max(1, Math.floor(buffer.sampleRate * frameSeconds));
+  const envelope: number[] = [];
+  for (let position = 0; position < buffer.length; position += frameSamples) {
+    envelope.push(rmsFrame(buffer, position, frameSamples));
+  }
+
+  const sorted = [...envelope].sort((a, b) => a - b);
+  const high = sorted[Math.floor(sorted.length * 0.8)] ?? 0;
+  const threshold = Math.max(0.0035, high * 0.18);
+  const gapCenters: number[] = [];
+  let gapStart: number | null = null;
+
+  envelope.forEach((value, index) => {
+    const silent = value <= threshold;
+    if (silent && gapStart === null) gapStart = index;
+    if ((!silent || index === envelope.length - 1) && gapStart !== null) {
+      const gapEnd = silent && index === envelope.length - 1 ? index + 1 : index;
+      const gapDuration = (gapEnd - gapStart) * frameSeconds;
+      if (gapDuration >= 1.1) gapCenters.push(((gapStart + gapEnd) / 2) * frameSeconds);
+      gapStart = null;
+    }
   });
-  return notes.slice(0, 36);
-}
 
-async function analyzeReferenceSelection(): Promise<void> {
-  if (!referenceAudioBuffer) {
-    setReferenceStatus('Import accessible audio before analyzing pitch.', 'PLAYER ONLY');
-    return;
-  }
-
-  const startSeconds = Math.max(0, Number(referenceStartEl.value) || 0);
-  const requestedDuration = Math.max(3, Math.min(20, Number(referenceDurationEl.value) || 12));
-  const duration = Math.min(requestedDuration, referenceAudioBuffer.duration - startSeconds);
-
-  if (duration <= 0) {
-    setReferenceStatus('The analysis start is beyond the end of the audio.', 'CHECK RANGE');
-    return;
-  }
-
-  analysisProgressEl.classList.remove('hidden');
-  referenceSequenceWrapEl.classList.add('hidden');
-  analyzeReferenceButton.disabled = true;
-  analysisProgressFillEl.style.width = '0%';
-  analysisProgressTextEl.textContent = 'Analyzing pitch contour…';
-
-  const sampleRate = referenceAudioBuffer.sampleRate;
-  const channelCount = referenceAudioBuffer.numberOfChannels;
-  const startSample = Math.floor(startSeconds * sampleRate);
-  const endSample = Math.min(
-    referenceAudioBuffer.length,
-    Math.floor((startSeconds + duration) * sampleRate)
-  );
-  const step = Math.max(1, Math.floor(sampleRate * 0.15));
-  const sourceFrameSize = 4096;
-  const detected: Array<number | null> = [];
-  const totalFrames = Math.max(1, Math.ceil((endSample - startSample) / step));
-  let frameNumber = 0;
-
-  for (let position = startSample; position + sourceFrameSize < endSample; position += step) {
-    const downsampled = new Float32Array(2048);
-
-    for (let i = 0; i < downsampled.length; i += 1) {
-      const sourceIndex = position + i * 2;
-      let value = 0;
-      for (let channel = 0; channel < channelCount; channel += 1) {
-        value += referenceAudioBuffer.getChannelData(channel)[sourceIndex] ?? 0;
+  const targetCount = Math.max(3, Math.min(9, Math.round(duration / 23)));
+  const boundaries = [0];
+  const used = new Set<number>();
+  for (let index = 1; index < targetCount; index += 1) {
+    const desired = duration * index / targetCount;
+    let bestIndex = -1;
+    let bestDistance = 8;
+    gapCenters.forEach((value, candidateIndex) => {
+      const distance = Math.abs(value - desired);
+      if (!used.has(candidateIndex) && distance < bestDistance && value > boundaries[boundaries.length - 1] + 7) {
+        bestDistance = distance;
+        bestIndex = candidateIndex;
       }
-      downsampled[i] = value / channelCount;
-    }
+    });
+    const boundary = bestIndex >= 0 ? gapCenters[bestIndex] : desired;
+    if (bestIndex >= 0) used.add(bestIndex);
+    if (boundary - boundaries[boundaries.length - 1] >= 7 && duration - boundary >= 7) boundaries.push(boundary);
+  }
+  boundaries.push(duration);
+  boundaries.sort((a, b) => a - b);
 
-    const result = estimatePitch(downsampled, sampleRate / 2);
-    detected.push(result ? frequencyToMidi(result.frequency) : null);
-    frameNumber += 1;
-
-    if (frameNumber % 8 === 0) {
-      const progress = Math.min(100, (frameNumber / totalFrames) * 100);
-      analysisProgressFillEl.style.width = progress.toFixed(0) + '%';
-      analysisProgressTextEl.textContent = 'Analyzing… ' + progress.toFixed(0) + '%';
-      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-    }
+  const sections: SongSection[] = [];
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    const start = boundaries[index];
+    const end = boundaries[index + 1];
+    const notes = collapseReferencePitches(pitchFrames(buffer, start, end - start, 0.16));
+    sections.push({
+      id: 'section-' + index,
+      label: 'Section ' + String(index + 1),
+      kind: 'section',
+      start,
+      end,
+      notes,
+      activity: sectionActivity(buffer, start, end)
+    });
+    setAnalysisProgress(84 + ((index + 1) / Math.max(1, boundaries.length - 1)) * 12, 'Mapping sections and pitch…');
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   }
 
-  derivedReferenceNotes = collapseReferencePitches(detected);
-  analysisProgressFillEl.style.width = '100%';
-  analyzeReferenceButton.disabled = false;
+  if (sections[0] && sections[0].activity < 0.28) {
+    sections[0].kind = 'intro';
+    sections[0].label = 'Intro';
+  }
+  if (sections.length > 1 && sections[sections.length - 1].activity < 0.25) {
+    const last = sections[sections.length - 1];
+    last.kind = 'outro';
+    last.label = 'Outro';
+  }
 
-  if (derivedReferenceNotes.length === 0) {
-    analysisProgressTextEl.textContent = 'No stable vocal pitch sequence found in this selection.';
+  let bestGroup: number[] = [];
+  for (let i = 0; i < sections.length; i += 1) {
+    if (sections[i].kind === 'intro' || sections[i].kind === 'outro') continue;
+    const group = [i];
+    for (let j = i + 1; j < sections.length; j += 1) {
+      if (sections[j].kind === 'intro' || sections[j].kind === 'outro') continue;
+      const durationRatio = Math.min(sections[i].end - sections[i].start, sections[j].end - sections[j].start) /
+        Math.max(sections[i].end - sections[i].start, sections[j].end - sections[j].start);
+      if (durationRatio > 0.68 && noteBigramSimilarity(sections[i].notes, sections[j].notes) >= 0.42) group.push(j);
+    }
+    if (group.length > bestGroup.length) bestGroup = group;
+  }
+
+  if (bestGroup.length >= 2) {
+    bestGroup.forEach((sectionIndex, groupIndex) => {
+      const section = sections[sectionIndex];
+      section.kind = 'chorus';
+      section.label = groupIndex === bestGroup.length - 1 && bestGroup.length > 2
+        ? 'Final Chorus'
+        : 'Chorus ' + String(groupIndex + 1);
+    });
+  }
+
+  let verseNumber = 1;
+  sections.forEach((section, index) => {
+    if (section.kind !== 'section') return;
+    const nextChorusIndex = sections.findIndex((candidate, candidateIndex) => candidateIndex > index && candidate.kind === 'chorus');
+    const durationSeconds = section.end - section.start;
+    if (nextChorusIndex === index + 1 && durationSeconds < 16) {
+      section.kind = 'pre';
+      section.label = 'Pre-Chorus';
+    } else if (bestGroup.length >= 2 && index > bestGroup[0] && index < bestGroup[bestGroup.length - 1] && durationSeconds > 16 && index > sections.length * 0.55) {
+      section.kind = 'bridge';
+      section.label = 'Bridge';
+    } else {
+      section.kind = 'verse';
+      section.label = 'Verse ' + String(verseNumber);
+      verseNumber += 1;
+    }
+  });
+
+  return sections;
+}
+
+function formatTime(seconds: number): string {
+  const value = Math.max(0, Math.round(seconds));
+  return String(Math.floor(value / 60)) + ':' + String(value % 60).padStart(2, '0');
+}
+
+function selectedSections(): SongSection[] {
+  return songSections.filter(section => selectedSectionIds.has(section.id));
+}
+
+function syncSelectedNotes(): void {
+  const sections = selectedSections();
+  derivedReferenceNotes = sections.flatMap(section => section.notes).slice(0, 72);
+  referenceSequenceEl.innerHTML = derivedReferenceNotes.length
+    ? derivedReferenceNotes.map(note => '<span class="chip">' + note + '</span>').join('')
+    : 'Select a section.';
+  updateListeningContext();
+}
+
+function renderSongSections(): void {
+  sectionChipsEl.innerHTML = songSections.map((section, index) => {
+    const selected = selectedSectionIds.has(section.id) ? ' selected' : '';
+    return '<button type="button" class="songSection' + selected + '" data-section-index="' + index + '">' +
+      '<strong>' + section.label + '</strong><span>' + formatTime(section.start) + '–' + formatTime(section.end) + '</span></button>';
+  }).join('');
+
+  sectionChipsEl.querySelectorAll<HTMLButtonElement>('[data-section-index]').forEach(button => {
+    button.addEventListener('click', event => {
+      const index = Number(button.dataset.sectionIndex ?? -1);
+      if (index < 0 || !songSections[index]) return;
+
+      if ((event as MouseEvent).shiftKey && lastSectionIndex !== null) {
+        const from = Math.min(lastSectionIndex, index);
+        const to = Math.max(lastSectionIndex, index);
+        for (let cursor = from; cursor <= to; cursor += 1) selectedSectionIds.add(songSections[cursor].id);
+      } else {
+        const id = songSections[index].id;
+        if (selectedSectionIds.has(id)) selectedSectionIds.delete(id);
+        else selectedSectionIds.add(id);
+        lastSectionIndex = index;
+      }
+
+      renderSongSections();
+      syncSelectedNotes();
+    });
+  });
+}
+
+function selectKinds(kinds: SectionKind[]): void {
+  selectedSectionIds.clear();
+  songSections.forEach(section => {
+    if (kinds.includes(section.kind)) selectedSectionIds.add(section.id);
+  });
+  renderSongSections();
+  syncSelectedNotes();
+}
+
+async function prepareSong(blob: Blob, filename: string): Promise<void> {
+  stopPracticePlayback(false);
+  songWorkspaceEl.classList.add('hidden');
+  reviewPanelEl.classList.add('hidden');
+  selectedSectionIds.clear();
+  songSections = [];
+  derivedReferenceNotes = [];
+  leadVocalBuffer = null;
+  backingVocalBuffer = null;
+  instrumentalBuffer = null;
+
+  try {
+    setAnalysisProgress(4, 'Reading source audio…');
+    referenceAudioBuffer = await decodeReferenceBytes(await blob.arrayBuffer());
+    setReferenceStatus('Source captured. Preparing stems automatically…', 'PROCESSING');
+
+    setAnalysisProgress(10, 'Uploading source for stem separation…');
+    const sourceId = await uploadToLalal(blob, filename);
+    setAnalysisProgress(17, 'Starting vocal / instrumental separation…');
+    const taskId = await startLalalSplit(sourceId);
+    const tracks = await waitForLalal(taskId);
+
+    const lead = tracks.find(track => track.label === 'vocals@0') ?? tracks.find(track => track.label === 'vocals');
+    const backing = tracks.find(track => track.label === 'vocals@1');
+    const instrumental = tracks.find(track => track.label === 'no_vocals');
+
+    if (!lead?.url || !instrumental?.url) throw new Error('The separated lead vocal or instrumental track is missing.');
+
+    setAnalysisProgress(81, 'Loading separated tracks…');
+    const [leadBuffer, instrumentalLoaded, backingBuffer] = await Promise.all([
+      fetchTrackBuffer(lead.url),
+      fetchTrackBuffer(instrumental.url),
+      backing?.url ? fetchTrackBuffer(backing.url) : Promise.resolve(null)
+    ]);
+    leadVocalBuffer = leadBuffer;
+    instrumentalBuffer = instrumentalLoaded;
+    backingVocalBuffer = backingBuffer;
+
+    songSections = await buildSongSections(leadVocalBuffer);
+    if (!songSections.length) throw new Error('No usable song sections were detected.');
+
+    const firstPractice = songSections.find(section => section.kind === 'chorus') ??
+      songSections.find(section => section.kind !== 'intro' && section.kind !== 'outro') ??
+      songSections[0];
+    selectedSectionIds.add(firstPractice.id);
+    lastSectionIndex = songSections.indexOf(firstPractice);
+
+    renderSongSections();
+    syncSelectedNotes();
+    songWorkspaceEl.classList.remove('hidden');
+    setAnalysisProgress(100, 'Song ready.');
+    window.setTimeout(clearAnalysisProgress, 600);
     setReferenceStatus(
-      'Try a section with a clearer isolated vocal, less percussion, or a shorter phrase.',
-      'NO STABLE PITCH'
+      'Ready. Lead vocal, backing vocals, and instrumental stay synchronized. Pick any sections and practice.',
+      'READY'
     );
+  } catch (error) {
+    clearAnalysisProgress();
+    const message = error instanceof Error ? error.message : 'Song preparation failed.';
+    const keyMissing = message.includes('LALAL_API_KEY');
+    setReferenceStatus(
+      keyMissing
+        ? 'The app is ready for LALAL, but the private LALAL_API_KEY still needs to be added to Netlify.'
+        : message,
+      keyMissing ? 'LALAL KEY NEEDED' : 'PROCESSING ERROR'
+    );
+  }
+}
+
+function updateSourceTimer(): void {
+  const elapsed = Math.max(0, (performance.now() - sourceCaptureStartedAt) / 1000);
+  sourceTimerEl.textContent = formatTime(elapsed);
+}
+
+function stopSourceCapture(): void {
+  if (sourceTimerHandle !== null) {
+    window.clearInterval(sourceTimerHandle);
+    sourceTimerHandle = null;
+  }
+  if (sourceRecorder?.state === 'recording') sourceRecorder.stop();
+  sourceCaptureStream?.getTracks().forEach(track => track.stop());
+  sourceCaptureStream = null;
+  recordSourceAudioButton.disabled = false;
+  stopSourceAudioButton.disabled = true;
+}
+
+async function startSourceCapture(): Promise<void> {
+  if (!navigator.mediaDevices?.getDisplayMedia || !('MediaRecorder' in window)) {
+    setReferenceStatus('This browser cannot record tab audio.', 'UNSUPPORTED');
     return;
   }
 
-  referenceSequenceEl.innerHTML = derivedReferenceNotes
-    .map(note => '<span class="chip">' + note + '</span>')
-    .join('');
-  referenceSequenceWrapEl.classList.remove('hidden');
-  analysisProgressTextEl.textContent =
-    'Found ' + derivedReferenceNotes.length + ' stable note targets.';
-  setReferenceStatus(
-    'Pitch Cruzer derived a practice contour from the accessible reference audio.',
-    'TARGETS READY'
-  );
+  try {
+    const capture = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    const audioTrack = capture.getAudioTracks()[0];
+    if (!audioTrack) {
+      capture.getTracks().forEach(track => track.stop());
+      setReferenceStatus('Choose a browser tab and enable Share tab audio.', 'NO AUDIO');
+      return;
+    }
+
+    sourceCaptureStream = capture;
+    const audioOnly = new MediaStream([audioTrack]);
+    const mimeType = getRecorderMimeType();
+    sourceRecorder = mimeType ? new MediaRecorder(audioOnly, { mimeType }) : new MediaRecorder(audioOnly);
+    sourceChunks = [];
+    sourceRecorder.addEventListener('dataavailable', event => {
+      if (event.data.size > 0) sourceChunks.push(event.data);
+    });
+    sourceRecorder.addEventListener('stop', () => {
+      const type = sourceRecorder?.mimeType || mimeType || 'audio/webm';
+      const blob = new Blob(sourceChunks, { type });
+      sourceChunks = [];
+      if (blob.size > 0) void prepareSong(blob, 'recorded-source.webm');
+    });
+    audioTrack.addEventListener('ended', () => {
+      if (sourceRecorder?.state === 'recording') stopSourceCapture();
+    });
+
+    sourceCaptureStartedAt = performance.now();
+    sourceTimerEl.textContent = '0:00';
+    sourceTimerHandle = window.setInterval(updateSourceTimer, 250);
+    sourceRecorder.start(250);
+    recordSourceAudioButton.disabled = true;
+    stopSourceAudioButton.disabled = false;
+    setReferenceStatus('Recording the selected tab audio. Stop when you have the song or section you want.', 'RECORDING SOURCE');
+  } catch {
+    setReferenceStatus('Tab recording was cancelled or blocked.', 'CAPTURE CANCELLED');
+  }
 }
 
-function noteToMidi(note: string): number | null {
+function scheduleBuffer(
+  buffer: AudioBuffer | null,
+  gain: GainNode,
+  context: AudioContext,
+  when: number,
+  offset: number,
+  duration: number
+): void {
+  if (!buffer || duration <= 0 || offset >= buffer.duration) return;
+  const sourceNode = context.createBufferSource();
+  sourceNode.buffer = buffer;
+  sourceNode.connect(gain);
+  const safeDuration = Math.min(duration, buffer.duration - offset);
+  sourceNode.start(when, offset, safeDuration);
+  practiceSources.push(sourceNode);
+}
+
+function stopPracticePlayback(stopRecorder = true): void {
+  practiceSources.forEach(sourceNode => {
+    try { sourceNode.stop(); } catch { /* already stopped */ }
+  });
+  practiceSources = [];
+  if (practiceStopTimer !== null) {
+    window.clearTimeout(practiceStopTimer);
+    practiceStopTimer = null;
+  }
+  if (stopRecorder && takeRecorder?.state === 'recording') takeRecorder.stop();
+  takeMicStream?.getTracks().forEach(track => track.stop());
+  takeMicStream = null;
+  practiceContext?.close().catch(() => undefined);
+  practiceContext = null;
+  practiceArtistGain = null;
+  practiceBackingVocalGain = null;
+  practiceInstrumentalGain = null;
+  playSelectionButton.disabled = false;
+  recordTakeButton.disabled = false;
+  stopPracticeButton.disabled = true;
+}
+
+function applyStemLevels(): void {
+  if (practiceArtistGain) practiceArtistGain.gain.value = artistLevel;
+  if (practiceBackingVocalGain) practiceBackingVocalGain.gain.value = Number(backingVocalLevelEl.value) / 100;
+  if (practiceInstrumentalGain) practiceInstrumentalGain.gain.value = Number(instrumentalLevelEl.value) / 100;
+  backingVocalLevelValueEl.textContent = backingVocalLevelEl.value + '%';
+  instrumentalLevelValueEl.textContent = instrumentalLevelEl.value + '%';
+  artistPresetButtons.forEach(button => {
+    button.classList.toggle('active', Number(button.dataset.artistLevel ?? 0) === Math.round(artistLevel * 100));
+  });
+}
+
+async function startSelection(recordUser: boolean): Promise<void> {
+  const sections = selectedSections();
+  if (!leadVocalBuffer || !instrumentalBuffer || sections.length === 0) {
+    takeStatusEl.textContent = 'Select at least one prepared section first.';
+    return;
+  }
+
+  stopPracticePlayback(false);
+  reviewPanelEl.classList.add('hidden');
+
+  try {
+    if (recordUser) {
+      takeMicStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
+        video: false
+      });
+      const mimeType = getRecorderMimeType();
+      takeRecorder = mimeType ? new MediaRecorder(takeMicStream, { mimeType }) : new MediaRecorder(takeMicStream);
+      takeChunks = [];
+      takeRecorder.addEventListener('dataavailable', event => {
+        if (event.data.size > 0) takeChunks.push(event.data);
+      });
+      takeRecorder.addEventListener('stop', () => {
+        const type = takeRecorder?.mimeType || mimeType || 'audio/webm';
+        const blob = new Blob(takeChunks, { type });
+        takeChunks = [];
+        if (blob.size > 0) void analyzeTake(blob);
+      });
+    }
+
+    const context = new AudioContext();
+    await context.resume();
+    practiceContext = context;
+    const artistGain = context.createGain();
+    const backingGain = context.createGain();
+    const instrumentalGain = context.createGain();
+    artistGain.connect(context.destination);
+    backingGain.connect(context.destination);
+    instrumentalGain.connect(context.destination);
+    practiceArtistGain = artistGain;
+    practiceBackingVocalGain = backingGain;
+    practiceInstrumentalGain = instrumentalGain;
+    applyStemLevels();
+
+    const repetitions = Math.max(1, Number(loopCountEl.value) || 1);
+    const leadIn = recordUser ? 0.2 : 0.06;
+    takeLeadInSeconds = leadIn;
+    practiceSegments = [];
+    let cursor = context.currentTime + leadIn;
+    let relativeCursor = 0;
+
+    if (recordUser && takeRecorder) takeRecorder.start(250);
+
+    for (let repeat = 0; repeat < repetitions; repeat += 1) {
+      for (const section of sections) {
+        const duration = Math.max(0, section.end - section.start);
+        scheduleBuffer(leadVocalBuffer, artistGain, context, cursor, section.start, duration);
+        scheduleBuffer(backingVocalBuffer, backingGain, context, cursor, section.start, duration);
+        scheduleBuffer(instrumentalBuffer, instrumentalGain, context, cursor, section.start, duration);
+        practiceSegments.push({ sourceStart: section.start, duration, label: section.label });
+        cursor += duration;
+        relativeCursor += duration;
+      }
+    }
+
+    takeTotalDuration = relativeCursor;
+    derivedReferenceNotes = practiceSegments.flatMap(segment => {
+      const section = songSections.find(item => Math.abs(item.start - segment.sourceStart) < 0.01);
+      return section?.notes ?? [];
+    }).slice(0, 72);
+    updateListeningContext();
+
+    playSelectionButton.disabled = true;
+    recordTakeButton.disabled = true;
+    stopPracticeButton.disabled = false;
+    takeStatusEl.textContent = recordUser
+      ? 'Recording your microphone separately. You are hearing the synchronized artist + backing tracks.'
+      : 'Playing selected sections.';
+
+    practiceStopTimer = window.setTimeout(() => {
+      stopPracticePlayback(recordUser);
+      takeStatusEl.textContent = recordUser ? 'Take complete. Analyzing your vocal…' : 'Playback complete.';
+    }, Math.ceil((leadIn + relativeCursor + 0.15) * 1000));
+  } catch (error) {
+    stopPracticePlayback(false);
+    takeStatusEl.textContent = error instanceof Error ? error.message : 'Could not start practice.';
+  }
+}
+
+function concatenateArtistPitch(stepSeconds: number): Array<number | null> {
+  if (!leadVocalBuffer) return [];
+  return practiceSegments.flatMap(segment => pitchFrames(leadVocalBuffer!, segment.sourceStart, segment.duration, stepSeconds));
+}
+
+function rmsSequence(buffer: AudioBuffer, startSeconds: number, durationSeconds: number, stepSeconds: number): number[] {
+  const frameSamples = Math.max(1, Math.floor(buffer.sampleRate * stepSeconds));
+  const start = Math.max(0, Math.floor(startSeconds * buffer.sampleRate));
+  const end = Math.min(buffer.length, Math.floor((startSeconds + durationSeconds) * buffer.sampleRate));
+  const values: number[] = [];
+  for (let position = start; position < end; position += frameSamples) values.push(rmsFrame(buffer, position, frameSamples));
+  return values;
+}
+
+function concatenateArtistRms(stepSeconds: number): number[] {
+  if (!leadVocalBuffer) return [];
+  return practiceSegments.flatMap(segment => rmsSequence(leadVocalBuffer!, segment.sourceStart, segment.duration, stepSeconds));
+}
+
+function correlation(a: number[], b: number[]): number {
+  const length = Math.min(a.length, b.length);
+  if (length < 3) return 0;
+  const aa = a.slice(0, length);
+  const bb = b.slice(0, length);
+  const meanA = aa.reduce((sum, value) => sum + value, 0) / length;
+  const meanB = bb.reduce((sum, value) => sum + value, 0) / length;
+  let numerator = 0;
+  let denomA = 0;
+  let denomB = 0;
+  for (let index = 0; index < length; index += 1) {
+    const da = aa[index] - meanA;
+    const db = bb[index] - meanB;
+    numerator += da * db;
+    denomA += da * da;
+    denomB += db * db;
+  }
+  const denom = Math.sqrt(denomA * denomB);
+  return denom ? numerator / denom : 0;
+}
+
+function bestTimingOffset(artist: Array<number | null>, user: Array<number | null>, stepSeconds: number): number {
+  let bestLag = 0;
+  let bestScore = -1;
+  for (let lag = -5; lag <= 5; lag += 1) {
+    let matches = 0;
+    let count = 0;
+    for (let index = 0; index < artist.length; index += 1) {
+      const userIndex = index + lag;
+      if (userIndex < 0 || userIndex >= user.length) continue;
+      const artistVoiced = artist[index] !== null;
+      const userVoiced = user[userIndex] !== null;
+      if (artistVoiced === userVoiced) matches += 1;
+      count += 1;
+    }
+    const score = count ? matches / count : 0;
+    if (score > bestScore) {
+      bestScore = score;
+      bestLag = lag;
+    }
+  }
+  return bestLag * stepSeconds * 1000;
+}
+
+async function analyzeTake(blob: Blob): Promise<void> {
+  try {
+    const userBuffer = await decodeReferenceBytes(await blob.arrayBuffer());
+    const stepSeconds = 0.12;
+    const artistPitch = concatenateArtistPitch(stepSeconds);
+    const userPitch = pitchFrames(userBuffer, takeLeadInSeconds, takeTotalDuration, stepSeconds);
+    const pitchErrors: number[] = [];
+    const artistMotion: number[] = [];
+    const userMotion: number[] = [];
+
+    const length = Math.min(artistPitch.length, userPitch.length);
+    for (let index = 0; index < length; index += 1) {
+      const artistMidi = artistPitch[index];
+      const userMidi = userPitch[index];
+      if (artistMidi !== null && userMidi !== null) pitchErrors.push(Math.abs((userMidi - artistMidi) * 100));
+      if (index > 0) {
+        const previousArtist = artistPitch[index - 1];
+        const previousUser = userPitch[index - 1];
+        if (artistMidi !== null && userMidi !== null && previousArtist !== null && previousUser !== null) {
+          artistMotion.push(artistMidi - previousArtist);
+          userMotion.push(userMidi - previousUser);
+        }
+      }
+    }
+
+    const within25 = pitchErrors.length
+      ? pitchErrors.filter(value => value <= 25).length / pitchErrors.length * 100
+      : 0;
+    const medianError = pitchErrors.length ? median(pitchErrors) : 0;
+    const timingMs = bestTimingOffset(artistPitch, userPitch, stepSeconds);
+    const artistRms = concatenateArtistRms(stepSeconds);
+    const userRms = rmsSequence(userBuffer, takeLeadInSeconds, takeTotalDuration, stepSeconds);
+    const energyMatch = Math.max(0, correlation(artistRms, userRms)) * 100;
+    const motionMatch = Math.max(0, correlation(artistMotion, userMotion)) * 100;
+
+    const timingText = Math.abs(timingMs) < 45
+      ? 'centered'
+      : Math.abs(timingMs).toFixed(0) + ' ms ' + (timingMs > 0 ? 'late' : 'early');
+
+    reviewSummaryEl.textContent = within25.toFixed(0) + '% of voiced frames within ±25¢';
+    reviewDetailsEl.innerHTML =
+      '<div><span>Pitch center</span><strong>' + medianError.toFixed(0) + '¢ median error</strong></div>' +
+      '<div><span>Timing</span><strong>' + timingText + '</strong></div>' +
+      '<div><span>Dynamics / breath energy</span><strong>' + energyMatch.toFixed(0) + '% contour match</strong></div>' +
+      '<div><span>Slides / vibrato movement</span><strong>' + motionMatch.toFixed(0) + '% contour match</strong></div>';
+    reviewPanelEl.classList.remove('hidden');
+    takeStatusEl.textContent = 'Review ready. Artist and your microphone were analyzed as separate tracks.';
+  } catch {
+    takeStatusEl.textContent = 'The take recorded, but this browser could not decode it for review.';
+  }
+}
+
+function noteToMidi(note: string): number | null {function noteToMidi(note: string): number | null {
   const match = note
     .trim()
     .toUpperCase()
@@ -1211,11 +1473,11 @@ function updateListeningContext(): void {
     if (derivedReferenceNotes.length === 0) {
       listeningForTextEl.textContent = 'No pitch target yet';
       listeningDetailEl.textContent =
-        'Load a reference, then analyze accessible audio before the tuner can grade against it.';
+        'Add a song in Match. Pitch Cruzer prepares stems and section targets automatically.';
     } else {
       listeningForTextEl.textContent = derivedReferenceNotes.join(' → ');
       listeningDetailEl.textContent =
-        'Reference targets are ready. Current target: ' + target + '.';
+        'Selected song sections are ready. Current pitch target: ' + target + '.';
     }
   }
 
@@ -1935,49 +2197,46 @@ holdSlider.addEventListener('input', () => {
   holdValue.textContent = (Number(holdSlider.value) / 1000).toFixed(2) + 's';
 });
 
-captureDesktopAudioButton.addEventListener('click', () => {
-  void startDesktopCapture();
+recordSourceAudioButton.addEventListener('click', () => {
+  void startSourceCapture();
 });
 
-stopDesktopAudioButton.addEventListener('click', stopDesktopCapture);
-
-vocalReduceSlider.addEventListener('input', updateDesktopMix);
-backingLevelSlider.addEventListener('input', updateDesktopMix);
-
-loadReferenceButton.addEventListener('click', loadReferenceLink);
+stopSourceAudioButton.addEventListener('click', stopSourceCapture);
 
 referenceFileEl.addEventListener('change', () => {
   const file = referenceFileEl.files?.[0];
-  if (file) void loadReferenceFile(file);
+  if (file) void prepareSong(file, file.name || 'uploaded-source');
 });
 
-useCurrentTimeButton.addEventListener('click', () => {
-  if (!referenceAudioElement) return;
-  referenceStartEl.value = referenceAudioElement.currentTime.toFixed(1);
+selectVersesButton.addEventListener('click', () => selectKinds(['verse']));
+selectChorusesButton.addEventListener('click', () => selectKinds(['chorus']));
+clearSectionsButton.addEventListener('click', () => {
+  selectedSectionIds.clear();
+  renderSongSections();
+  syncSelectedNotes();
 });
 
-analyzeReferenceButton.addEventListener('click', () => {
-  void analyzeReferenceSelection();
+artistPresetButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    artistLevel = Math.max(0, Math.min(1, Number(button.dataset.artistLevel ?? 0) / 100));
+    applyStemLevels();
+  });
+});
+backingVocalLevelEl.addEventListener('input', applyStemLevels);
+instrumentalLevelEl.addEventListener('input', applyStemLevels);
+
+playSelectionButton.addEventListener('click', () => {
+  void startSelection(false);
+});
+recordTakeButton.addEventListener('click', () => {
+  void startSelection(true);
+});
+stopPracticeButton.addEventListener('click', () => {
+  stopPracticePlayback(true);
+  takeStatusEl.textContent = 'Stopped.';
 });
 
-sendReferenceToCruiseButton.addEventListener('click', () => {
-  if (derivedReferenceNotes.length === 0) return;
-  sequenceTextEl.value = derivedReferenceNotes.join(' → ');
-  phraseMode = false;
-  cruiseOn = false;
-  sequenceIndex = 0;
-  renderSequence();
-  sequenceTextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-});
-
-sendReferenceToPhraseButton.addEventListener('click', () => {
-  if (derivedReferenceNotes.length === 0) return;
-  phraseNotesEl.value = derivedReferenceNotes.join(' → ');
-  practicePhraseButton.disabled = true;
-  phraseNotesEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-});
-
-modeButtons.forEach(button => {
+modeButtons.forEach(button => {modeButtons.forEach(button => {
   button.addEventListener('click', () => {
     const mode = button.dataset.appMode as AppMode | undefined;
     if (mode) setAppMode(mode);
