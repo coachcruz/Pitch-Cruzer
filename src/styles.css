@@ -1,0 +1,1855 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  color: #f6f7fb;
+  background: #080a0d;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+html {
+  background: #080a0d;
+}
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background:
+    radial-gradient(
+      circle at 20% -10%,
+      rgba(0, 231, 199, 0.16),
+      transparent 34rem
+    ),
+    radial-gradient(
+      circle at 100% 20%,
+      rgba(55, 125, 255, 0.1),
+      transparent 30rem
+    ),
+    #080a0d;
+}
+
+button,
+select,
+textarea,
+input {
+  font: inherit;
+}
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+.hidden {
+  display: none !important;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: 20px 16px 48px;
+}
+
+.topbar { order: 0; }
+.errorBanner { order: 0; }
+.modeChooser { order: 1; }
+.phraseCard,
+.referenceCard,
+.controlsGrid { order: 2; }
+.heroCard { order: 3; }
+.traceCard { order: 4; }
+footer { order: 5; }
+
+.topModeStatus {
+  padding: 7px 10px;
+  border-radius: 999px;
+  color: #9ba7b6;
+  background: #14181e;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.modeChooser {
+  margin-bottom: 14px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  background: rgba(16, 19, 24, 0.88);
+}
+
+.flowHeading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.textButton {
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 9px;
+  color: #798596;
+  background: transparent;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.textButton.active {
+  color: #22e6c2;
+  background: rgba(34, 230, 194, 0.07);
+}
+
+.modeButtons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.modeButton {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  color: #b8c1cd;
+  background: #0d1014;
+  cursor: pointer;
+  text-align: left;
+}
+
+.modeButton strong {
+  color: #eef2f6;
+  font-size: 14px;
+}
+
+.modeButton span {
+  color: #697484;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.modeButton.active {
+  border-color: rgba(34, 230, 194, 0.55);
+  background: rgba(34, 230, 194, 0.07);
+  box-shadow: 0 0 0 2px rgba(34, 230, 194, 0.05);
+}
+
+.listenStageTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 15px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.listeningContext {
+  min-width: 0;
+}
+
+.listeningModeLabel {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: #22e6c2;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.listeningContext > strong {
+  display: block;
+  max-width: 680px;
+  overflow: hidden;
+  color: #f6f8fb;
+  font-size: clamp(20px, 4vw, 30px);
+  line-height: 1.05;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.listeningContext > p:last-child {
+  margin-top: 6px;
+  color: #7d8998;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.micButton:disabled {
+  cursor: default;
+  opacity: 0.38;
+  box-shadow: none;
+}
+
+.setupStepLabel {
+  margin-bottom: 8px;
+  color: #22e6c2;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: clamp(30px, 8vw, 48px);
+  letter-spacing: -0.045em;
+  line-height: 0.95;
+}
+h2 {
+  font-size: 19px;
+  letter-spacing: -0.02em;
+}
+
+.eyebrow {
+  margin-bottom: 6px;
+  color: #7f8a9a;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.micButton,
+.primaryButton,
+.secondaryButton,
+.ghostButton {
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.micButton {
+  min-width: 132px;
+  padding: 12px 18px;
+  color: #061310;
+  background: #22e6c2;
+  box-shadow:
+    0 0 0 1px rgba(34, 230, 194, 0.18),
+    0 12px 34px rgba(34, 230, 194, 0.16);
+}
+.micButton.active {
+  color: #fff;
+  background: #2a2f38;
+  box-shadow: none;
+}
+
+.errorBanner {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 98, 111, 0.35);
+  border-radius: 14px;
+  color: #ffd5d9;
+  background: rgba(255, 71, 87, 0.1);
+  font-size: 14px;
+}
+
+.heroCard,
+.traceCard,
+.phraseCard,
+.referenceCard,
+.panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(16, 19, 24, 0.88);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(14px);
+}
+
+.heroCard {
+  padding: 18px;
+  border-radius: 26px;
+}
+
+.targetStrip {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  color: #8b96a6;
+  font-size: 13px;
+}
+.targetStrip strong {
+  color: #f9fbff;
+  font-size: 22px;
+}
+.targetStrip .ghostButton {
+  justify-self: end;
+}
+
+.ghostButton,
+.secondaryButton {
+  padding: 9px 13px;
+  color: #dce3ed;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #1b2027;
+}
+
+.liveReadout {
+  display: grid;
+  justify-items: center;
+  padding: 26px 0 20px;
+}
+
+.detectedNote {
+  font-size: clamp(72px, 24vw, 132px);
+  font-weight: 900;
+  line-height: 0.82;
+  letter-spacing: -0.075em;
+}
+
+.frequency {
+  margin-top: 14px;
+  color: #8490a0;
+  font-variant-numeric: tabular-nums;
+}
+
+.status {
+  margin-top: 16px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.status-locked {
+  color: #061310;
+  background: #22e6c2;
+}
+.status-close {
+  color: #151003;
+  background: #ffc94c;
+}
+.status-flat,
+.status-sharp {
+  color: #ffd4d8;
+  background: rgba(255, 80, 96, 0.18);
+}
+.status-listening {
+  color: #9aa5b5;
+  background: #20252d;
+}
+
+.centsReadout {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  position: relative;
+  height: 48px;
+  overflow: hidden;
+  border-radius: 15px;
+  background: #0b0d10;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.meterCloseZone,
+.meterLockZone,
+.centerLine,
+.needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+.meterCloseZone {
+  left: 26%;
+  right: 26%;
+  background: rgba(255, 201, 76, 0.09);
+}
+.meterLockZone {
+  left: 40%;
+  right: 40%;
+  background: rgba(34, 230, 194, 0.14);
+}
+.centerLine {
+  left: 50%;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.55);
+}
+.needle {
+  left: 50%;
+  width: 4px;
+  transform: translateX(-2px);
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.9);
+  transition: left 70ms linear;
+}
+
+.meterLabels {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 3px 0;
+  color: #5f6978;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.holdBlock {
+  margin-top: 18px;
+}
+.holdHeader {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 7px;
+  color: #9aa5b5;
+  font-size: 12px;
+}
+.holdHeader strong {
+  color: #f5f7fa;
+}
+
+.progressTrack {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #252a32;
+}
+.progressFill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: #22e6c2;
+  transition: width 55ms linear;
+}
+
+.traceCard,
+.phraseCard,
+.referenceCard,
+.panel {
+  margin-top: 14px;
+  padding: 16px;
+  border-radius: 20px;
+}
+
+.sectionHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.tinyLabel,
+.stepBadge {
+  color: #8d98a8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.traceWrap {
+  height: 126px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #0b0d10;
+}
+
+.traceWrap svg {
+  width: 100%;
+  height: 100%;
+}
+.traceTarget {
+  stroke: rgba(34, 230, 194, 0.55);
+  stroke-width: 0.9;
+}
+.traceClose {
+  stroke: rgba(255, 201, 76, 0.16);
+  stroke-width: 0.5;
+  stroke-dasharray: 2 2;
+}
+.traceLine {
+  fill: none;
+  stroke: #eaf0f8;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.desktopCapturePanel {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 7px;
+  padding: 8px;
+  border-radius: 9px;
+  border: 1px solid rgba(34, 230, 194, 0.14);
+  background: rgba(34, 230, 194, 0.035);
+}
+
+.captureActions {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 5px;
+  align-items: center;
+}
+
+.captureActions button {
+  min-height: 31px;
+}
+
+.captureState {
+  min-width: 34px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  color: #727e8d;
+  background: #11151a;
+  font-size: 8px;
+  font-weight: 900;
+  text-align: center;
+}
+
+.captureState.active {
+  color: #06130f;
+  background: #22e6c2;
+}
+
+.captureMixControls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.captureMixControls label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 6px;
+}
+
+.captureMixControls label span {
+  color: #dce3eb;
+  font-variant-numeric: tabular-nums;
+}
+
+.captureMixControls input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #22e6c2;
+}
+
+.captureHint {
+  color: #687483;
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.referenceUrlRow {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.referenceUrlRow input,
+.analysisControls input,
+.fileLabel input {
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  outline: none;
+  color: #f3f6fa;
+  background: #0c0f13;
+}
+
+.fileLabel input {
+  height: auto;
+  padding: 10px;
+}
+
+.compactButton {
+  min-height: 44px;
+  padding: 0 16px;
+  white-space: nowrap;
+}
+
+.referenceDivider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  color: #596371;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.referenceDivider::before,
+.referenceDivider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.referenceStatus {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border-radius: 12px;
+  color: #9ba6b5;
+  background: #0c0f13;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.referencePlayer {
+  display: grid;
+  gap: 9px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+.referencePlayer iframe {
+  width: 100%;
+  min-height: 220px;
+  border: 0;
+  border-radius: 14px;
+  background: #050607;
+}
+
+.referencePlayer audio {
+  width: 100%;
+}
+
+.referenceOpenLink {
+  display: block;
+  padding: 11px 13px;
+  border-radius: 12px;
+  color: #22e6c2;
+  background: #0c0f13;
+  border: 1px solid rgba(34, 230, 194, 0.13);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.referenceAnalysis {
+  margin-top: 12px;
+}
+
+.analysisControls {
+  display: grid;
+  grid-template-columns: 0.7fr 0.7fr 1fr 1.2fr;
+  gap: 8px;
+  align-items: end;
+}
+
+.analysisControls button {
+  min-height: 44px;
+}
+
+.analysisProgress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.analysisProgress .progressTrack {
+  grid-column: 1 / -1;
+}
+
+.analysisProgress span {
+  color: #7f8a99;
+  font-size: 11px;
+}
+
+.referenceSequenceWrap {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #0b0e12;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.derivedSequence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+
+.referenceActions {
+  margin-top: 4px;
+}
+
+.phraseNow {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 9px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(34, 230, 194, 0.07);
+  border: 1px solid rgba(34, 230, 194, 0.14);
+  color: #8e9aa9;
+}
+
+.phraseNow strong {
+  color: #f5f8fb;
+  font-size: 23px;
+  letter-spacing: -0.02em;
+}
+
+.phraseNow span:last-child {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #07130f;
+  background: #22e6c2;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.phraseIntro {
+  margin: -3px 0 14px;
+  color: #7f8a99;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.phraseInputs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.phraseButtons {
+  margin-top: 12px;
+}
+
+.cadencePanel {
+  margin-top: 12px;
+  padding: 13px;
+  border-radius: 15px;
+  border: 1px solid rgba(34, 230, 194, 0.12);
+  background: rgba(34, 230, 194, 0.035);
+}
+
+.cadenceTitleRow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 11px;
+}
+
+.cadenceTitleRow strong {
+  display: block;
+  margin-top: 2px;
+  color: #f3f6fa;
+  font-size: 15px;
+}
+
+.cadenceNote {
+  max-width: 240px;
+  color: #667180;
+  font-size: 9px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.cadenceControls {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cadenceControls input,
+.cadenceControls select {
+  width: 100%;
+  height: 40px;
+  margin-top: 6px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: #eef2f6;
+  outline: none;
+  background: #0b0e12;
+  font-size: 12px;
+}
+
+.cadenceButtons {
+  margin-top: 10px;
+}
+
+.cadenceStatus {
+  margin-top: 9px;
+  color: #7f8a99;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.phraseWarning {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: #ffd98a;
+  background: rgba(255, 201, 76, 0.08);
+  border: 1px solid rgba(255, 201, 76, 0.14);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.phraseUnits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.emptyPhrase {
+  display: block;
+  padding: 18px;
+  border: 1px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  color: #697484;
+  text-align: center;
+  font-size: 12px;
+}
+
+.phraseUnit {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 13px;
+  color: #e9edf4;
+  background: #0d1014;
+  text-align: left;
+  cursor: pointer;
+}
+
+.phraseUnitWord {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.phraseUnitNote {
+  color: #22e6c2;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.vowelSelect {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 31px;
+  margin-top: 4px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: #aeb8c6;
+  background: #171b21;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.currentPhraseUnit {
+  border-color: rgba(34, 230, 194, 0.6);
+  box-shadow: 0 0 0 2px rgba(34, 230, 194, 0.08);
+}
+
+.donePhraseUnit {
+  opacity: 0.55;
+}
+
+.vowelCoach {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #0a0d10;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.vowelCoachTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vowelCoachTop strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 24px;
+}
+
+.vowelBadge {
+  min-width: 52px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  color: #06130f;
+  background: #22e6c2;
+  font-size: 16px;
+  font-weight: 950;
+  text-align: center;
+}
+
+.coachLabel {
+  color: #66717f;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.coachGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 13px;
+}
+
+.coachGrid > div {
+  padding: 11px;
+  border-radius: 12px;
+  background: #11151a;
+}
+
+.coachGrid p {
+  margin-top: 5px;
+  color: #bac2cd;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.coachScience {
+  margin-top: 10px;
+  color: #6f7a89;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.controlsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.targetControls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+label {
+  color: #909bab;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+select,
+textarea {
+  width: 100%;
+  margin-top: 7px;
+  color: #f3f6fa;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  outline: none;
+  background: #0c0f13;
+}
+
+select {
+  height: 46px;
+  padding: 0 12px;
+}
+textarea {
+  min-height: 74px;
+  padding: 12px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+select:focus,
+textarea:focus {
+  border-color: rgba(34, 230, 194, 0.55);
+  box-shadow: 0 0 0 3px rgba(34, 230, 194, 0.08);
+}
+
+.sequenceChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 13px 0;
+}
+
+.chip {
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  color: #9da7b4;
+  background: #11151a;
+  font-size: 12px;
+  font-weight: 800;
+}
+.chip.current {
+  color: #05130f;
+  border-color: transparent;
+  background: #22e6c2;
+}
+.chip.done {
+  color: #9ef3df;
+  border-color: rgba(34, 230, 194, 0.18);
+}
+
+.buttonRow {
+  display: flex;
+  gap: 9px;
+}
+
+.primaryButton,
+.secondaryButton {
+  flex: 1;
+  min-height: 44px;
+}
+.primaryButton {
+  color: #061310;
+  background: #22e6c2;
+}
+.primaryButton:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.settingRow {
+  display: grid;
+  gap: 14px;
+}
+.settingRow label {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  align-items: center;
+}
+.settingRow label span {
+  color: #e5e9f0;
+  font-variant-numeric: tabular-nums;
+}
+.settingRow input[type='range'] {
+  grid-column: 1 / -1;
+  width: 100%;
+  accent-color: #22e6c2;
+}
+
+footer {
+  padding: 24px 6px 0;
+  color: #626d7c;
+  font-size: 11px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+@media (max-width: 620px) {
+  .flowHeading,
+  .listenStageTop {
+    align-items: stretch;
+  }
+
+  .flowHeading {
+    display: grid;
+  }
+
+  .modeButtons {
+    grid-template-columns: 1fr;
+  }
+
+  .listenStageTop {
+    display: grid;
+  }
+
+  .micButton {
+    width: 100%;
+  }
+
+  .listeningContext > strong {
+    white-space: normal;
+  }
+
+  .cadenceTitleRow {
+    display: grid;
+  }
+
+  .cadenceNote {
+    max-width: none;
+    text-align: left;
+  }
+
+  .cadenceControls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cadenceControls label:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .referenceUrlRow {
+    grid-template-columns: 1fr;
+  }
+
+  .analysisControls {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .analysisControls button {
+    width: 100%;
+  }
+}
+
+@media (min-width: 760px) {
+  html,
+  body,
+  #app {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    margin: 0;
+    padding: 8px;
+    gap: 8px;
+    grid-template-columns: 270px minmax(420px, 1fr) 250px;
+    grid-template-rows: 40px 36px minmax(0, 1fr) 160px;
+  }
+
+  .topbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 0 4px;
+  }
+
+  .topbar .eyebrow,
+  .topModeStatus {
+    display: none;
+  }
+
+  .topbar h1 {
+    font-size: 22px;
+    line-height: 1;
+    letter-spacing: -0.035em;
+  }
+
+  .modeChooser {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    display: grid;
+    grid-template-columns: auto 100px;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .modeButtons {
+    display: flex;
+    gap: 4px;
+    width: max-content;
+    height: 34px;
+  }
+
+  .modeButton {
+    display: flex;
+    min-width: 74px;
+    height: 34px;
+    align-items: center;
+    justify-content: center;
+    padding: 0 12px;
+    border-radius: 9px;
+  }
+
+  .modeButton strong {
+    font-size: 11px;
+  }
+
+  .modeButton span {
+    display: none;
+  }
+
+  .textButton {
+    height: 32px;
+    padding: 0 9px;
+    font-size: 10px;
+  }
+
+  .errorBanner {
+    position: fixed;
+    z-index: 50;
+    top: 82px;
+    left: 50%;
+    width: min(520px, calc(100vw - 24px));
+    margin: 0;
+    transform: translateX(-50%);
+  }
+
+  .heroCard {
+    grid-row: 3;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 10px;
+    overflow: hidden;
+    border-radius: 14px;
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr) 30px 13px 26px;
+  }
+
+  .traceCard {
+    grid-row: 4;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 8px;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .mode-single .heroCard,
+  .mode-single .traceCard {
+    grid-column: 1 / 3;
+  }
+
+  .mode-single .controlsGrid {
+    grid-column: 3;
+    grid-row: 3 / 5;
+  }
+
+  .mode-phrase .phraseCard,
+  .mode-reference .referenceCard {
+    grid-column: 1;
+    grid-row: 3 / 5;
+  }
+
+  .mode-phrase .heroCard,
+  .mode-phrase .traceCard,
+  .mode-reference .heroCard,
+  .mode-reference .traceCard {
+    grid-column: 2 / 4;
+  }
+
+  .mode-phrase.advanced-open .heroCard,
+  .mode-phrase.advanced-open .traceCard,
+  .mode-reference.advanced-open .heroCard,
+  .mode-reference.advanced-open .traceCard {
+    grid-column: 2;
+  }
+
+  .mode-phrase.advanced-open .controlsGrid,
+  .mode-reference.advanced-open .controlsGrid {
+    grid-column: 3;
+    grid-row: 3 / 5;
+  }
+
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid {
+    min-width: 0;
+    min-height: 0;
+    max-height: none;
+    margin: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  .phraseCard,
+  .referenceCard {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .controlsGrid {
+    display: block;
+  }
+
+  .controlsGrid .panel {
+    min-width: 0;
+    margin: 0 0 8px;
+    padding: 10px;
+    border-radius: 10px;
+  }
+
+  footer {
+    display: none;
+  }
+
+  .listenStageTop {
+    min-height: 40px;
+    margin: 0 0 5px;
+    padding: 0 0 5px;
+  }
+
+  .listeningContext .eyebrow {
+    display: none;
+  }
+
+  .listeningModeLabel {
+    margin: 0 6px 0 0;
+    font-size: 8px;
+  }
+
+  .listeningContext > strong {
+    display: inline;
+    max-width: none;
+    font-size: 15px;
+    line-height: 1.1;
+  }
+
+  .listeningContext > p:last-child {
+    margin-top: 2px;
+    font-size: 9px;
+    line-height: 1.25;
+  }
+
+  .micButton {
+    min-width: 116px;
+    padding: 8px 11px;
+    font-size: 10px;
+  }
+
+  .targetStrip {
+    grid-template-columns: auto auto 1fr;
+    gap: 7px;
+    min-height: 26px;
+    font-size: 9px;
+  }
+
+  .targetStrip strong {
+    font-size: 15px;
+  }
+
+  .targetStrip .ghostButton {
+    padding: 5px 9px;
+    font-size: 9px;
+  }
+
+  .phraseNow {
+    margin-top: 3px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    font-size: 9px;
+  }
+
+  .phraseNow strong {
+    font-size: 16px;
+  }
+
+  .liveReadout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-rows: 1fr auto;
+    align-items: center;
+    justify-items: start;
+    min-height: 0;
+    padding: 0 10px;
+  }
+
+  .detectedNote {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    font-size: clamp(68px, 10vh, 94px);
+    line-height: 0.8;
+  }
+
+  .status {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+    margin: 0 14px 4px 0;
+    padding: 5px 8px;
+    font-size: 9px;
+  }
+
+  .frequency {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+    margin: 1px 14px 0 0;
+    font-size: 10px;
+  }
+
+  .centsReadout {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    margin: 0;
+    font-size: 30px;
+  }
+
+  .meter {
+    height: 30px;
+    border-radius: 8px;
+  }
+
+  .meterLabels {
+    padding-top: 2px;
+    font-size: 7px;
+  }
+
+  .holdBlock {
+    margin-top: 3px;
+  }
+
+  .holdHeader {
+    margin-bottom: 2px;
+    font-size: 8px;
+  }
+
+  .progressTrack {
+    height: 4px;
+  }
+
+  .traceCard .sectionHeading {
+    margin-bottom: 4px;
+  }
+
+  .traceCard .sectionHeading .eyebrow {
+    display: none;
+  }
+
+  .traceCard .sectionHeading h2 {
+    font-size: 11px;
+  }
+
+  .traceCard .tinyLabel {
+    font-size: 8px;
+  }
+
+  .traceWrap {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+    border-radius: 8px;
+  }
+
+  .sectionHeading {
+    margin-bottom: 7px;
+  }
+
+  .sectionHeading h2 {
+    font-size: 14px;
+  }
+
+  .eyebrow {
+    margin-bottom: 3px;
+    font-size: 8px;
+  }
+
+  .phraseIntro,
+  .coachScience {
+    display: none;
+  }
+
+  label {
+    font-size: 9px;
+  }
+
+  select {
+    height: 32px;
+    margin-top: 3px;
+    padding: 0 8px;
+    border-radius: 8px;
+    font-size: 10px;
+  }
+
+  textarea {
+    min-height: 46px;
+    margin-top: 3px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    font-size: 10px;
+    line-height: 1.3;
+  }
+
+  .phraseInputs {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    min-height: 31px;
+    font-size: 9px;
+  }
+
+  .phraseButtons,
+  .cadenceButtons {
+    margin-top: 6px;
+  }
+
+  .cadencePanel {
+    margin-top: 7px;
+    padding: 7px;
+    border-radius: 9px;
+  }
+
+  .cadenceTitleRow {
+    margin-bottom: 5px;
+  }
+
+  .cadenceTitleRow strong {
+    font-size: 11px;
+  }
+
+  .cadenceNote {
+    display: none;
+  }
+
+  .cadenceControls {
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+
+  .cadenceControls input,
+  .cadenceControls select {
+    height: 29px;
+    margin-top: 3px;
+    padding: 0 6px;
+    border-radius: 7px;
+    font-size: 9px;
+  }
+
+  .cadenceStatus {
+    margin-top: 5px;
+    font-size: 9px;
+  }
+
+  .phraseWarning {
+    margin-top: 6px;
+    padding: 6px 7px;
+    font-size: 9px;
+  }
+
+  .phraseUnits {
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-top: 7px;
+  }
+
+  .phraseUnit {
+    gap: 2px 5px;
+    padding: 6px;
+    border-radius: 8px;
+  }
+
+  .phraseUnitWord {
+    font-size: 10px;
+  }
+
+  .phraseUnitNote {
+    font-size: 9px;
+  }
+
+  .vowelSelect {
+    height: 25px;
+    margin-top: 2px;
+    padding: 0 5px;
+    font-size: 8px;
+  }
+
+  .vowelCoach {
+    margin-top: 7px;
+    padding: 7px;
+    border-radius: 9px;
+  }
+
+  .vowelCoachTop strong {
+    font-size: 16px;
+  }
+
+  .vowelBadge {
+    min-width: 38px;
+    padding: 5px 7px;
+    border-radius: 8px;
+    font-size: 11px;
+  }
+
+  .coachGrid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+    margin-top: 5px;
+  }
+
+  .coachGrid > div {
+    padding: 6px;
+    border-radius: 7px;
+  }
+
+  .coachGrid p {
+    margin-top: 2px;
+    font-size: 9px;
+    line-height: 1.3;
+  }
+
+  .desktopCapturePanel {
+    gap: 5px;
+    margin-bottom: 5px;
+    padding: 6px;
+  }
+
+  .captureActions button {
+    min-height: 29px;
+    font-size: 8px;
+  }
+
+  .captureMixControls {
+    gap: 5px;
+  }
+
+  .captureHint {
+    font-size: 7px;
+  }
+
+  .referenceUrlRow {
+    gap: 5px;
+    margin-top: 3px;
+  }
+
+  .referenceUrlRow input,
+  .analysisControls input,
+  .fileLabel input {
+    height: 32px;
+    padding: 0 7px;
+    border-radius: 8px;
+    font-size: 9px;
+  }
+
+  .fileLabel input {
+    height: auto;
+    padding: 6px;
+  }
+
+  .compactButton {
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 9px;
+  }
+
+  .referenceDivider {
+    margin: 6px 0;
+  }
+
+  .referenceStatus {
+    margin-top: 6px;
+    padding: 6px 7px;
+    border-radius: 8px;
+    font-size: 9px;
+    line-height: 1.3;
+  }
+
+  .referencePlayer {
+    margin-top: 6px;
+    border-radius: 8px;
+  }
+
+  .referencePlayer iframe {
+    min-height: 150px;
+    border-radius: 8px;
+  }
+
+  .referenceAnalysis {
+    margin-top: 6px;
+  }
+
+  .analysisControls {
+    grid-template-columns: 1fr 1fr;
+    gap: 5px;
+  }
+
+  .analysisControls button {
+    min-height: 31px;
+    font-size: 9px;
+  }
+
+  .referenceSequenceWrap {
+    margin-top: 7px;
+    padding: 7px;
+    border-radius: 8px;
+  }
+
+  .derivedSequence,
+  .sequenceChips {
+    gap: 4px;
+    margin: 6px 0;
+  }
+
+  .chip {
+    padding: 4px 6px;
+    font-size: 8px;
+  }
+
+  .setupStepLabel {
+    margin-bottom: 4px;
+    font-size: 8px;
+  }
+
+  .targetControls {
+    gap: 6px;
+  }
+
+  .settingRow {
+    gap: 7px;
+  }
+
+  .settingRow label {
+    gap: 2px 7px;
+  }
+}
+
+@media (max-width: 759px) {
+  .shell {
+    padding: 8px;
+  }
+
+  .topbar {
+    margin-bottom: 6px;
+  }
+
+  .topbar .eyebrow,
+  .topModeStatus {
+    display: none;
+  }
+
+  .topbar h1 {
+    font-size: 24px;
+  }
+
+  .modeChooser {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .modeButtons {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+  }
+
+  .modeButton {
+    min-height: 34px;
+    padding: 0 5px;
+    border-radius: 9px;
+    text-align: center;
+  }
+
+  .modeButton span {
+    display: none;
+  }
+
+  .modeButton strong {
+    font-size: 10px;
+  }
+
+  .textButton {
+    padding: 0 7px;
+    font-size: 9px;
+  }
+
+  .heroCard,
+  .traceCard,
+  .phraseCard,
+  .referenceCard,
+  .panel {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .listenStageTop {
+    gap: 8px;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+  }
+
+  .listeningContext .eyebrow {
+    display: none;
+  }
+
+  .listeningContext > strong {
+    font-size: 18px;
+  }
+
+  .listeningContext > p:last-child {
+    font-size: 10px;
+  }
+
+  .detectedNote {
+    font-size: 72px;
+  }
+
+  .liveReadout {
+    padding: 14px 0 10px;
+  }
+
+  .phraseIntro,
+  .coachScience {
+    display: none;
+  }
+
+  textarea {
+    min-height: 52px;
+  }
+
+  .primaryButton,
+  .secondaryButton {
+    min-height: 36px;
+  }
+
+  .phraseCard,
+  .referenceCard,
+  .panel,
+  .traceCard {
+    margin-top: 8px;
+  }
+}
