@@ -443,7 +443,6 @@ let cadencePlaying = false;
 let cadenceIndex = 0;
 let cadenceTimers: number[] = [];
 let cueAudioContext: AudioContext | null = null;
-let referenceAudioBuffer: AudioBuffer | null = null;
 let leadVocalBuffer: AudioBuffer | null = null;
 let backingVocalBuffer: AudioBuffer | null = null;
 let instrumentalBuffer: AudioBuffer | null = null;
@@ -979,7 +978,7 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
 
   try {
     setAnalysisProgress(4, 'Reading source audio…');
-    referenceAudioBuffer = await decodeReferenceBytes(await blob.arrayBuffer());
+    await decodeReferenceBytes(await blob.arrayBuffer());
     setReferenceStatus('Source captured. Preparing stems automatically…', 'PROCESSING');
 
     setAnalysisProgress(10, 'Uploading source for stem separation…');
