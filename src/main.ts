@@ -705,10 +705,7 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
 async function uploadToLalal(blob: Blob, filename: string): Promise<string> {
   const response = await requestJson<{ id?: string }>('/api/lalal/upload', {
     method: 'POST',
-    headers: {
-      'X-File-Name': filename,
-      'X-File-Type': blob.type || 'application/octet-stream'
-    },
+    headers: { 'X-File-Name': filename },
     body: blob
   });
   if (!response.id) throw new Error('LALAL upload did not return a source id.');
@@ -1312,6 +1309,7 @@ async function startSourceCapture(): Promise<void> {
     sourceRecorder.addEventListener('stop', () => {
       const type = sourceRecorder?.mimeType || mimeType || 'audio/webm';
       const blob = new Blob(sourceChunks, { type });
+      sourceRecorder = null;
       const extension = recorderFileExtension(type);
       sourceChunks = [];
 
@@ -1327,8 +1325,13 @@ async function startSourceCapture(): Promise<void> {
     });
 
     sourceRecorder.addEventListener('error', () => {
+      if (sourceTimerHandle !== null) {
+        window.clearInterval(sourceTimerHandle);
+        sourceTimerHandle = null;
+      }
       sourceCaptureStream?.getTracks().forEach(track => track.stop());
       sourceCaptureStream = null;
+      sourceRecorder = null;
       sourceChunks = [];
       setSourceUiState('idle');
       setReferenceStatus('The browser recorder failed before the audio could be finalized.', 'CAPTURE ERROR');
