@@ -24,6 +24,7 @@ app.innerHTML = `
     <button id="advancedToggle" class="textButton">Tuner tools</button>
   </section>
 
+  <div class="tunerStack">
   <section class="heroCard">
     <div class="listenStageTop">
       <div class="listeningContext">
@@ -82,6 +83,7 @@ app.innerHTML = `
       </svg>
     </div>
   </section>
+  </div>
 
   <section id="phraseCard" class="phraseCard hidden">
     <div class="sectionHeading">
