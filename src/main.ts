@@ -186,7 +186,10 @@ app.innerHTML = `
   <section id="referenceCard" class="referenceCard hidden">
     <div class="sectionHeading">
       <div><p class="eyebrow">SONG PRACTICE</p><h2>Match</h2></div>
-      <span id="referenceCapability" class="tinyLabel">NO SONG</span>
+      <div class="matchBadges">
+        <span id="lalalStatus" class="tinyLabel">LALAL CHECKING</span>
+        <span id="referenceCapability" class="tinyLabel">NO SONG</span>
+      </div>
     </div>
 
     <div class="matchSourceRow">
@@ -385,6 +388,7 @@ const stopSourceAudioButton = qs<HTMLButtonElement>('#stopSourceAudio');
 const sourceTimerEl = qs<HTMLElement>('#sourceTimer');
 const referenceStatusEl = qs<HTMLElement>('#referenceStatus');
 const referenceCapabilityEl = qs<HTMLElement>('#referenceCapability');
+const lalalStatusEl = qs<HTMLElement>('#lalalStatus');
 const analysisProgressEl = qs<HTMLElement>('#analysisProgress');
 const analysisProgressFillEl = qs<HTMLElement>('#analysisProgressFill');
 const analysisProgressTextEl = qs<HTMLElement>('#analysisProgressText');
@@ -584,6 +588,25 @@ function parseNoteList(value: string): string[] {
 function setReferenceStatus(message: string, capability: string): void {
   referenceStatusEl.textContent = message;
   referenceCapabilityEl.textContent = capability;
+}
+
+let lalalChecked = false;
+
+async function checkLalalConnection(force = false): Promise<void> {
+  if (lalalChecked && !force) return;
+  lalalStatusEl.textContent = 'LALAL CHECKING';
+
+  try {
+    const result = await requestJson<{ minutes_left?: number }>('/api/lalal/minutes', {
+      method: 'POST'
+    });
+    lalalChecked = true;
+    lalalStatusEl.textContent = typeof result.minutes_left === 'number'
+      ? 'LALAL ' + result.minutes_left.toFixed(1) + ' MIN'
+      : 'LALAL READY';
+  } catch {
+    lalalStatusEl.textContent = 'LALAL KEY ERROR';
+  }
 }
 
 function setAnalysisProgress(percent: number, message: string): void {
@@ -1536,6 +1559,7 @@ function setAppMode(mode: AppMode): void {
   traceLineEl.setAttribute('points', '');
   setHoldProgress(0);
   applyModeVisibility();
+  if (mode === 'reference') void checkLalalConnection();
 }
 
 function getTargetFrequency(): number {
@@ -2284,4 +2308,5 @@ if ('serviceWorker' in navigator) {
 
 renderSequence();
 applyModeVisibility();
+void checkLalalConnection();
 setNoPitch();
