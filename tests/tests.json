@@ -1,0 +1,43 @@
+[
+  {
+    "name": "Desktop workstation keeps core controls in one viewport",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": ["compact desktop workstation", "mode switcher visibility", "microphone control visibility", "live tuner visibility", "pitch trace visibility"],
+    "description": "Verifies the primary desktop practice surface does not require page scrolling to reach the mode switcher, microphone, tuner, and pitch trace.",
+    "steps": ["Open Pitch Cruzer", "Stay in Single note mode", "Observe the full desktop viewport"],
+    "expected": "The mode switcher, Start listening button, target setup, live note/cents feedback, and pitch trace are visible together without scrolling the page."
+  },
+  {
+    "name": "Capture tab audio and reduce centered vocals",
+    "viewport": "desktop",
+    "covers": ["display audio capture", "simultaneous backing playback", "center vocal reduction", "backing level control", "captured-reference recording"],
+    "description": "Verifies Match mode can capture user-authorized tab or system audio, route a vocal-reduced backing mix, and retain the capture for later reference analysis.",
+    "steps": ["Choose Match", "Tap Capture tab audio", "Select a source with Share audio enabled, then adjust Vocal reduce and Backing"],
+    "expected": "Capture status shows the audio source is active, the processed backing is heard through Pitch Cruzer, and Stop capture ends playback and prepares captured audio for analysis when recording is supported."
+  },
+  {
+    "name": "Phrase mode uses a compact setup sidebar",
+    "viewport": "desktop",
+    "covers": ["Phrase mode layout", "compact side pane", "Phrase Coach inputs", "live tuner persistence"],
+    "description": "Verifies phrase configuration moves into a bounded side pane while the live monitor remains visible.",
+    "steps": ["Choose Phrase", "Observe the phrase setup area and live monitor", "Enter a phrase if desired"],
+    "expected": "Phrase controls occupy the left side pane with internal overflow if needed, while the live tuner and pitch trace remain visible in the main workspace."
+  },
+  {
+    "name": "Tuner tools reveal secondary controls without expanding page height",
+    "viewport": "desktop",
+    "covers": ["progressive disclosure", "tuner tools", "accuracy controls", "manual sequence controls"],
+    "description": "Verifies secondary tuner settings use the existing workstation panes instead of adding vertical page sections.",
+    "steps": ["Choose Single", "Tap Tuner tools", "Observe sequence and accuracy settings"],
+    "expected": "Secondary controls appear in the side control pane and the page itself remains fixed to the viewport."
+  },
+  {
+    "name": "Mobile mode switching remains compact",
+    "viewport": "mobile",
+    "covers": ["compact mobile mode switcher", "mobile tuner workflow", "reduced vertical padding"],
+    "description": "Verifies the mobile layout presents concise mode controls and the tuner without oversized introductory cards.",
+    "steps": ["Open Pitch Cruzer on mobile", "Switch between Note, Phrase, and Match", "Observe the top portion of each mode"],
+    "expected": "The three modes are available from a compact switcher and the current workflow begins near the top without large explanatory blocks."
+  }
+]
