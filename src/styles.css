@@ -2094,3 +2094,10 @@ footer {
     grid-template-columns: 1fr;
   }
 }
+
+
+.matchBadges {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+}
