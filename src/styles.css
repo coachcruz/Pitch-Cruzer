@@ -2102,334 +2102,7 @@ footer {
   align-items: center;
 }
 
-
-/* Responsive workstation correction */
-@media (min-width: 1280px) {
-  .shell {
-    padding: 12px 14px;
-    gap: 10px;
-    grid-template-columns:
-      minmax(330px, 0.9fr)
-      minmax(470px, 1.35fr)
-      minmax(260px, 0.75fr);
-    grid-template-rows: 44px 40px minmax(0, 1fr) clamp(150px, 21vh, 190px);
-  }
-
-  .topbar {
-    padding: 0 6px;
-  }
-
-  .modeChooser {
-    height: 40px;
-  }
-
-  .modeButtons {
-    height: 38px;
-  }
-
-  .modeButton {
-    min-width: 88px;
-    height: 38px;
-    padding: 0 15px;
-  }
-
-  .phraseCard,
-  .referenceCard {
-    padding: 14px;
-  }
-
-  .mode-reference .referenceCard,
-  .mode-phrase .phraseCard {
-    min-width: 0;
-  }
-
-  .mode-reference .heroCard,
-  .mode-phrase .heroCard {
-    min-width: 0;
-  }
-
-  .mode-reference .referenceCard label,
-  .mode-reference .referenceStatus,
-  .mode-reference .takeStatus {
-    font-size: 10px;
-  }
-
-  .mode-reference .primaryButton,
-  .mode-reference .secondaryButton {
-    min-height: 36px;
-    font-size: 10px;
-  }
-}
-
-@media (min-width: 1024px) and (max-width: 1279px) {
-  html,
-  body,
-  #app {
-    height: auto;
-    min-height: 100%;
-    overflow: auto;
-  }
-
-  .shell {
-    display: grid;
-    width: 100%;
-    max-width: none;
-    height: auto;
-    min-height: 100dvh;
-    margin: 0;
-    padding: 12px;
-    gap: 10px;
-    grid-template-columns: minmax(300px, 0.82fr) minmax(0, 1.18fr);
-    grid-template-rows: 44px 40px auto 170px auto;
-  }
-
-  .topbar {
-    grid-column: 1 / -1;
-    grid-row: 1;
-  }
-
-  .modeChooser {
-    grid-column: 1 / -1;
-    grid-row: 2;
-    height: 40px;
-  }
-
-  .mode-reference .referenceCard,
-  .mode-phrase .phraseCard {
-    grid-column: 1;
-    grid-row: 3 / 5;
-  }
-
-  .mode-reference .heroCard,
-  .mode-phrase .heroCard {
-    grid-column: 2;
-    grid-row: 3;
-    min-height: 420px;
-  }
-
-  .mode-reference .traceCard,
-  .mode-phrase .traceCard {
-    grid-column: 2;
-    grid-row: 4;
-    min-height: 170px;
-  }
-
-  .mode-reference.advanced-open .heroCard,
-  .mode-phrase.advanced-open .heroCard {
-    grid-column: 2;
-  }
-
-  .mode-reference.advanced-open .controlsGrid,
-  .mode-phrase.advanced-open .controlsGrid {
-    grid-column: 1 / -1;
-    grid-row: 5;
-  }
-
-  .mode-single .heroCard {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    min-height: 430px;
-  }
-
-  .mode-single .traceCard {
-    grid-column: 1 / -1;
-    grid-row: 4;
-    min-height: 170px;
-  }
-
-  .mode-single .controlsGrid {
-    grid-column: 1 / -1;
-    grid-row: 5;
-  }
-
-  .phraseCard,
-  .referenceCard,
-  .controlsGrid {
-    max-height: none;
-    overflow: visible;
-  }
-
-  .controlsGrid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-  }
-
-  .controlsGrid .panel {
-    margin: 0;
-  }
-}
-
-@media (min-width: 760px) and (max-width: 1023px) {
-  html,
-  body,
-  #app {
-    height: auto;
-    min-height: 100%;
-    overflow: auto;
-  }
-
-  .shell {
-    display: grid;
-    width: 100%;
-    max-width: none;
-    height: auto;
-    min-height: 100dvh;
-    margin: 0;
-    padding: 12px;
-    gap: 10px;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto;
-  }
-
-  .topbar,
-  .modeChooser,
-  .heroCard,
-  .traceCard,
-  .phraseCard,
-  .referenceCard,
-  .controlsGrid,
-  .mode-single .heroCard,
-  .mode-single .traceCard,
-  .mode-single .controlsGrid,
-  .mode-phrase .phraseCard,
-  .mode-phrase .heroCard,
-  .mode-phrase .traceCard,
-  .mode-reference .referenceCard,
-  .mode-reference .heroCard,
-  .mode-reference .traceCard,
-  .mode-phrase.advanced-open .heroCard,
-  .mode-reference.advanced-open .heroCard,
-  .mode-phrase.advanced-open .controlsGrid,
-  .mode-reference.advanced-open .controlsGrid {
-    grid-column: 1;
-    grid-row: auto;
-  }
-
-  .heroCard {
-    min-height: 420px;
-  }
-
-  .traceCard {
-    min-height: 170px;
-  }
-
-  .phraseCard,
-  .referenceCard,
-  .controlsGrid {
-    max-height: none;
-    overflow: visible;
-  }
-
-  .controlsGrid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .controlsGrid .panel {
-    margin: 0;
-  }
-}
-
-/* Match should reflow inside its own available width, not squeeze controls. */
-@media (min-width: 760px) and (max-width: 1279px) {
-  .mode-reference .referenceCard {
-    padding: 14px;
-  }
-
-  .matchSourceRow {
-    grid-template-columns: 1fr 1fr;
-    align-items: stretch;
-  }
-
-  .matchSourceRow .fileAction {
-    grid-column: 1 / -1;
-  }
-
-  .matchSourceRow .fileAction input {
-    min-height: 38px;
-  }
-
-  .matchSourceRow #sourceTimer {
-    display: flex;
-    min-height: 36px;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .sectionToolbar {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .sectionToolbar label {
-    grid-column: 1 / -1;
-    grid-template-columns: 1fr 90px;
-    justify-content: stretch;
-  }
-
-  .artistPresets {
-    flex-wrap: wrap;
-  }
-
-  .practiceActions {
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .practiceActions #stopPractice {
-    grid-column: 1 / -1;
-  }
-
-  .reviewDetails {
-    grid-template-columns: 1fr;
-  }
-
-  .mode-reference .referenceCard label,
-  .mode-reference .referenceStatus,
-  .mode-reference .takeStatus {
-    font-size: 10px;
-  }
-
-  .mode-reference .primaryButton,
-  .mode-reference .secondaryButton {
-    min-height: 36px;
-    font-size: 10px;
-  }
-}
-
-@media (min-width: 1280px) {
-  .matchSourceRow {
-    grid-template-columns: minmax(0, 1fr) minmax(88px, auto);
-  }
-
-  .matchSourceRow .fileAction {
-    grid-column: 1 / -1;
-  }
-
-  .matchSourceRow #recordSourceAudio {
-    grid-column: 1;
-  }
-
-  .matchSourceRow #stopSourceAudio {
-    grid-column: 2;
-  }
-
-  .matchSourceRow #sourceTimer {
-    grid-column: 1 / -1;
-    justify-self: start;
-  }
-
-  .sectionToolbar {
-    grid-template-columns: repeat(3, auto) minmax(110px, 1fr);
-  }
-
-  .artistPresets {
-    flex-wrap: wrap;
-  }
-}
-
-
-/* Source launch is a simple workflow strip, not another nested card. */
+/* Unified responsive workstation */
 .sourceLaunchRow {
   display: flex;
   flex-wrap: wrap;
@@ -2440,17 +2113,17 @@ footer {
   font-size: 10px;
 }
 
-.sourceLaunchRow > span:first-child {
+.sourceLaunchLabel {
   color: #aab3bf;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
 }
 
 .sourceLink {
   color: #8ff3dc;
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 850;
   text-decoration: none;
   border-bottom: 1px solid rgba(143, 243, 220, 0.35);
 }
@@ -2461,8 +2134,82 @@ footer {
 }
 
 .sourceLaunchHint {
-  flex: 1 1 220px;
+  flex: 1 1 260px;
   min-width: 0;
+}
+
+.captureBar {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.9fr) auto 64px minmax(260px, 1.25fr);
+  gap: 8px;
+  align-items: end;
+}
+
+.capturePrimary,
+.captureStop {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.captureStop {
+  border: 1px solid rgba(255, 95, 108, 0.42);
+  color: #ffe3e6;
+  background: rgba(255, 71, 87, 0.16);
+  cursor: pointer;
+}
+
+.captureStop:hover {
+  background: rgba(255, 71, 87, 0.24);
+}
+
+.captureState {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
+  color: #8d98a6;
+  background: #0d1014;
+  font-size: 11px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.captureState.recording {
+  color: #ffd9dd;
+  border-color: rgba(255, 80, 96, 0.32);
+  background: rgba(255, 80, 96, 0.08);
+}
+
+.captureState.recording::before {
+  width: 7px;
+  height: 7px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #ff5060;
+  content: '';
+}
+
+.fileAction {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fileAction > span {
+  color: #7d8896;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.fileAction input:disabled,
+.referenceCard[data-capture-state='processing'] .sourceLink {
+  opacity: 0.5;
 }
 
 .captureInstruction {
@@ -2473,148 +2220,12 @@ footer {
 }
 
 .captureInstruction strong {
-  color: #b9c2cd;
+  color: #c3ccd6;
 }
 
-/* The tuner is a readout, not the whole page. Keep it compact and leave
-   intentional breathing room below the final interactive area. */
-@media (min-width: 1280px) {
-  html,
-  body,
-  #app {
-    height: auto;
-    min-height: 100%;
-    overflow: auto;
-  }
-
-  .shell {
-    height: auto;
-    min-height: 0;
-    padding: 12px 14px 34px;
-    align-content: start;
-    grid-template-rows:
-      44px
-      40px
-      clamp(270px, 34vh, 340px)
-      clamp(120px, 15vh, 155px);
-  }
-
-  .heroCard {
-    min-height: 0;
-  }
-
-  .liveReadout {
-    padding-top: 2px;
-    padding-bottom: 2px;
-  }
-
-  .detectedNote {
-    font-size: clamp(58px, 8vh, 78px);
-  }
-
-  .mode-reference .heroCard,
-  .mode-phrase .heroCard {
-    padding: 10px 12px;
-  }
-
-  .mode-reference .listenStageTop,
-  .mode-phrase .listenStageTop {
-    min-height: 34px;
-    margin-bottom: 4px;
-    padding-bottom: 4px;
-  }
-
-  .mode-reference .targetStrip,
-  .mode-phrase .targetStrip {
-    min-height: 24px;
-  }
-
-  .mode-reference .liveReadout,
-  .mode-phrase .liveReadout {
-    min-height: 96px;
-    padding: 0 8px;
-  }
-
-  .mode-reference .detectedNote,
-  .mode-phrase .detectedNote {
-    font-size: clamp(52px, 6.5vh, 68px);
-  }
-
-  .mode-reference .meter,
-  .mode-phrase .meter {
-    height: 22px;
-  }
-
-  .mode-reference .holdBlock,
-  .mode-phrase .holdBlock {
-    margin-top: 2px;
-  }
+.referenceCard[data-capture-state='recording'] .captureInstruction {
+  color: #aeb8c5;
 }
-
-@media (min-width: 1024px) and (max-width: 1279px) {
-  .shell {
-    padding-bottom: 34px;
-  }
-
-  .mode-reference .heroCard,
-  .mode-phrase .heroCard,
-  .mode-single .heroCard {
-    min-height: 300px;
-  }
-
-  .mode-reference .traceCard,
-  .mode-phrase .traceCard,
-  .mode-single .traceCard {
-    min-height: 130px;
-  }
-
-  .liveReadout {
-    padding-top: 4px;
-    padding-bottom: 4px;
-  }
-
-  .detectedNote {
-    font-size: clamp(58px, 8vw, 78px);
-  }
-}
-
-@media (min-width: 760px) and (max-width: 1023px) {
-  .shell {
-    padding-bottom: 34px;
-  }
-
-  .heroCard {
-    min-height: 300px;
-  }
-
-  .traceCard {
-    min-height: 130px;
-  }
-
-  .liveReadout {
-    padding-top: 6px;
-    padding-bottom: 6px;
-  }
-
-  .detectedNote {
-    font-size: clamp(56px, 9vw, 74px);
-  }
-}
-
-@media (max-width: 759px) {
-  .shell {
-    padding-bottom: 30px;
-  }
-
-  .sourceLaunchHint {
-    flex-basis: 100%;
-  }
-
-  .captureInstruction {
-    font-size: 10px;
-  }
-}
-
 
 .pitchRangeRow {
   display: flex;
@@ -2625,14 +2236,14 @@ footer {
 }
 
 .rangeMode {
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 29px;
+  padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 999px;
   color: #8f9aa8;
   background: #0f1318;
   font-size: 8px;
-  font-weight: 800;
+  font-weight: 850;
   cursor: pointer;
 }
 
@@ -2670,7 +2281,399 @@ footer {
   color: #9aa6b4;
 }
 
+@media (min-width: 1280px) {
+  html,
+  body,
+  #app {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  .shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 12px 14px 38px;
+    gap: 10px;
+    grid-template-columns:
+      minmax(320px, 1fr)
+      minmax(360px, 1.08fr)
+      minmax(250px, 0.62fr);
+    grid-template-rows: 44px 40px auto 132px;
+    align-content: start;
+  }
+
+  .topbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-height: 0;
+    margin: 0;
+    padding: 0 6px;
+  }
+
+  .modeChooser {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 40px;
+    margin: 0;
+  }
+
+  .mode-single .heroCard,
+  .mode-single .traceCard {
+    grid-column: 1 / 3;
+  }
+
+  .mode-single .heroCard {
+    grid-row: 3;
+    min-height: 280px;
+  }
+
+  .mode-single .traceCard {
+    grid-row: 4;
+    min-height: 132px;
+  }
+
+  .mode-single .controlsGrid {
+    grid-column: 3;
+    grid-row: 3 / 5;
+  }
+
+  .mode-phrase .phraseCard {
+    grid-column: 1;
+    grid-row: 3 / 5;
+  }
+
+  .mode-phrase .heroCard,
+  .mode-phrase .traceCard {
+    grid-column: 2 / 4;
+  }
+
+  .mode-phrase .heroCard {
+    grid-row: 3;
+    min-height: 280px;
+  }
+
+  .mode-phrase .traceCard {
+    grid-row: 4;
+    min-height: 132px;
+  }
+
+  .mode-reference .referenceCard {
+    grid-column: 1 / 3;
+    grid-row: 3 / 5;
+    min-width: 0;
+    max-height: none;
+    margin: 0;
+    padding: 16px;
+    overflow: visible;
+  }
+
+  .mode-reference .heroCard {
+    grid-column: 3;
+    grid-row: 3;
+    min-width: 0;
+    min-height: 255px;
+    margin: 0;
+    padding: 10px 12px;
+    overflow: hidden;
+  }
+
+  .mode-reference .traceCard {
+    grid-column: 3;
+    grid-row: 4;
+    min-width: 0;
+    min-height: 132px;
+    margin: 0;
+    padding: 8px;
+  }
+
+  .mode-reference.advanced-open .referenceCard {
+    grid-column: 1 / 3;
+  }
+
+  .mode-reference.advanced-open .heroCard,
+  .mode-reference.advanced-open .traceCard {
+    grid-column: 3;
+  }
+
+  .mode-reference.advanced-open .controlsGrid {
+    grid-column: 1 / -1;
+    grid-row: 5;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .mode-reference .listenStageTop {
+    min-height: 34px;
+    margin-bottom: 4px;
+    padding-bottom: 4px;
+  }
+
+  .mode-reference .targetStrip {
+    min-height: 24px;
+    gap: 5px;
+  }
+
+  .mode-reference .targetStrip strong {
+    font-size: 14px;
+  }
+
+  .mode-reference .liveReadout {
+    min-height: 92px;
+    padding: 0 5px;
+  }
+
+  .mode-reference .detectedNote {
+    font-size: clamp(48px, 5.5vh, 64px);
+  }
+
+  .mode-reference .status {
+    margin-right: 6px;
+  }
+
+  .mode-reference .centsReadout {
+    font-size: 24px;
+  }
+
+  .mode-reference .meter {
+    height: 20px;
+  }
+
+  .mode-reference .holdBlock {
+    margin-top: 2px;
+  }
+
+  .phraseCard,
+  .controlsGrid {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (min-width: 1000px) and (max-width: 1279px) {
+  html,
+  body,
+  #app {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  .shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 12px 12px 36px;
+    gap: 10px;
+    grid-template-columns: minmax(0, 1.38fr) minmax(270px, 0.62fr);
+    grid-template-rows: 44px 40px auto 130px auto;
+    align-content: start;
+  }
+
+  .topbar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .modeChooser {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    height: 40px;
+  }
+
+  .mode-reference .referenceCard {
+    grid-column: 1;
+    grid-row: 3 / 5;
+    max-height: none;
+    padding: 14px;
+    overflow: visible;
+  }
+
+  .mode-reference .heroCard {
+    grid-column: 2;
+    grid-row: 3;
+    min-height: 255px;
+  }
+
+  .mode-reference .traceCard {
+    grid-column: 2;
+    grid-row: 4;
+    min-height: 130px;
+  }
+
+  .mode-reference.advanced-open .controlsGrid {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
+  .mode-reference .detectedNote {
+    font-size: clamp(48px, 6vw, 62px);
+  }
+
+  .mode-single .heroCard {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    min-height: 300px;
+  }
+
+  .mode-single .traceCard {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    min-height: 130px;
+  }
+
+  .mode-single .controlsGrid {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
+  .mode-phrase .phraseCard {
+    grid-column: 1;
+    grid-row: 3 / 5;
+  }
+
+  .mode-phrase .heroCard {
+    grid-column: 2;
+    grid-row: 3;
+    min-height: 300px;
+  }
+
+  .mode-phrase .traceCard {
+    grid-column: 2;
+    grid-row: 4;
+    min-height: 130px;
+  }
+
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (min-width: 760px) and (max-width: 999px) {
+  html,
+  body,
+  #app {
+    height: auto;
+    min-height: 100%;
+    overflow: auto;
+  }
+
+  .shell {
+    display: grid;
+    width: 100%;
+    max-width: none;
+    height: auto;
+    min-height: 100dvh;
+    margin: 0;
+    padding: 12px 12px 34px;
+    gap: 10px;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+  }
+
+  .topbar,
+  .modeChooser,
+  .heroCard,
+  .traceCard,
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid,
+  .mode-single .heroCard,
+  .mode-single .traceCard,
+  .mode-single .controlsGrid,
+  .mode-phrase .phraseCard,
+  .mode-phrase .heroCard,
+  .mode-phrase .traceCard,
+  .mode-reference .referenceCard,
+  .mode-reference .heroCard,
+  .mode-reference .traceCard,
+  .mode-reference.advanced-open .controlsGrid {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .heroCard {
+    min-height: 280px;
+  }
+
+  .traceCard {
+    min-height: 125px;
+  }
+
+  .phraseCard,
+  .referenceCard,
+  .controlsGrid {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .mode-reference .detectedNote {
+    font-size: clamp(52px, 8vw, 70px);
+  }
+}
+
+@media (max-width: 1100px) {
+  .captureBar {
+    grid-template-columns: 1fr 96px;
+  }
+
+  .capturePrimary,
+  .captureStop {
+    grid-column: 1;
+  }
+
+  .captureState {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .fileAction {
+    grid-column: 1 / -1;
+  }
+}
+
 @media (max-width: 759px) {
+  .shell {
+    padding-bottom: 30px;
+  }
+
+  .sourceLaunchHint {
+    flex-basis: 100%;
+  }
+
+  .captureBar {
+    grid-template-columns: 1fr 82px;
+    gap: 7px;
+  }
+
+  .capturePrimary,
+  .captureStop {
+    min-height: 42px;
+  }
+
+  .captureState {
+    min-height: 42px;
+  }
+
+  .fileAction {
+    grid-column: 1 / -1;
+  }
+
+  .captureInstruction {
+    font-size: 10px;
+  }
+
   .rangeLabel {
     width: 100%;
     margin-left: 0;
