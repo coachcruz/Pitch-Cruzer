@@ -19,17 +19,12 @@ export default async (req: Request) => {
   const bytes = await req.arrayBuffer();
   if (!bytes.byteLength) return json({ error: 'No audio data received' }, 400);
 
-  const requestedType = (req.headers.get('x-file-type') || 'application/octet-stream').toLowerCase();
-  const safeType = /^(audio|video)\/[a-z0-9.+-]+(?:;[a-z0-9=.+-]+)?$/i.test(requestedType)
-    ? requestedType
-    : 'application/octet-stream';
-
   const response = await fetch('https://www.lalal.ai/api/v1/upload/', {
     method: 'POST',
     headers: {
       'X-License-Key': key,
       'Content-Disposition': 'attachment; filename="' + filename + '"',
-      'Content-Type': safeType
+      'Content-Type': 'application/octet-stream'
     },
     body: bytes
   });
