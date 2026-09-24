@@ -1,0 +1,17 @@
+{
+  "name": "Pitch Cruzer",
+  "short_name": "Pitch Cruzer",
+  "description": "A low-voice pitch target trainer with live cents, target tones, and Cruise Mode sequences.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#080a0d",
+  "theme_color": "#080a0d",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
