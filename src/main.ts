@@ -486,7 +486,7 @@ let takeChunks: Blob[] = [];
 let takeLeadInSeconds = 0;
 let takeTotalDuration = 0;
 
-type VowelProfile = {type VowelProfile = {
+type VowelProfile = {
   label: string;
   mouth: string;
   resonance: string;
