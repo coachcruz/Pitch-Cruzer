@@ -658,8 +658,20 @@ function clearAnalysisProgress(): void {
 
 function getRecorderMimeType(): string {
   if (!('MediaRecorder' in window)) return '';
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus'];
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/ogg;codecs=opus',
+    'audio/mp4'
+  ];
   return candidates.find(type => MediaRecorder.isTypeSupported(type)) ?? '';
+}
+
+function recorderFileExtension(mimeType: string): string {
+  const normalized = mimeType.toLowerCase();
+  if (normalized.includes('ogg')) return 'ogg';
+  if (normalized.includes('mp4')) return 'm4a';
+  return 'webm';
 }
 
 async function decodeReferenceBytes(bytes: ArrayBuffer): Promise<AudioBuffer> {
@@ -1151,8 +1163,8 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
   updatePitchRangeUi();
 
   try {
+    if (blob.size < 1024) throw new Error('The captured source did not contain enough audio data.');
     setAnalysisProgress(4, 'Reading source audio…');
-    await decodeReferenceBytes(await blob.arrayBuffer());
     setReferenceStatus('Source captured. Preparing stems automatically…', 'PROCESSING');
 
     setAnalysisProgress(10, 'Uploading source for stem separation…');
@@ -1224,7 +1236,14 @@ function stopSourceCapture(): void {
     window.clearInterval(sourceTimerHandle);
     sourceTimerHandle = null;
   }
-  if (sourceRecorder?.state === 'recording') sourceRecorder.stop();
+
+  if (sourceRecorder?.state === 'recording') {
+    stopSourceAudioButton.disabled = true;
+    setReferenceStatus('Finalizing captured tab audio…', 'FINALIZING');
+    sourceRecorder.stop();
+    return;
+  }
+
   sourceCaptureStream?.getTracks().forEach(track => track.stop());
   sourceCaptureStream = null;
   recordSourceAudioButton.disabled = false;
@@ -1257,8 +1276,19 @@ async function startSourceCapture(): Promise<void> {
     sourceRecorder.addEventListener('stop', () => {
       const type = sourceRecorder?.mimeType || mimeType || 'audio/webm';
       const blob = new Blob(sourceChunks, { type });
+      const extension = recorderFileExtension(type);
       sourceChunks = [];
-      if (blob.size > 0) void prepareSong(blob, 'recorded-source.webm');
+
+      sourceCaptureStream?.getTracks().forEach(track => track.stop());
+      sourceCaptureStream = null;
+      recordSourceAudioButton.disabled = false;
+      stopSourceAudioButton.disabled = true;
+
+      if (blob.size > 0) {
+        void prepareSong(blob, 'recorded-source.' + extension);
+      } else {
+        setReferenceStatus('No usable tab audio was captured. Make sure Share tab audio is enabled.', 'NO AUDIO');
+      }
     });
     audioTrack.addEventListener('ended', () => {
       if (sourceRecorder?.state === 'recording') stopSourceCapture();
@@ -1267,7 +1297,7 @@ async function startSourceCapture(): Promise<void> {
     sourceCaptureStartedAt = performance.now();
     sourceTimerEl.textContent = '0:00';
     sourceTimerHandle = window.setInterval(updateSourceTimer, 250);
-    sourceRecorder.start(250);
+    sourceRecorder.start();
     recordSourceAudioButton.disabled = true;
     stopSourceAudioButton.disabled = false;
     setReferenceStatus('Recording the selected tab audio. Stop when you have the song or section you want.', 'RECORDING SOURCE');
