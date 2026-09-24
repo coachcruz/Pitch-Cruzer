@@ -408,7 +408,7 @@ const reviewPanelEl = qs<HTMLElement>('#reviewPanel');
 const reviewSummaryEl = qs<HTMLElement>('#reviewSummary');
 const reviewDetailsEl = qs<HTMLElement>('#reviewDetails');
 
-targetNoteEl.innerHTML = NOTE_NAMES.map(targetNoteEl.innerHTML = NOTE_NAMES.map(
+targetNoteEl.innerHTML = NOTE_NAMES.map(
   name => '<option value="' + name + '">' + name + '</option>'
 ).join('');
 targetNoteEl.value = 'G';
@@ -1350,7 +1350,7 @@ async function analyzeTake(blob: Blob): Promise<void> {
   }
 }
 
-function noteToMidi(note: string): number | null {function noteToMidi(note: string): number | null {
+function noteToMidi(note: string): number | null {
   const match = note
     .trim()
     .toUpperCase()
@@ -2235,7 +2235,7 @@ stopPracticeButton.addEventListener('click', () => {
   takeStatusEl.textContent = 'Stopped.';
 });
 
-modeButtons.forEach(button => {modeButtons.forEach(button => {
+modeButtons.forEach(button => {
   button.addEventListener('click', () => {
     const mode = button.dataset.appMode as AppMode | undefined;
     if (mode) setAppMode(mode);
