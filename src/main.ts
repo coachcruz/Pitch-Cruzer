@@ -2095,7 +2095,7 @@ function syncPhraseFromInputs(): void {
     phraseWarningEl.classList.remove('hidden');
   } else {
     phraseBuildStateEl.textContent =
-      words.length + ' units ready · tap Hear on any unit or Practice phrase.';
+      words.length + ' units ready · play any target or start practice.';
   }
 
   renderPhraseCoach();
