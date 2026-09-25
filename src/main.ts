@@ -2657,6 +2657,48 @@ applyModeVisibility();
 setSourceUiState('idle');
 updatePitchRangeUi();
 
+if (new URLSearchParams(window.location.search).get('debug') === 'phrase-buttons') {
+  appMode = 'phrase';
+  lyricsTextEl.value = 'hey | there | you';
+  phraseNotesEl.value = 'G3 → A3 → B3';
+  applyModeVisibility();
+  syncPhraseFromInputs();
+
+  window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+    const buttons = Array.from(phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.unitToneButton'));
+    const results = buttons.map(button => {
+      const rect = button.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const centerY = rect.top + rect.height / 2;
+      const topElement = document.elementFromPoint(centerX, centerY);
+      const targetable = topElement === button || Boolean(topElement && button.contains(topElement));
+      const before = button.textContent ?? '';
+      button.click();
+      const after = button.textContent ?? '';
+      return {
+        label: before,
+        disabled: button.disabled,
+        pointerEvents: getComputedStyle(button).pointerEvents,
+        targetable,
+        topElement: topElement instanceof HTMLElement ? topElement.className : String(topElement),
+        handlerFired: after.startsWith('Playing ')
+      };
+    });
+
+    const debug = document.createElement('pre');
+    debug.id = 'phraseButtonDebug';
+    debug.style.cssText =
+      'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:calc(100vw - 16px);max-height:45vh;overflow:auto;padding:10px;background:#000;color:#0f0;font:11px/1.35 monospace;white-space:pre-wrap;border:1px solid #0f0';
+    debug.textContent = JSON.stringify({
+      count: buttons.length,
+      phraseUnits: phraseWords.length,
+      phraseNotes: phraseNotes.length,
+      results
+    }, null, 2);
+    document.body.appendChild(debug);
+  }));
+}
+
 if (new URLSearchParams(window.location.search).get('debug') === 'layout') {
   const renderLayoutDebug = () => {
     document.getElementById('layoutDebug')?.remove();
