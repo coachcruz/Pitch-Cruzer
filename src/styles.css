@@ -3177,3 +3177,182 @@ footer {
     display: none;
   }
 }
+
+
+/* Phrase workflow cleanup */
+.phraseCoachContext {
+  display: none;
+}
+
+.cadencePanel {
+  overflow: hidden;
+}
+
+.cadencePanel > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.cadencePanel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.cadencePanel > summary strong {
+  display: block;
+  margin-top: 2px;
+  color: #f3f6fa;
+  font-size: 14px;
+}
+
+.cadencePanel > summary::after {
+  content: '＋';
+  flex: 0 0 auto;
+  color: #7f8a99;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.cadencePanel[open] > summary::after {
+  content: '−';
+}
+
+.cadencePanel[open] .cadenceControls {
+  margin-top: 12px;
+}
+
+.cadenceStatus:empty {
+  display: none;
+}
+
+.unitToneButton {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 58px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid rgba(34, 230, 194, 0.28);
+  border-radius: 8px;
+  color: #9ff8e7;
+  background: rgba(34, 230, 194, 0.08);
+  font-size: 10px;
+  font-weight: 900;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.unitToneButton:active {
+  transform: translateY(1px);
+  background: rgba(34, 230, 194, 0.16);
+}
+
+.phraseUnit {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.phraseUnitNote {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.vowelSelect {
+  grid-column: 1 / -1;
+}
+
+.mode-phrase .listeningContext,
+.mode-phrase .targetStrip,
+.mode-phrase .phraseNow {
+  display: none !important;
+}
+
+.mode-phrase .listenStageTop {
+  min-height: 38px;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+}
+
+.mode-phrase .listenStageTop::before {
+  content: 'LIVE TUNER';
+  margin-right: auto;
+  color: #697584;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.mode-phrase .micButton {
+  min-width: 108px;
+}
+
+.mode-phrase:not(.phrase-ready) .tunerStack {
+  display: none;
+}
+
+.mode-phrase:not(.phrase-ready) .phraseCard {
+  grid-column: 1 / -1 !important;
+  grid-row: 3 / 5 !important;
+}
+
+.mode-phrase .phraseInputs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.mode-phrase .phraseInputs textarea {
+  min-height: 68px;
+}
+
+.mode-phrase .phraseUnits.hidden {
+  display: none;
+}
+
+.mode-phrase .vowelCoach {
+  margin-top: 10px;
+}
+
+.mode-phrase .coachGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 0;
+}
+
+.mode-phrase .coachGrid > div {
+  padding: 8px;
+}
+
+.mode-phrase .cadencePanel {
+  margin-top: 10px;
+  padding: 10px 11px;
+}
+
+.mode-phrase .ghostButton,
+.mode-phrase .primaryButton,
+.mode-phrase .secondaryButton,
+.mode-phrase .unitToneButton {
+  touch-action: manipulation;
+}
+
+@media (max-width: 759px) {
+  .mode-phrase .phraseInputs {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-phrase .coachGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .phraseUnit {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .unitToneButton {
+    min-width: 54px;
+    min-height: 34px;
+  }
+}
