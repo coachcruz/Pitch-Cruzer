@@ -1758,7 +1758,7 @@ function updateListeningContext(): void {
     const line = getPhraseLine();
     if (!line || phraseNotes.length === 0) {
       listeningForTextEl.textContent = 'No phrase loaded';
-      listeningDetailEl.textContent = 'Enter the lyric units and their notes, then tap Build phrase.';
+      listeningDetailEl.textContent = 'Enter matching lyric units and target notes.';
     } else {
       const index = cadencePlaying
         ? Math.min(cadenceIndex, phraseWords.length - 1)
@@ -1944,7 +1944,7 @@ function estimatePitch(
 }
 
 function renderPhraseCoach(): void {
-  if (phraseWords.length === 0 || phraseNotes.length === 0) {
+  if (phraseWords.length === 0) {
     phraseNowEl.classList.add('hidden');
     phraseUnitsEl.classList.add('hidden');
     vowelCoachEl.classList.add('hidden');
@@ -1960,6 +1960,7 @@ function renderPhraseCoach(): void {
   phraseUnitsEl.classList.remove('emptyPhrase', 'hidden');
   phraseUnitsEl.innerHTML = phraseWords.map((word, index) => {
     const note = phraseNotes[index] ?? '—';
+    const canPlay = noteToMidi(note) !== null;
     const vowel = phraseVowels[index] ?? inferVowel(word);
     const classes = [
       'phraseUnit',
@@ -1978,22 +1979,21 @@ function renderPhraseCoach(): void {
     return '<div class="' + classes + '" data-phrase-index="' + index + '" role="button" tabindex="0" aria-label="Select ' + word + ', target ' + note + '">' +
       '<span class="phraseUnitWord">' + word + '</span>' +
       '<span class="phraseUnitNote">' + note + '</span>' +
-      '<button type="button" class="unitToneButton" data-tone-index="' + index + '" aria-label="Play ' + note + ' for ' + word + '">▶ ' + note + '</button>' +
+      '<button type="button" class="unitToneButton" data-tone-index="' + index + '"' +
+        (canPlay ? '' : ' disabled') +
+        ' aria-label="Hear target tone for ' + word + '">▶ Hear</button>' +
       '<select class="vowelSelect" data-vowel-index="' + index + '" aria-label="Vowel for ' + word + '">' + options + '</select>' +
     '</div>';
   }).join('');
 
-  const word = phraseWords[currentIndex];
+  const word = phraseWords[currentIndex] ?? '';
   const vowelKey = phraseVowels[currentIndex] ?? inferVowel(word);
   const profile = VOWEL_PROFILES[vowelKey] ?? VOWEL_PROFILES.UH;
 
   vowelCoachEl.classList.remove('hidden');
-  coachWordEl.textContent = word;
   coachVowelEl.textContent = profile.label;
   mouthCueEl.textContent = profile.mouth;
   resonanceCueEl.textContent = profile.resonance;
-  pitchCueEl.textContent = profile.pitch;
-
   phraseNowEl.classList.add('hidden');
 
   phraseUnitsEl.querySelectorAll<HTMLElement>('[data-phrase-index]').forEach(element => {
@@ -2018,19 +2018,23 @@ function renderPhraseCoach(): void {
 
   phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.unitToneButton').forEach(button => {
     button.addEventListener('click', event => {
+      event.preventDefault();
       event.stopPropagation();
       const index = Number(button.dataset.toneIndex ?? 0);
       const note = phraseNotes[index];
-      if (!note) return;
+      if (!note || noteToMidi(note) === null) return;
+
+      button.classList.add('playing');
+      void playNoteTone(note, 750)
+        .catch(() => {
+          phraseBuildStateEl.textContent = 'Tone playback was blocked. Tap Hear again.';
+        });
+
       selectedPhraseIndex = index;
-      renderPhraseCoach();
       updateListeningContext();
-      const activeToneButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
-        '[data-tone-index="' + index + '"]'
-      );
-      activeToneButton?.classList.add('playing');
-      window.setTimeout(() => activeToneButton?.classList.remove('playing'), 900);
-      void playNoteTone(note, 900);
+      window.setTimeout(() => {
+        renderPhraseCoach();
+      }, 90);
     });
   });
 
@@ -2047,39 +2051,46 @@ function renderPhraseCoach(): void {
   });
 }
 
-function buildPhrase(): void {
+function syncPhraseFromInputs(): void {
+  if (cadencePlaying) stopCadence(false);
+  phraseMode = false;
+  cruiseOn = false;
+
   const words = splitPhraseUnits(lyricsTextEl.value);
   const notes = parseNoteList(phraseNotesEl.value);
   phraseWarningEl.classList.add('hidden');
   phraseWarningEl.textContent = '';
 
-  if (words.length === 0 || notes.length === 0) {
-    phraseWarningEl.textContent = 'Add lyrics and target notes, then build the phrase.';
-    phraseWarningEl.classList.remove('hidden');
-    practicePhraseButton.disabled = true;
-    startCadenceButton.disabled = true;
-    phraseUnitsEl.classList.add('hidden');
-    vowelCoachEl.classList.add('hidden');
-    shellEl.classList.remove('phrase-ready');
-    return;
-  }
-
   phraseWords = words;
-  phraseNotes = notes.slice(0, words.length);
+  phraseNotes = notes;
   phraseVowels = words.map((word, index) => phraseVowels[index] ?? inferVowel(word));
-  selectedPhraseIndex = 0;
+  selectedPhraseIndex = Math.min(selectedPhraseIndex, Math.max(0, words.length - 1));
 
-  if (words.length !== notes.length) {
+  const hasBoth = words.length > 0 && notes.length > 0;
+  const countsMatch = hasBoth && words.length === notes.length;
+  const ready = countsMatch;
+
+  practicePhraseButton.disabled = !ready;
+  startCadenceButton.disabled = !ready;
+  shellEl.classList.toggle('phrase-ready', ready);
+  cadenceStatusEl.textContent = '';
+
+  if (words.length === 0 && notes.length === 0) {
+    phraseBuildStateEl.textContent = 'Add lyrics and target notes.';
+  } else if (!hasBoth) {
+    phraseBuildStateEl.textContent = words.length === 0
+      ? 'Add the lyric / syllable line.'
+      : 'Add the target-note line.';
+  } else if (!countsMatch) {
+    phraseBuildStateEl.textContent = words.length + ' lyric units · ' + notes.length + ' notes';
     phraseWarningEl.textContent =
-      'I found ' + words.length + ' lyric units and ' + notes.length +
-      ' notes. Use | between lyric syllables so the counts match exactly.';
+      'Make the counts match. Use | to split lyric syllables exactly.';
     phraseWarningEl.classList.remove('hidden');
+  } else {
+    phraseBuildStateEl.textContent =
+      words.length + ' units ready · tap Hear on any unit or Practice phrase.';
   }
 
-  practicePhraseButton.disabled = phraseNotes.length === 0;
-  startCadenceButton.disabled = phraseNotes.length === 0;
-  shellEl.classList.toggle('phrase-ready', phraseWords.length > 0 && phraseNotes.length > 0);
-  cadenceStatusEl.textContent = '';
   renderPhraseCoach();
   updateListeningContext();
 }
