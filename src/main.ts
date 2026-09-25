@@ -2205,7 +2205,11 @@ function finishCadence(): void {
 }
 
 function startCadence(): void {
-  if (phraseWords.length === 0 || phraseNotes.length === 0) return;
+  if (
+    phraseWords.length === 0 ||
+    phraseNotes.length === 0 ||
+    phraseWords.length !== phraseNotes.length
+  ) return;
 
   stopCadence(false);
   cruiseOn = false;
@@ -2608,8 +2612,6 @@ advancedToggleButton.addEventListener('click', () => {
   applyModeVisibility();
 });
 
-buildPhraseButton.addEventListener('click', buildPhrase);
-
 startCadenceButton.addEventListener('click', startCadence);
 stopCadenceButton.addEventListener('click', () => stopCadence());
 
@@ -2628,28 +2630,8 @@ practicePhraseButton.addEventListener('click', () => {
   renderSequence();
 });
 
-function invalidatePhraseBuild(): void {
-  if (cadencePlaying) stopCadence(false);
-  phraseMode = false;
-  cruiseOn = false;
-  phraseWords = [];
-  phraseNotes = [];
-  phraseVowels = [];
-  selectedPhraseIndex = 0;
-  practicePhraseButton.disabled = true;
-  startCadenceButton.disabled = true;
-  phraseWarningEl.classList.add('hidden');
-  phraseUnitsEl.innerHTML = '';
-  phraseUnitsEl.classList.add('emptyPhrase', 'hidden');
-  vowelCoachEl.classList.add('hidden');
-  phraseNowEl.classList.add('hidden');
-  cadenceStatusEl.textContent = '';
-  shellEl.classList.remove('phrase-ready');
-  updateListeningContext();
-}
-
-lyricsTextEl.addEventListener('input', invalidatePhraseBuild);
-phraseNotesEl.addEventListener('input', invalidatePhraseBuild);
+lyricsTextEl.addEventListener('input', syncPhraseFromInputs);
+phraseNotesEl.addEventListener('input', syncPhraseFromInputs);
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => undefined);
