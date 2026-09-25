@@ -3076,7 +3076,9 @@ footer {
     height: 100%;
   }
 
-  body:has(.shell.mode-reference) {
+  html:has(.shell.mode-reference),
+  body:has(.shell.mode-reference),
+  #app:has(.shell.mode-reference) {
     overflow: hidden;
   }
 
