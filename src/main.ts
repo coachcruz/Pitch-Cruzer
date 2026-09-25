@@ -2031,6 +2031,11 @@ function renderPhraseCoach(): void {
       selectedPhraseIndex = index;
       renderPhraseCoach();
       updateListeningContext();
+      const activeToneButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
+        '[data-tone-index="' + index + '"]'
+      );
+      activeToneButton?.classList.add('playing');
+      window.setTimeout(() => activeToneButton?.classList.remove('playing'), 900);
       void playNoteTone(note, 900);
     });
   });
