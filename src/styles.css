@@ -2959,3 +2959,110 @@ footer {
     margin-bottom: 8px;
   }
 }
+
+
+/* Final Match viewport geometry */
+@media (min-width: 1000px) {
+  html:has(.shell.mode-reference),
+  body:has(.shell.mode-reference),
+  #app:has(.shell.mode-reference) {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .shell.mode-reference {
+    width: 100%;
+    max-width: none;
+    height: 100dvh;
+    min-height: 0;
+    margin: 0;
+    padding: 8px 10px 8px;
+    gap: 6px 8px;
+    overflow: hidden;
+    grid-template-columns: minmax(0, 1fr) clamp(210px, 18vw, 240px);
+    grid-template-rows: 42px minmax(0, 1fr) 16px;
+    grid-template-areas:
+      "header modes"
+      "reference tuner"
+      "footer footer";
+    align-content: stretch;
+  }
+
+  .mode-reference .topbar {
+    min-height: 0;
+    height: 42px;
+    padding: 0 2px;
+  }
+
+  .mode-reference .modeChooser {
+    min-height: 42px;
+    height: 42px;
+    padding: 3px;
+    gap: 3px;
+    border-radius: 10px;
+  }
+
+  .mode-reference .modeButton {
+    min-height: 30px;
+    padding: 5px 7px;
+  }
+
+  .mode-reference .referenceCard {
+    min-height: 0;
+    height: 100%;
+    max-height: none;
+    padding: 12px 14px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+
+  .mode-reference .tunerStack {
+    min-height: 0;
+    height: 100%;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .mode-reference .tunerStack .heroCard {
+    flex: 0 0 210px;
+    min-height: 210px;
+    height: 210px;
+    padding: 9px 10px;
+  }
+
+  .mode-reference .tunerStack .traceCard {
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding: 8px;
+  }
+
+  .mode-reference .tunerStack .traceWrap {
+    min-height: 0;
+    height: calc(100% - 30px);
+  }
+
+  .mode-reference footer {
+    min-height: 0;
+    height: 16px;
+    margin: 0;
+    padding: 0;
+    line-height: 16px;
+    font-size: 9px;
+    overflow: hidden;
+  }
+
+  .mode-reference .referenceStatus {
+    margin-top: 6px;
+  }
+
+  .mode-reference .sourceLaunchRow {
+    margin-bottom: 7px;
+  }
+
+  .mode-reference .captureInstruction {
+    margin-top: 5px;
+  }
+}
