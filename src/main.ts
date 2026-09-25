@@ -105,7 +105,7 @@ app.innerHTML = `
 
     <div class="phraseActionRow">
       <button id="practicePhrase" class="primaryButton" disabled>Practice phrase</button>
-      <span id="phraseBuildState" class="phraseBuildState">Add lyrics and target notes.</span>
+      <span id="phraseBuildState" class="phraseBuildState" aria-live="polite">Add lyrics and target notes.</span>
     </div>
 
     <div id="phraseWarning" class="phraseWarning hidden"></div>
@@ -1842,6 +1842,7 @@ function setAppMode(mode: AppMode): void {
   setHoldProgress(0);
   applyModeVisibility();
   if (mode === 'reference') void checkLalalConnection();
+  if (mode === 'phrase') window.requestAnimationFrame(syncPhraseFromInputs);
 }
 
 function getTargetFrequency(): number {
@@ -2637,8 +2638,11 @@ practicePhraseButton.addEventListener('click', () => {
   renderSequence();
 });
 
-lyricsTextEl.addEventListener('input', syncPhraseFromInputs);
-phraseNotesEl.addEventListener('input', syncPhraseFromInputs);
+[lyricsTextEl, phraseNotesEl].forEach(field => {
+  field.addEventListener('input', syncPhraseFromInputs);
+  field.addEventListener('change', syncPhraseFromInputs);
+  field.addEventListener('blur', syncPhraseFromInputs);
+});
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => undefined);
