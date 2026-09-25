@@ -1,4 +1,4 @@
-const CACHE = 'pitch-cruzer-v1';
+const CACHE = 'pitch-cruzer-v2';
 const APP_SHELL = ['./', './manifest.webmanifest', './icon.svg'];
 
 self.addEventListener('install', event => {
