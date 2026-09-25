@@ -2104,7 +2104,7 @@ async function getCueContext(): Promise<AudioContext> {
   return cueAudioContext;
 }
 
-async function playCadenceTone(note: string, durationMs: number): Promise<void> {
+async function playNoteTone(note: string, durationMs = 900): Promise<void> {
   const midi = noteToMidi(note);
   if (midi === null) return;
 
@@ -2115,16 +2115,20 @@ async function playCadenceTone(note: string, durationMs: number): Promise<void> 
   oscillator.frequency.value = midiToFrequency(midi);
 
   const now = context.currentTime;
-  const duration = Math.max(0.08, Math.min(0.7, durationMs / 1000 * 0.58));
+  const duration = Math.max(0.12, Math.min(1.2, durationMs / 1000));
   gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(0.14, now + 0.012);
-  gain.gain.setValueAtTime(0.14, now + Math.max(0.025, duration - 0.045));
+  gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+  gain.gain.setValueAtTime(0.18, now + Math.max(0.04, duration - 0.08));
   gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
 
   oscillator.connect(gain);
   gain.connect(context.destination);
   oscillator.start(now);
-  oscillator.stop(now + duration + 0.02);
+  oscillator.stop(now + duration + 0.03);
+}
+
+async function playCadenceTone(note: string, durationMs: number): Promise<void> {
+  await playNoteTone(note, Math.max(120, durationMs * 0.58));
 }
 
 async function playCountInClick(accent: boolean): Promise<void> {
@@ -2191,7 +2195,6 @@ function finishCadence(): void {
 }
 
 function startCadence(): void {
-  buildPhrase();
   if (phraseWords.length === 0 || phraseNotes.length === 0) return;
 
   stopCadence(false);
@@ -2464,22 +2467,7 @@ function stopMic(): void {
 }
 
 async function playTarget(): Promise<void> {
-  const context = audioContext ?? new AudioContext();
-  if (!audioContext) audioContext = context;
-  await context.resume();
-
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  oscillator.type = 'sine';
-  oscillator.frequency.value = getTargetFrequency();
-  gain.gain.setValueAtTime(0.0001, context.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.03);
-  gain.gain.setValueAtTime(0.18, context.currentTime + 0.6);
-  gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.85);
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start();
-  oscillator.stop(context.currentTime + 0.9);
+  await playNoteTone(getActiveTarget(), 900);
 }
 
 micButton.addEventListener('click', () => {
@@ -2617,7 +2605,6 @@ stopCadenceButton.addEventListener('click', () => stopCadence());
 
 practicePhraseButton.addEventListener('click', () => {
   stopCadence(false);
-  buildPhrase();
   if (phraseWords.length === 0 || phraseNotes.length === 0) return;
   sequenceTextEl.value = phraseNotes.join(' → ');
   phraseMode = true;
@@ -2631,15 +2618,28 @@ practicePhraseButton.addEventListener('click', () => {
   renderSequence();
 });
 
-lyricsTextEl.addEventListener('input', () => {
+function invalidatePhraseBuild(): void {
+  if (cadencePlaying) stopCadence(false);
+  phraseMode = false;
+  cruiseOn = false;
+  phraseWords = [];
+  phraseNotes = [];
+  phraseVowels = [];
+  selectedPhraseIndex = 0;
   practicePhraseButton.disabled = true;
-  if (cadencePlaying) stopCadence();
-});
+  startCadenceButton.disabled = true;
+  phraseWarningEl.classList.add('hidden');
+  phraseUnitsEl.innerHTML = '';
+  phraseUnitsEl.classList.add('emptyPhrase', 'hidden');
+  vowelCoachEl.classList.add('hidden');
+  phraseNowEl.classList.add('hidden');
+  cadenceStatusEl.textContent = '';
+  shellEl.classList.remove('phrase-ready');
+  updateListeningContext();
+}
 
-phraseNotesEl.addEventListener('input', () => {
-  practicePhraseButton.disabled = true;
-  if (cadencePlaying) stopCadence();
-});
+lyricsTextEl.addEventListener('input', invalidatePhraseBuild);
+phraseNotesEl.addEventListener('input', invalidatePhraseBuild);
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => undefined);
