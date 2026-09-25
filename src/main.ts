@@ -1655,7 +1655,7 @@ function noteToMidi(note: string): number | null {
   const match = note
     .trim()
     .toUpperCase()
-    .match(/^([A-G])([#B]?)(-?\\d)$/);
+    .match(/^([A-G])([#B]?)(-?\d)$/);
   if (!match) return null;
 
   const naturalMap: Record<string, number> = {
@@ -1701,7 +1701,7 @@ function median(values: number[]): number {
 
 function getSequence(): string[] {
   return sequenceTextEl.value
-    .split(/(?:→|,|\\s)+/)
+    .split(/(?:→|,|\s)+/)
     .map(item => item.trim())
     .filter(item => item.length > 0 && noteToMidi(item) !== null);
 }
