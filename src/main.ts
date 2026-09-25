@@ -2654,14 +2654,28 @@ if (new URLSearchParams(window.location.search).get('debug') === 'layout') {
     debug.id = 'layoutDebug';
     debug.style.cssText =
       'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:calc(100vw - 16px);max-height:45vh;overflow:auto;padding:10px;background:#000;color:#0f0;font:11px/1.35 monospace;white-space:pre-wrap;border:1px solid #0f0';
+    const bodyStyle = getComputedStyle(document.body);
+    const shell = document.querySelector<HTMLElement>('.shell');
     debug.textContent =
       'viewport w=' + window.innerWidth + ' h=' + window.innerHeight +
       ' scrollH=' + document.documentElement.scrollHeight +
-      ' bodyH=' + document.body.scrollHeight + '\n' +
+      ' bodyH=' + document.body.scrollHeight +
+      ' stylesheets=' + document.styleSheets.length +
+      ' bodyMargin=' + bodyStyle.margin +
+      ' shellClass=' + (shell?.className ?? 'missing') + '\n' +
       lines.join('\n');
     document.body.appendChild(debug);
   };
-  window.requestAnimationFrame(() => window.requestAnimationFrame(renderLayoutDebug));
+  const renderWhenReady = () => {
+    window.requestAnimationFrame(() => window.requestAnimationFrame(renderLayoutDebug));
+    window.setTimeout(renderLayoutDebug, 1600);
+  };
+  if (document.readyState === 'complete') {
+    renderWhenReady();
+  } else {
+    window.addEventListener('load', renderWhenReady, { once: true });
+  }
+  document.fonts?.ready.then(renderLayoutDebug).catch(() => undefined);
   window.addEventListener('resize', renderLayoutDebug);
 }
 void checkLalalConnection();
