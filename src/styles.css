@@ -3246,9 +3246,11 @@ footer {
   -webkit-tap-highlight-color: transparent;
 }
 
-.unitToneButton:active {
+.unitToneButton:active,
+.unitToneButton.playing {
   transform: translateY(1px);
-  background: rgba(34, 230, 194, 0.16);
+  color: #06130f;
+  background: #22e6c2;
 }
 
 .phraseUnit {
