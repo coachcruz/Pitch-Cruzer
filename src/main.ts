@@ -2025,6 +2025,7 @@ function renderPhraseCoach(): void {
       if (!note || noteToMidi(note) === null) return;
 
       button.classList.add('playing');
+      phraseBuildStateEl.textContent = 'Playing ' + note + '…';
       void playNoteTone(note, 750)
         .catch(() => {
           phraseBuildStateEl.textContent = 'Tone playback was blocked. Tap Hear again.';
@@ -2035,6 +2036,12 @@ function renderPhraseCoach(): void {
       window.setTimeout(() => {
         renderPhraseCoach();
       }, 90);
+      window.setTimeout(() => {
+        if (phraseWords.length === phraseNotes.length && phraseWords.length > 0) {
+          phraseBuildStateEl.textContent =
+            phraseWords.length + ' units ready · tap Hear on any unit or Practice phrase.';
+        }
+      }, 850);
     });
   });
 
