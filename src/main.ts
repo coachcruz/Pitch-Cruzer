@@ -103,23 +103,19 @@ app.innerHTML = `
       </label>
     </div>
 
-    <div class="buttonRow phraseButtons">
-      <button id="buildPhrase" class="primaryButton">Build phrase</button>
-      <button id="practicePhrase" class="secondaryButton" disabled>Start phrase</button>
+    <div class="phraseActionRow">
+      <button id="practicePhrase" class="primaryButton" disabled>Practice phrase</button>
+      <span id="phraseBuildState" class="phraseBuildState">Add lyrics and target notes.</span>
     </div>
 
     <div id="phraseWarning" class="phraseWarning hidden"></div>
     <div id="phraseUnits" class="phraseUnits emptyPhrase hidden"></div>
 
     <div id="vowelCoach" class="vowelCoach hidden">
-      <div class="vowelCoachTop phraseCoachContext" aria-hidden="true">
-        <strong id="coachWord">—</strong>
-        <div id="coachVowel">AH</div>
-      </div>
       <div class="coachGrid">
+        <div><span class="coachLabel">VOWEL</span><p id="coachVowel">—</p></div>
         <div><span class="coachLabel">MOUTH</span><p id="mouthCue"></p></div>
         <div><span class="coachLabel">RESONANCE</span><p id="resonanceCue"></p></div>
-        <div><span class="coachLabel">PITCH CUE</span><p id="pitchCue"></p></div>
       </div>
     </div>
 
@@ -374,8 +370,8 @@ const closeValue = qs<HTMLElement>('#closeValue');
 const holdValue = qs<HTMLElement>('#holdValue');
 const lyricsTextEl = qs<HTMLTextAreaElement>('#lyricsText');
 const phraseNotesEl = qs<HTMLTextAreaElement>('#phraseNotes');
-const buildPhraseButton = qs<HTMLButtonElement>('#buildPhrase');
 const practicePhraseButton = qs<HTMLButtonElement>('#practicePhrase');
+const phraseBuildStateEl = qs<HTMLElement>('#phraseBuildState');
 const cadenceBpmEl = qs<HTMLInputElement>('#cadenceBpm');
 const cadenceCountInEl = qs<HTMLSelectElement>('#cadenceCountIn');
 const cadenceBeatsEl = qs<HTMLSelectElement>('#cadenceBeats');
@@ -387,11 +383,9 @@ const cadenceStatusEl = qs<HTMLElement>('#cadenceStatus');
 const phraseWarningEl = qs<HTMLElement>('#phraseWarning');
 const phraseUnitsEl = qs<HTMLElement>('#phraseUnits');
 const vowelCoachEl = qs<HTMLElement>('#vowelCoach');
-const coachWordEl = qs<HTMLElement>('#coachWord');
 const coachVowelEl = qs<HTMLElement>('#coachVowel');
 const mouthCueEl = qs<HTMLElement>('#mouthCue');
 const resonanceCueEl = qs<HTMLElement>('#resonanceCue');
-const pitchCueEl = qs<HTMLElement>('#pitchCue');
 const phraseNowEl = qs<HTMLElement>('#phraseNow');
 const phraseNowWordEl = qs<HTMLElement>('#phraseNowWord');
 const phraseNowVowelEl = qs<HTMLElement>('#phraseNowVowel');
