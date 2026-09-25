@@ -3358,3 +3358,101 @@ footer {
     min-height: 34px;
   }
 }
+
+
+/* Phrase single-workflow correction */
+.phraseActionRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.phraseBuildState {
+  min-width: 0;
+  color: #7f8a98;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.mode-phrase .phraseUnits {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.mode-phrase .phraseUnit {
+  position: relative;
+  z-index: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 5px 7px;
+  padding: 9px;
+}
+
+.mode-phrase .phraseUnitWord {
+  font-size: 13px;
+}
+
+.mode-phrase .phraseUnitNote {
+  font-size: 12px;
+}
+
+.mode-phrase .unitToneButton {
+  position: relative;
+  z-index: 3;
+  min-width: 62px;
+  min-height: 34px;
+  pointer-events: auto;
+  user-select: none;
+}
+
+.mode-phrase .unitToneButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.mode-phrase .vowelSelect {
+  position: relative;
+  z-index: 2;
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+.mode-phrase .vowelCoach {
+  margin-top: 8px;
+  padding: 9px;
+}
+
+.mode-phrase .coachGrid {
+  margin: 0;
+}
+
+.mode-phrase .coachGrid > div {
+  min-height: 62px;
+}
+
+.mode-phrase .phraseWarning {
+  margin-top: 8px;
+}
+
+.mode-phrase .cadencePanel {
+  margin-top: 8px;
+}
+
+@media (max-width: 759px) {
+  .phraseActionRow {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .mode-phrase .phraseUnits {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .mode-phrase .phraseUnits {
+    grid-template-columns: 1fr;
+  }
+}
