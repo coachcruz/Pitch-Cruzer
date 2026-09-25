@@ -88,38 +88,49 @@ app.innerHTML = `
   <section id="phraseCard" class="phraseCard hidden">
     <div class="sectionHeading">
       <div>
-        <p class="eyebrow">LYRIC + RESONANCE TRAINER</p>
-        <h2>Phrase Coach</h2>
+        <p class="eyebrow">PHRASE TRAINER</p>
+        <h2>Phrase</h2>
       </div>
-      <span class="tinyLabel">VOWEL SHAPE</span>
+      <span class="tinyLabel">BUILD → HEAR → SING</span>
     </div>
 
-    <p class="phraseIntro">
-      Enter the phrase as words or syllables, then give each unit a target note. Use <strong>|</strong> when you want exact syllable boundaries.
-    </p>
-
     <div class="phraseInputs">
-      <label>Phrase lyrics
-        <textarea id="lyricsText" rows="3" placeholder="raise | your | yah | yah | yah"></textarea>
+      <label>Lyrics / syllables
+        <textarea id="lyricsText" rows="2" placeholder="raise | your | yah | yah | yah"></textarea>
       </label>
-      <label>Phrase notes
-        <textarea id="phraseNotes" rows="3" placeholder="G3 → A3 → B3 → B3 → B3"></textarea>
+      <label>Target notes
+        <textarea id="phraseNotes" rows="2" placeholder="G3 → A3 → B3 → B3 → B3"></textarea>
       </label>
     </div>
 
     <div class="buttonRow phraseButtons">
       <button id="buildPhrase" class="primaryButton">Build phrase</button>
-      <button id="practicePhrase" class="secondaryButton" disabled>Practice phrase</button>
+      <button id="practicePhrase" class="secondaryButton" disabled>Start phrase</button>
     </div>
 
-    <div class="cadencePanel">
-      <div class="cadenceTitleRow">
-        <div>
-          <span class="coachLabel">CADENCE CUE</span>
-          <strong>Entrance trainer</strong>
-        </div>
-        <span class="cadenceNote">Tone = exact pitch · TTS pitch = approximate</span>
+    <div id="phraseWarning" class="phraseWarning hidden"></div>
+    <div id="phraseUnits" class="phraseUnits emptyPhrase hidden"></div>
+
+    <div id="vowelCoach" class="vowelCoach hidden">
+      <div class="vowelCoachTop phraseCoachContext" aria-hidden="true">
+        <strong id="coachWord">—</strong>
+        <div id="coachVowel">AH</div>
       </div>
+      <div class="coachGrid">
+        <div><span class="coachLabel">MOUTH</span><p id="mouthCue"></p></div>
+        <div><span class="coachLabel">RESONANCE</span><p id="resonanceCue"></p></div>
+        <div><span class="coachLabel">PITCH CUE</span><p id="pitchCue"></p></div>
+      </div>
+    </div>
+
+    <details class="cadencePanel">
+      <summary>
+        <span>
+          <span class="coachLabel">OPTIONAL</span>
+          <strong>Entrance cues</strong>
+        </span>
+        <span class="cadenceNote">Count-in · tempo · tone / speech</span>
+      </summary>
 
       <div class="cadenceControls">
         <label>BPM
@@ -157,32 +168,11 @@ app.innerHTML = `
       </div>
 
       <div class="buttonRow cadenceButtons">
-        <button id="startCadence" class="primaryButton">Start cues</button>
+        <button id="startCadence" class="primaryButton" disabled>Start cues</button>
         <button id="stopCadence" class="secondaryButton" disabled>Stop</button>
       </div>
-      <div id="cadenceStatus" class="cadenceStatus">Build a phrase, then cue the entrances.</div>
-    </div>
-
-    <div id="phraseWarning" class="phraseWarning hidden"></div>
-    <div id="phraseUnits" class="phraseUnits emptyPhrase">
-      Build a phrase to see note-by-note vowel coaching.
-    </div>
-
-    <div id="vowelCoach" class="vowelCoach hidden">
-      <div class="vowelCoachTop">
-        <div>
-          <span class="coachLabel">CURRENT UNIT</span>
-          <strong id="coachWord">—</strong>
-        </div>
-        <div class="vowelBadge" id="coachVowel">AH</div>
-      </div>
-      <div class="coachGrid">
-        <div><span class="coachLabel">MOUTH</span><p id="mouthCue"></p></div>
-        <div><span class="coachLabel">RESONANCE</span><p id="resonanceCue"></p></div>
-        <div><span class="coachLabel">PITCH CUE</span><p id="pitchCue"></p></div>
-      </div>
-      <p class="coachScience">The vowel changes resonance/formants and tone color. Your vocal folds still set the fundamental pitch.</p>
-    </div>
+      <div id="cadenceStatus" class="cadenceStatus"></div>
+    </details>
   </section>
 
   <section id="referenceCard" class="referenceCard hidden">
