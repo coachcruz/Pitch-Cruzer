@@ -1952,6 +1952,8 @@ function estimatePitch(
 function renderPhraseCoach(): void {
   if (phraseWords.length === 0 || phraseNotes.length === 0) {
     phraseNowEl.classList.add('hidden');
+    phraseUnitsEl.classList.add('hidden');
+    vowelCoachEl.classList.add('hidden');
     return;
   }
 
@@ -1961,7 +1963,7 @@ function renderPhraseCoach(): void {
       ? Math.min(cadenceIndex, phraseWords.length - 1)
       : Math.min(selectedPhraseIndex, phraseWords.length - 1);
 
-  phraseUnitsEl.classList.remove('emptyPhrase');
+  phraseUnitsEl.classList.remove('emptyPhrase', 'hidden');
   phraseUnitsEl.innerHTML = phraseWords.map((word, index) => {
     const note = phraseNotes[index] ?? '—';
     const vowel = phraseVowels[index] ?? inferVowel(word);
@@ -1979,11 +1981,12 @@ function renderPhraseCoach(): void {
       '<option value="' + key + '"' + (key === vowel ? ' selected' : '') + '>' + key + '</option>'
     ).join('');
 
-    return '<button type="button" class="' + classes + '" data-phrase-index="' + index + '">' +
+    return '<div class="' + classes + '" data-phrase-index="' + index + '" role="button" tabindex="0" aria-label="Select ' + word + ', target ' + note + '">' +
       '<span class="phraseUnitWord">' + word + '</span>' +
       '<span class="phraseUnitNote">' + note + '</span>' +
+      '<button type="button" class="unitToneButton" data-tone-index="' + index + '" aria-label="Play ' + note + ' for ' + word + '">▶ ' + note + '</button>' +
       '<select class="vowelSelect" data-vowel-index="' + index + '" aria-label="Vowel for ' + word + '">' + options + '</select>' +
-    '</button>';
+    '</div>';
   }).join('');
 
   const word = phraseWords[currentIndex];
@@ -1997,20 +2000,38 @@ function renderPhraseCoach(): void {
   resonanceCueEl.textContent = profile.resonance;
   pitchCueEl.textContent = profile.pitch;
 
-  if (phraseMode || cadencePlaying) {
-    phraseNowEl.classList.remove('hidden');
-    phraseNowWordEl.textContent = word;
-    phraseNowVowelEl.textContent = profile.label;
-  } else {
-    phraseNowEl.classList.add('hidden');
-  }
+  phraseNowEl.classList.add('hidden');
 
   phraseUnitsEl.querySelectorAll<HTMLElement>('[data-phrase-index]').forEach(element => {
-    element.addEventListener('click', event => {
-      if ((event.target as HTMLElement).tagName === 'SELECT') return;
+    const selectUnit = () => {
       selectedPhraseIndex = Number(element.dataset.phraseIndex ?? 0);
       renderPhraseCoach();
       updateListeningContext();
+    };
+
+    element.addEventListener('click', event => {
+      const target = event.target as HTMLElement;
+      if (target.closest('select, button')) return;
+      selectUnit();
+    });
+
+    element.addEventListener('keydown', event => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      selectUnit();
+    });
+  });
+
+  phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.unitToneButton').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const index = Number(button.dataset.toneIndex ?? 0);
+      const note = phraseNotes[index];
+      if (!note) return;
+      selectedPhraseIndex = index;
+      renderPhraseCoach();
+      updateListeningContext();
+      void playNoteTone(note, 900);
     });
   });
 
@@ -2034,9 +2055,13 @@ function buildPhrase(): void {
   phraseWarningEl.textContent = '';
 
   if (words.length === 0 || notes.length === 0) {
-    phraseWarningEl.textContent = 'Add both lyrics and target notes first.';
+    phraseWarningEl.textContent = 'Add lyrics and target notes, then build the phrase.';
     phraseWarningEl.classList.remove('hidden');
     practicePhraseButton.disabled = true;
+    startCadenceButton.disabled = true;
+    phraseUnitsEl.classList.add('hidden');
+    vowelCoachEl.classList.add('hidden');
+    shellEl.classList.remove('phrase-ready');
     return;
   }
 
@@ -2053,6 +2078,9 @@ function buildPhrase(): void {
   }
 
   practicePhraseButton.disabled = phraseNotes.length === 0;
+  startCadenceButton.disabled = phraseNotes.length === 0;
+  shellEl.classList.toggle('phrase-ready', phraseWords.length > 0 && phraseNotes.length > 0);
+  cadenceStatusEl.textContent = '';
   renderPhraseCoach();
   updateListeningContext();
 }
