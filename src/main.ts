@@ -467,7 +467,8 @@ let phraseVowels: string[] = [];
 let selectedPhraseIndex = 0;
 type AppMode = 'single' | 'phrase' | 'reference';
 
-let appMode: AppMode = 'single';
+const requestedMode = new URLSearchParams(window.location.search).get('mode');
+let appMode: AppMode = requestedMode === 'phrase' || requestedMode === 'reference' ? requestedMode : 'single';
 let advancedControls = false;
 let cadencePlaying = false;
 let cadenceIndex = 0;
@@ -2630,5 +2631,38 @@ renderSequence();
 applyModeVisibility();
 setSourceUiState('idle');
 updatePitchRangeUi();
+
+if (new URLSearchParams(window.location.search).get('debug') === 'layout') {
+  const renderLayoutDebug = () => {
+    document.getElementById('layoutDebug')?.remove();
+    const selectors = ['.shell', '.topbar', '.modeChooser', '.referenceCard', '.tunerStack', '.heroCard', '.traceCard', 'footer'];
+    const lines = selectors.map(selector => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) return selector + ': missing';
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return selector +
+        ' x=' + rect.x.toFixed(1) +
+        ' y=' + rect.y.toFixed(1) +
+        ' w=' + rect.width.toFixed(1) +
+        ' h=' + rect.height.toFixed(1) +
+        ' bottom=' + rect.bottom.toFixed(1) +
+        ' display=' + style.display +
+        ' overflowY=' + style.overflowY;
+    });
+    const debug = document.createElement('pre');
+    debug.id = 'layoutDebug';
+    debug.style.cssText =
+      'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:calc(100vw - 16px);max-height:45vh;overflow:auto;padding:10px;background:#000;color:#0f0;font:11px/1.35 monospace;white-space:pre-wrap;border:1px solid #0f0';
+    debug.textContent =
+      'viewport w=' + window.innerWidth + ' h=' + window.innerHeight +
+      ' scrollH=' + document.documentElement.scrollHeight +
+      ' bodyH=' + document.body.scrollHeight + '\n' +
+      lines.join('\n');
+    document.body.appendChild(debug);
+  };
+  window.requestAnimationFrame(() => window.requestAnimationFrame(renderLayoutDebug));
+  window.addEventListener('resize', renderLayoutDebug);
+}
 void checkLalalConnection();
 setNoPitch();
