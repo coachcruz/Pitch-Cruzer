@@ -3091,7 +3091,7 @@ footer {
     padding: 8px 10px 10px;
     gap: 8px;
     overflow: hidden;
-    grid-template-columns: minmax(0, 1fr) clamp(220px, 19vw, 250px);
+    grid-template-columns: minmax(0, 1fr) clamp(190px, 16vw, 220px);
     grid-template-rows: 42px minmax(0, 1fr);
     grid-template-areas:
       "header modes"
@@ -3136,9 +3136,9 @@ footer {
   .mode-reference .referenceCard {
     grid-area: reference;
     min-height: 0;
-    height: 100%;
-    max-height: 100%;
-    align-self: stretch;
+    height: auto;
+    max-height: calc(100dvh - 60px);
+    align-self: start;
     margin: 0;
     padding: 14px;
     overflow-x: hidden;
@@ -3148,9 +3148,9 @@ footer {
   .mode-reference .tunerStack {
     grid-area: tuner;
     min-height: 0;
-    height: 100%;
-    max-height: 100%;
-    align-self: stretch;
+    height: auto;
+    max-height: calc(100dvh - 60px);
+    align-self: start;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -3166,10 +3166,10 @@ footer {
   }
 
   .mode-reference .tunerStack .traceCard {
-    flex: 1 1 auto;
+    flex: 0 0 150px;
     width: 100%;
-    height: auto;
-    min-height: 120px;
+    height: 150px;
+    min-height: 150px;
     margin: 0;
   }
 
