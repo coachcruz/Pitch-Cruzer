@@ -3,6 +3,7 @@ import * as lalal from '../lib/lalal';
 import { formatTime, keyName } from '../lib/music';
 import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type SongInput, type StepId } from '../lib/prepare';
 import { TabRecorder } from '../lib/tabcapture';
+import { showRecordingReview } from '../ui/recordingReview';
 import { session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 
@@ -60,11 +61,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
           <a href="https://music.apple.com/" target="_blank" rel="noopener">Apple Music ↗</a>
           <a href="https://suno.com/" target="_blank" rel="noopener">Suno ↗</a></span></li>
         <li>Press <b>Start recording</b>, pick that tab, and keep <b>“Share tab audio”</b> switched on.</li>
-        <li>Play the song from the start. Press <b>Stop</b> when it ends (or when you have the part you want).</li>
+        <li>Play the song from the start. Press <b>Stop</b> when it ends — then play it back, trim it, and prepare it.</li>
       </ol>
       <div class="recordRow">
         <button id="tabStart" class="btn primary">Start recording</button>
-        <button id="tabStop" class="btn danger hidden">Stop &amp; prepare</button>
+        <button id="tabStop" class="btn danger hidden">■ Stop</button>
+        <button id="tabRestart" class="btn ghost hidden recordRestart" title="Throw away what’s recorded and start over on the same tab">↺ Restart</button>
         <span id="tabTime" class="mono">0:00</span>
         <span class="meter"><span id="tabLevel"></span></span>
       </div>
@@ -79,6 +81,8 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         <button id="capturePip" class="btn">⧉ Float the tab</button>
       </div>
     </div>
+
+    <div id="capReviewHost"></div>
 
     <div class="options">
       <label class="check"><input id="useSeparation" type="checkbox" checked> Separate the singer from the music <small>(LALAL.AI — needed to turn the artist down)</small></label>
@@ -274,7 +278,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     tabStart.classList.toggle('hidden', on);
     tabStop.classList.toggle('hidden', !on);
     root.querySelectorAll<HTMLButtonElement>('.recordStart').forEach(button => button.classList.toggle('hidden', on));
-    root.querySelectorAll<HTMLButtonElement>('.linkStop').forEach(button => button.classList.toggle('hidden', !on));
+    root.querySelectorAll<HTMLButtonElement>('.linkStop, .recordRestart').forEach(button => button.classList.toggle('hidden', !on));
     if (meterTimer !== null) window.clearInterval(meterTimer);
     let warned = false;
     meterTimer = on ? window.setInterval(() => {
@@ -286,7 +290,11 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       root.querySelectorAll<HTMLElement>('#tabLevel, .linkLevel').forEach(node => { node.style.width = Math.round(recorder.level * 100) + '%'; });
     }, 200) : null;
   };
+  const reviewHost = el(root, '#capReviewHost');
+  let closeReview: (() => void) | null = null;
   const startTab = async () => {
+    closeReview?.();
+    closeReview = null;
     if (!TabRecorder.supported()) { toast('This browser can’t record tab audio. Use Chrome or Edge on a computer, or upload a file.', 'error'); return; }
     try {
       recorder.seconds = 0;
@@ -307,10 +315,19 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const stopTab = async () => {
     if (tabStop.classList.contains('hidden')) return;
     setRecording(false);
-    const blob = await recorder.stop();
-    if (!blob) { toast('No sound was captured. Make sure the song was playing and “Share tab audio” was on.', 'error'); return; }
-    void start({ kind: 'recording', blob, name: 'Recorded song ' + new Date().toLocaleDateString() + '.wav' });
+    const recording = await recorder.stop();
+    if (!recording) { toast('No sound was captured. Make sure the song was playing and “Share tab audio” was on.', 'error'); return; }
+    closeReview = showRecordingReview(reviewHost, recording, {
+      use: wav => { closeReview = null; void start({ kind: 'recording', blob: wav, name: 'Recorded song ' + new Date().toLocaleDateString() + '.wav' }); },
+      redo: () => { closeReview = null; void startTab(); },
+      discard: () => { closeReview = null; toast('Recording discarded.'); }
+    });
+    reviewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
+  root.querySelectorAll<HTMLButtonElement>('.recordRestart').forEach(button => button.addEventListener('click', () => {
+    recorder.reset();
+    toast('Starting over — play the song from the beginning.');
+  }));
   tabStart.addEventListener('click', () => void startTab());
   tabStop.addEventListener('click', () => void stopTab());
 
@@ -336,13 +353,15 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       <div class="recordRow">
         <a class="btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">1 · Open song ↗</a>
         <button class="btn primary recordStart">2 · Start recording that tab</button>
-        <button class="btn danger linkStop hidden">3 · Stop &amp; prepare</button>
+        <button class="btn danger linkStop hidden">3 · ■ Stop</button>
+        <button class="btn ghost hidden recordRestart" title="Throw away what’s recorded and start over on the same tab">↺ Restart</button>
         <span class="mono linkTime">0:00</span><span class="meter"><span class="linkLevel"></span></span>
       </div>
       <p class="hint">In the picker choose the tab you just opened and keep “Share tab audio” on. Then press play in that tab.</p>`;
     linkRecord.classList.remove('hidden');
     el(linkRecord, '.recordStart').addEventListener('click', () => void startTab());
     el(linkRecord, '.linkStop').addEventListener('click', () => void stopTab());
+    el(linkRecord, '.recordRestart').addEventListener('click', () => { recorder.reset(); toast('Starting over — play the song from the beginning.'); });
   });
 
   // ------------------------------------------------ library
@@ -374,5 +393,6 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     if (meterTimer !== null) window.clearInterval(meterTimer);
     if (!tabStop.classList.contains('hidden')) void recorder.stop();
     showPreview(false);
+    closeReview?.();
   };
 }

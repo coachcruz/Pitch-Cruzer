@@ -66,8 +66,18 @@ export class TabRecorder {
     capture.getVideoTracks()[0]?.addEventListener('ended', () => this.onEnded?.());
   }
 
-  /** Stops and returns a WAV file of what was captured (null if nothing audible). */
-  async stop(): Promise<Blob | null> {
+  /** Throws away what was captured so far and keeps recording the same tab. */
+  reset(): void {
+    this.chunks = [];
+    this.seconds = 0;
+    this.peak = 0;
+  }
+
+  /**
+   * Stops and returns the captured audio (null if nothing audible), plus a suggested trim that
+   * cuts the silence at both ends (time spent switching tabs / pressing play).
+   */
+  async stop(): Promise<Recording | null> {
     const rate = this.ctx?.sampleRate ?? 48000;
     if (this.processor) this.processor.onaudioprocess = null;
     this.stream?.getTracks().forEach(track => track.stop());
@@ -76,7 +86,7 @@ export class TabRecorder {
     this.ctx = null;
     this.processor = null;
     const length = this.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-    if (length < rate) return null;
+    if (length < rate) { this.chunks = []; return null; }
     const samples = new Float32Array(length);
     let offset = 0;
     let peak = 0;
@@ -87,13 +97,21 @@ export class TabRecorder {
     }
     this.chunks = [];
     if (peak < 0.002) return null;
-    // Trim silence at both ends (time spent switching tabs / pressing play).
     const threshold = 0.01;
     let start = 0, end = samples.length;
     while (start < end && Math.abs(samples[start]) < threshold) start += 1;
     while (end > start && Math.abs(samples[end - 1]) < threshold) end -= 1;
     start = Math.max(0, start - Math.round(rate * 0.25));
     end = Math.min(samples.length, end + Math.round(rate * 0.5));
-    return encodeWav([samples.subarray(start, end)], rate);
+    return { samples, sampleRate: rate, suggestedStart: start / rate, suggestedEnd: end / rate };
   }
+}
+
+export interface Recording { samples: Float32Array<ArrayBuffer>; sampleRate: number; suggestedStart: number; suggestedEnd: number }
+
+/** WAV file of just the kept part of a recording. */
+export function trimmedWav(recording: Recording, start: number, end: number): Blob {
+  const from = Math.max(0, Math.floor(start * recording.sampleRate));
+  const to = Math.min(recording.samples.length, Math.ceil(end * recording.sampleRate));
+  return encodeWav([recording.samples.subarray(from, Math.max(from + 1, to))], recording.sampleRate);
 }
