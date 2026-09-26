@@ -183,6 +183,10 @@ input[type='range'] { accent-color: var(--accent); }
 .recordRow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
 .meter { width: 120px; height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; }
 .meter span { display: block; height: 100%; width: 0; background: var(--good); transition: width 0.15s linear; }
+.capturePreview { display: flex; gap: 14px; align-items: center; margin-top: 14px; padding: 12px; border-radius: 12px; background: var(--surface-2); flex-wrap: wrap; }
+.capturePreview video { width: 220px; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background: #000; object-fit: contain; }
+.capturePreview > div { flex: 1; min-width: 180px; }
+.capturePreview .hint { margin: 4px 0 10px; }
 .options { display: grid; gap: 10px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
 .addSong.busy .tabs, .addSong.busy .tabPanel { opacity: 0.5; pointer-events: none; }
 

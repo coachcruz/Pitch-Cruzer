@@ -15,6 +15,12 @@ export class TabRecorder {
   peak = 0;
   onEnded: (() => void) | null = null;
 
+  /** Live picture of the tab being recorded (for the preview / picture-in-picture window). */
+  get videoStream(): MediaStream | null {
+    const track = this.stream?.getVideoTracks()[0];
+    return track && track.readyState === 'live' ? new MediaStream([track]) : null;
+  }
+
   static supported(): boolean {
     return Boolean(navigator.mediaDevices?.getDisplayMedia) && 'AudioContext' in window;
   }

@@ -71,6 +71,15 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       <div id="tabHelp" class="hint">Works in Chrome and Edge on a computer. Your recording is used only to prepare this song.</div>
     </div>
 
+    <div id="capturePreview" class="capturePreview hidden">
+      <video id="captureVideo" muted playsinline autoplay aria-label="Live preview of the tab being recorded"></video>
+      <div>
+        <strong>Recording this tab</strong>
+        <p class="hint">Float it to keep watching the song while you stay here. The audio keeps recording either way.</p>
+        <button id="capturePip" class="btn">⧉ Float the tab</button>
+      </div>
+    </div>
+
     <div class="options">
       <label class="check"><input id="useSeparation" type="checkbox" checked> Separate the singer from the music <small>(LALAL.AI — needed to turn the artist down)</small></label>
       <label class="check"><input id="keepSong" type="checkbox"> Keep this song on this device <small>(so you never have to prepare it again)</small></label>
@@ -232,7 +241,36 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   // ------------------------------------------------ tab recording
   const tabStart = el<HTMLButtonElement>(root, '#tabStart');
   const tabStop = el<HTMLButtonElement>(root, '#tabStop');
+  const capturePreview = el(root, '#capturePreview');
+  const captureVideo = el<HTMLVideoElement>(root, '#captureVideo');
+  const capturePip = el<HTMLButtonElement>(root, '#capturePip');
+  const pipSupported = 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
+  capturePip.classList.toggle('hidden', !pipSupported);
+  const floatTab = async () => {
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture();
+      else await captureVideo.requestPictureInPicture();
+    } catch {
+      toast('Couldn’t float the tab. Press “⧉ Float the tab” again.', 'error');
+    }
+  };
+  capturePip.addEventListener('click', () => void floatTab());
+  captureVideo.addEventListener('enterpictureinpicture', () => { capturePip.textContent = '⧉ Bring it back'; });
+  captureVideo.addEventListener('leavepictureinpicture', () => { capturePip.textContent = '⧉ Float the tab'; });
+  const showPreview = (on: boolean) => {
+    if (on && recorder.videoStream) {
+      captureVideo.srcObject = recorder.videoStream;
+      void captureVideo.play().catch(() => undefined);
+      capturePreview.classList.remove('hidden');
+    } else {
+      if (document.pictureInPictureElement === captureVideo) void document.exitPictureInPicture().catch(() => undefined);
+      captureVideo.srcObject = null;
+      capturePreview.classList.add('hidden');
+    }
+  };
+
   const setRecording = (on: boolean) => {
+    showPreview(on);
     tabStart.classList.toggle('hidden', on);
     tabStop.classList.toggle('hidden', !on);
     root.querySelectorAll<HTMLButtonElement>('.recordStart').forEach(button => button.classList.toggle('hidden', on));
@@ -255,7 +293,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       await recorder.start();
       recorder.onEnded = () => void stopTab();
       setRecording(true);
-      toast('Recording… play the song in the other tab.');
+      toast('Recording… play the song in the other tab. Use “⧉ Float the tab” to watch it from here.');
     } catch (error) {
       setRecording(false);
       const name = error instanceof Error ? error.name : '';
@@ -335,5 +373,6 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     abort?.abort();
     if (meterTimer !== null) window.clearInterval(meterTimer);
     if (!tabStop.classList.contains('hidden')) void recorder.stop();
+    showPreview(false);
   };
 }
