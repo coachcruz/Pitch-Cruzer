@@ -3642,3 +3642,115 @@ footer {
     max-height: calc(100dvh - 114px);
   }
 }
+
+
+/* Song lyric + pitch timeline */
+.referenceTimelinePanel {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  background: rgba(7, 10, 14, 0.52);
+}
+
+.referenceTimelineHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.referenceTimelineHeader > div {
+  display: grid;
+  gap: 2px;
+}
+
+.referenceTimelineHeader strong {
+  font-size: 12px;
+  color: #e9eef5;
+}
+
+.referenceTimeline {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0 5px;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+
+.referenceTimelineEmpty {
+  display: block;
+  min-height: 42px;
+  color: #788493;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.referenceWord {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 3px;
+  min-width: 58px;
+  max-width: 126px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 9px;
+  color: #c6cfdb;
+  background: #0d1116;
+  text-align: left;
+  cursor: default;
+  scroll-snap-align: center;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.referenceWord.active {
+  border-color: rgba(34, 230, 194, 0.75);
+  background: rgba(34, 230, 194, 0.12);
+  transform: translateY(-1px);
+}
+
+.referenceWordText {
+  overflow: hidden;
+  color: #f3f6fa;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.referenceWordPitch {
+  color: #8390a0;
+  font-size: 9px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.referenceWord.active .referenceWordPitch {
+  color: #8ff3dc;
+}
+
+@media (max-width: 759px) {
+  .referenceTimelinePanel {
+    margin: 8px 0;
+    padding: 8px;
+  }
+
+  .referenceTimelineHeader {
+    align-items: flex-start;
+  }
+
+  .referenceWord {
+    min-width: 54px;
+    padding: 6px 7px;
+  }
+}
