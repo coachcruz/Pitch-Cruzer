@@ -194,6 +194,19 @@ app.innerHTML = `
       </div>
       <div id="keyGuide" class="keyGuide">Load a song to build its key guide.</div>
 
+      <div class="referenceTimelinePanel">
+        <div class="referenceTimelineHeader">
+          <div>
+            <span class="coachLabel">LYRICS + PITCH</span>
+            <strong>Sing with the reference</strong>
+          </div>
+          <span id="transcriptStatus" class="tinyLabel">WAITING FOR SONG</span>
+        </div>
+        <div id="referenceTimeline" class="referenceTimeline referenceTimelineEmpty">
+          Your transcript, target note, octave, and pitch direction will appear here after the song is prepared.
+        </div>
+      </div>
+
       <div id="sectionChips" class="sectionChips"></div>
 
       <div class="selectedReference">
@@ -372,6 +385,8 @@ const loopCountEl = qs<HTMLSelectElement>('#loopCount');
 const referenceSequenceEl = qs<HTMLElement>('#referenceSequence');
 const songRangeLabelEl = qs<HTMLElement>('#songRangeLabel');
 const keyGuideEl = qs<HTMLElement>('#keyGuide');
+const transcriptStatusEl = qs<HTMLElement>('#transcriptStatus');
+const referenceTimelineEl = qs<HTMLElement>('#referenceTimeline');
 const pitchRangeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-pitch-range-mode]'));
 const backingVocalLevelEl = qs<HTMLInputElement>('#backingVocalLevel');
 const backingVocalLevelValueEl = qs<HTMLElement>('#backingVocalLevelValue');
@@ -457,6 +472,16 @@ type PracticeSegment = {
   label: string;
 };
 
+type ReferenceWord = {
+  text: string;
+  start: number;
+  end: number;
+  midi: number | null;
+  note: string | null;
+  noteSequence: string[];
+  direction: 'up' | 'down' | 'level';
+};
+
 let songSections: SongSection[] = [];
 let selectedSectionIds = new Set<string>();
 let lastSectionIndex: number | null = null;
@@ -480,6 +505,11 @@ let practiceBackingVocalGain: GainNode | null = null;
 let practiceInstrumentalGain: GainNode | null = null;
 let practiceStopTimer: number | null = null;
 let practiceSegments: PracticeSegment[] = [];
+let referenceWords: ReferenceWord[] = [];
+let activeReferenceNote: string | null = null;
+let referenceTimelineFrame: number | null = null;
+let practicePlaybackStartedAt = 0;
+let whisperTranscriber: any = null;
 let takeMicStream: MediaStream | null = null;
 let takeRecorder: MediaRecorder | null = null;
 let takeChunks: Blob[] = [];
