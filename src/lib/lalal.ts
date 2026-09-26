@@ -1,4 +1,5 @@
 /** Browser-side client for the Netlify functions that talk to LALAL.AI. */
+import { diag } from './diag';
 // Netlify base64-encodes binary request bodies (+33%), so ~4.5 MB is the real limit per request.
 const CHUNK_BYTES = 3 * 1024 * 1024;
 
@@ -6,14 +7,23 @@ export class LalalError extends Error {
   constructor(message: string, public code?: string) { super(message); }
 }
 
-async function requestJson<T>(url: string, init: RequestInit): Promise<T> {
+async function requestJson<T>(url: string, init: RequestInit, timeoutSeconds = 90): Promise<T> {
   let response: Response;
+  const name = url.split('?')[0];
+  const began = performance.now();
+  const took = () => ((performance.now() - began) / 1000).toFixed(1) + 's';
   try {
-    response = await fetch(url, init);
-  } catch {
-    throw new LalalError('Could not reach the Pitch Cruzer server. Check your connection.');
+    // Never wait forever: a hung request would freeze the progress screen.
+    response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutSeconds * 1000) });
+  } catch (error) {
+    const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
+    diag(name + ' → ' + (timedOut ? 'no answer after ' + timeoutSeconds + 's' : 'network error'), 'error');
+    throw new LalalError(timedOut
+      ? 'The server didn’t answer within ' + timeoutSeconds + ' seconds (' + name + '). Try again — if it keeps happening, the song file may be too large.'
+      : 'Could not reach the Pitch Cruzer server. Check your connection.');
   }
   const text = await response.text();
+  diag(name + ' → HTTP ' + response.status + ' in ' + took() + (response.ok ? '' : ' · ' + text.slice(0, 160)), response.ok ? 'ok' : 'error');
   let data: any = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text.slice(0, 200) }; }
   if (!response.ok) {
@@ -40,11 +50,12 @@ export async function uploadFile(file: Blob, filename: string, onProgress: (frac
     await requestJson('/api/upload/chunk?upload=' + uploadId + '&index=' + index, { method: 'POST', body });
     onProgress((index + 1) / chunks);
   }
+  diag('All ' + chunks + ' pieces sent (' + (file.size / 1048576).toFixed(1) + ' MB). Handing the file to LALAL.AI…');
   const data = await requestJson<{ id?: string }>('/api/lalal/upload', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ upload_id: uploadId, chunks, filename })
-  });
+  }, 120);
   if (!data.id) throw new LalalError('LALAL did not accept the upload.');
   return data.id;
 }
@@ -80,12 +91,17 @@ export async function waitForSplit(taskId: string, onProgress: (fraction: number
       body: JSON.stringify({ task_id: taskId })
     });
     const item = data.result?.[taskId];
-    if (!item) throw new LalalError('LALAL returned no status for this song.');
+    if (!item) {
+      diag('LALAL check reply had no status for this task: ' + JSON.stringify(data).slice(0, 200), 'warn');
+      throw new LalalError('LALAL returned no status for this song.');
+    }
+    diag('LALAL status: ' + item.status + (typeof item.progress === 'number' ? ' ' + item.progress + '%' : ''), 'info');
     if (item.status === 'success') return item.result?.tracks ?? [];
     if (['error', 'server_error', 'cancelled'].includes(item.status)) {
       const detail = typeof item.error === 'string' ? item.error : item.error?.detail;
       throw new LalalError(detail || 'LALAL could not separate this song.');
     }
+    if (item.status !== 'progress') diag('Unexpected LALAL status “' + item.status + '” — still waiting', 'warn');
     onProgress(Math.min(0.99, (item.progress ?? 0) / 100));
     await new Promise(resolve => window.setTimeout(resolve, 2500));
   }
@@ -95,10 +111,17 @@ export async function waitForSplit(taskId: string, onProgress: (fraction: number
 /** Stems download straight from LALAL's CDN when allowed, otherwise through our proxy. */
 export async function downloadTrack(url: string): Promise<Blob> {
   try {
-    const direct = await fetch(url, { mode: 'cors' });
-    if (direct.ok) return await direct.blob();
-  } catch { /* CORS blocked: fall through to the proxy */ }
-  const proxied = await fetch('/api/lalal/track?url=' + encodeURIComponent(url));
+    const direct = await fetch(url, { mode: 'cors', signal: AbortSignal.timeout(120_000) });
+    if (direct.ok) {
+      const blob = await direct.blob();
+      diag('Downloaded track directly (' + (blob.size / 1048576).toFixed(1) + ' MB)', 'ok');
+      return blob;
+    }
+    diag('Direct track download → HTTP ' + direct.status + ', trying the proxy', 'warn');
+  } catch { diag('Direct track download blocked, using the proxy', 'info'); }
+  const proxied = await fetch('/api/lalal/track?url=' + encodeURIComponent(url), { signal: AbortSignal.timeout(120_000) })
+    .catch(() => { throw new LalalError('Downloading a separated track timed out.'); });
+  diag('/api/lalal/track → HTTP ' + proxied.status, proxied.ok ? 'ok' : 'error');
   if (!proxied.ok) throw new LalalError('Could not download a separated track.');
   return proxied.blob();
 }

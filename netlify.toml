@@ -4,3 +4,11 @@
 
 [functions]
   directory = "netlify/functions"
+
+# Cross-origin isolation lets the in-browser lyrics model (ONNX Runtime) use several CPU threads
+# instead of one. "credentialless" keeps cross-origin downloads (models, LALAL stems) working.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "credentialless"

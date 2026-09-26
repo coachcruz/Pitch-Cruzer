@@ -1,11 +1,12 @@
-import { applyTypedLyrics, breathMarks, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
+import { applyTypedLyrics, breathMarks, buildLines, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
 import { decodeAudio, downloadBlob, encodeWav } from '../lib/audio';
 import { getSong, listTakes, saveSong, saveTake, deleteTake, type StoredSong, type StoredTake } from '../lib/library';
 import { LiveMic } from '../lib/mic';
-import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation } from '../lib/music';
+import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { Player, Timeline, type Range } from '../lib/player';
-import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, transcribeLyrics, type SongBuffers } from '../lib/prepare';
+import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
+import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 import { PitchLane, type TrailPoint } from '../ui/lane';
@@ -42,6 +43,16 @@ export function renderPractice(root: HTMLElement, songId: string, navigate: (has
     if (!buffers) {
       buffers = await decodeStems(song);
       session.buffers = buffers;
+    }
+    if (disposed) return;
+    if ((song.analysis.notesVersion ?? 1) < NOTES_VERSION) {
+      // Prepared with older note detection: re-check notes from the saved vocal (no LALAL minutes).
+      root.innerHTML = '<div class="card loading">Updating this song’s notes with improved octave detection…</div>';
+      const notesOnly = !song.analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
+      await recheckNotes(buffers.lead, song.analysis);
+      if (notesOnly) song.analysis.lines = buildLines([], song.analysis.notes);
+      if (session.saved) await saveSong(song).catch(() => undefined);
+      toast('Notes re-checked with improved octave detection.');
     }
     if (disposed) return;
     cleanup = mount(root, song, buffers, navigate);
@@ -81,7 +92,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <h1 id="songTitle">${escapeHtml(song.title)}</h1>
         <p class="meta">${[
           analysis.key ? 'Key ' + keyName(analysis.key) : null,
-          range ? 'Vocal range ' + midiToNote(range[0]) + '–' + midiToNote(range[1]) : null,
+          range ? 'Vocal range ' + midiToNote(range[0]) + '–' + midiToNote(range[1]) + ' (fits ' + voiceTypeNames(voiceTypesFor(range[0], range[1])) + ')' : null,
           formatTime(analysis.duration),
           analysis.separated ? null : 'Full mix (singer not separated)'
         ].filter(Boolean).map(value => escapeHtml(String(value))).join(' · ')}</p>
@@ -102,13 +113,16 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <button class="chip" data-quick="none">Clear</button>
           <button class="chip ghost" id="editSections" aria-pressed="false">Rename sections</button>
           <label class="inline">Repeat <select id="repeats"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
+          <label class="inline" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet">Style <select id="practiceStyle"><option value="along">Sing along</option><option value="echo">Echo — listen, then sing it back</option></select></label>
+          <label class="inline hidden" id="echoModelWrap" title="Copying your own voice is easier than copying someone else's">Guide <select id="echoModel"><option value="artist">Artist sings first</option><option value="me">My best take sings first</option></select></label>
           <span id="selectionLabel" class="selectionLabel"></span>
         </div>
       </div>
 
       <div class="stageRow">
         <div class="laneWrap"><canvas id="lane" aria-label="Lyrics scroll across the top; the artist’s notes are bars below, shaded by octave; your voice is the blue line"></canvas>
-          <div id="countdown" class="countdown hidden"></div></div>
+          <div id="countdown" class="countdown hidden"></div>
+          <div id="lineFlash" class="lineFlash" aria-live="polite"></div></div>
         <aside class="upNext" aria-label="Up next">
           <h3>Up next</h3>
           <ol id="upNext"></ol>
@@ -157,6 +171,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <label class="check"><input id="forgiveOctave" type="checkbox"> Forgive octave <small>(score the right note in any octave — your line still shows your real octave)</small></label>
           <label class="check"><input id="speakers" type="checkbox"> I’m on speakers, not headphones <small>(reduces echo)</small></label>
           <label class="check"><input id="countIn" type="checkbox"> Count me in before recording</label>
+          <label class="check"><input id="simpleView" type="checkbox"> Simple view <small>(just the notes, the words and your voice — less to read while singing)</small></label>
+          <label class="check"><input id="showVoices" type="checkbox"> Show voice types <small>(bass, baritone, tenor… beside the octaves)</small></label>
         </div>
       </div>
     </section>
@@ -187,7 +203,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <h2>Redo the lyrics</h2>
         <p class="hint">Listens to the singer again, phrase by phrase. For bilingual songs pick both languages — each line gets its own language.</p>
         <label class="inline">Language <select id="redoLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
-        <label class="inline">Accuracy <select id="redoQuality"><option value="best">Best (≈250 MB download, first time only)</option><option value="fast">Faster (≈80 MB)</option></select></label>
+        <label class="inline">Accuracy <select id="redoQuality"><option value="fast">Faster (≈80 MB, recommended)</option><option value="best">Best (≈250 MB, several times slower)</option></select></label>
         <p id="redoStatus" class="hint small"></p>
         <div class="row end"><button class="btn ghost" value="cancel" id="redoCancel">Cancel</button><button id="redoStart" class="btn primary" type="button">Redo lyrics</button></div>
       </form>
@@ -224,6 +240,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   let review: Review | null = null;
   let reviewPlaying = false;
   let frame = 0;
+  const liveVib = new LiveVibrato();
   let disposed = false;
 
   const levels = {
@@ -261,6 +278,21 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
 
   const inSelection = (time: number) => selectedRanges().some(r => time >= r.start && time < r.end);
 
+  // Echo practice: each line is played by the artist, then repeated silently for the singer to sing back.
+  const styleEl = el<HTMLSelectElement>(root, '#practiceStyle');
+  styleEl.value = prefs.get('practiceStyle', 'along');
+  const echoMode = () => styleEl.value === 'echo';
+  const playbackRanges = (): Range[] => {
+    const ranges = selectedRanges();
+    if (!echoMode()) return ranges;
+    const lines = analysis.lines.filter(line => ranges.some(range => line.start >= range.start - 0.05 && line.start < range.end));
+    if (!lines.length) return ranges;
+    return lines.flatMap(line => {
+      const piece = { start: Math.max(0, line.start - 0.4), end: Math.min(analysis.duration, line.end + 0.3) };
+      return [piece, { ...piece, turn: true }];
+    });
+  };
+
   const renderSections = () => {
     const map = el(root, '#songMap');
     map.innerHTML = analysis.sections.map(section => {
@@ -293,7 +325,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const names = custom ? custom.label
       : selected.size ? analysis.sections.filter(s => selected.has(s.id)).map(s => s.label).join(' + ')
       : 'Whole song';
-    el(root, '#selectionLabel').innerHTML = `Practicing: <b>${escapeHtml(names)}</b> · ${formatTime(total)}${repeats() > 1 ? ' × ' + (repeats() === 99 ? '∞' : repeats()) : ''}`;
+    el(root, '#selectionLabel').innerHTML = `Practicing: <b>${escapeHtml(names)}</b> · ${formatTime(total)}${repeats() > 1 ? ' × ' + (repeats() === 99 ? '∞' : repeats()) : ''}${styleEl.value === 'echo' ? ' · <b>Echo</b>' : ''}`;
   };
 
   const selectionChanged = () => {
@@ -319,6 +351,21 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     editingSections = !editingSections;
     (event.currentTarget as HTMLElement).setAttribute('aria-pressed', String(editingSections));
     renderSections();
+  });
+  const echoModelEl = el<HTMLSelectElement>(root, '#echoModel');
+  echoModelEl.value = prefs.get('echoModel', 'artist');
+  const syncEchoModel = () => el(root, '#echoModelWrap').classList.toggle('hidden', !echoMode());
+  syncEchoModel();
+  echoModelEl.addEventListener('change', () => {
+    prefs.set('echoModel', echoModelEl.value);
+    if (player.state !== 'stopped' && !recording) stopAll();
+    if (echoModelEl.value === 'me') toast('Echo will use your best saved take for each line it covers (the artist fills in the rest).');
+  });
+  styleEl.addEventListener('change', () => {
+    syncEchoModel();
+    prefs.set('practiceStyle', styleEl.value);
+    if (styleEl.value === 'echo') toast('Echo practice: listen to each line, then sing it back in the quiet. Only your turns are scored.');
+    selectionChanged();
   });
   repeatsEl.value = String(prefs.get('repeats', 1));
   repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); renderSections(); });
@@ -367,7 +414,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         selected = new Set(section ? [section.id] : []);
         selectionChanged();
       }
-      const from = new Timeline(selectedRanges(), repeats()).timelineFor(Math.max(0, line.start - 0.6)) ?? 0;
+      const from = new Timeline(playbackRanges(), repeats()).timelineFor(Math.max(0, line.start - 0.6)) ?? 0;
       void startPlayback(false, from);
     }));
   };
@@ -403,7 +450,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     redoLang.value = current
       ? (LANGUAGE_CHOICES.find(choice => choice.value === current.languages.join(','))?.value ?? 'auto')
       : prefs.get('lyricsLang', 'auto');
-    redoQuality.value = current?.quality ?? prefs.get('lyricsQuality', 'best');
+    redoQuality.value = current?.quality ?? prefs.get('lyricsQuality2', 'fast');
     redoStatus.textContent = '';
     redoDialog.showModal();
   });
@@ -415,7 +462,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     el<HTMLButtonElement>(root, '#redoCancel').disabled = true;
     if (player.state !== 'stopped') stopAll();
     prefs.set('lyricsLang', redoLang.value);
-    prefs.set('lyricsQuality', redoQuality.value);
+    prefs.set('lyricsQuality2', redoQuality.value);
     try {
       const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
@@ -505,6 +552,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     lane.forgiveOctave = forgiveOctave.checked;
     rescore();
   });
+  const simpleView = el<HTMLInputElement>(root, '#simpleView');
+  simpleView.checked = prefs.get('simpleView', false);
+  lane.simple = simpleView.checked;
+  simpleView.addEventListener('change', () => { prefs.set('simpleView', simpleView.checked); lane.simple = simpleView.checked; });
+  const showVoices = el<HTMLInputElement>(root, '#showVoices');
+  showVoices.checked = prefs.get('showVoices', window.innerWidth >= 700);
+  lane.showVoiceTypes = showVoices.checked;
+  showVoices.addEventListener('change', () => { prefs.set('showVoices', showVoices.checked); lane.showVoiceTypes = showVoices.checked; });
   const mixToggle = el<HTMLButtonElement>(root, '#mixToggle');
   mixToggle.addEventListener('click', () => {
     const open = el(root, '#mixPanel').classList.toggle('hidden') === false;
@@ -579,6 +634,30 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     tick();
   };
 
+  // Your best saved take, decoded once, used as the Echo guide ("My best take sings first").
+  let modelCache: { id: string; buffer: AudioBuffer; locate: (sourceTime: number) => number | null } | null = null;
+  const echoModelVoice = async () => {
+    if (!echoMode() || echoModelEl.value !== 'me') return undefined;
+    const takes = session.saved ? await listTakes(song.id).catch(() => [] as StoredTake[]) : [];
+    const singer = prefs.get('singer', '');
+    const take = takes.find(item => item.singer === singer) ?? takes[0];
+    if (!take) { toast('Save a take first — then Echo can use your own voice as the guide. Using the artist for now.'); return undefined; }
+    if (modelCache?.id !== take.id) {
+      const buffer = await decodeAudio(await take.voice.arrayBuffer());
+      const timeline = new Timeline(take.segments, 1);
+      const pieces = timeline.hasTurns ? timeline.pieces.filter(piece => piece.turn) : timeline.pieces;
+      modelCache = {
+        id: take.id,
+        buffer,
+        locate: sourceTime => {
+          const piece = pieces.find(item => sourceTime >= item.sourceStart - 0.05 && sourceTime < item.sourceStart + item.duration);
+          return piece ? piece.timelineStart + Math.max(0, sourceTime - piece.sourceStart) - take.offsetSeconds : null;
+        }
+      };
+    }
+    return modelCache;
+  };
+
   const startPlayback = async (withRecording: boolean, from = 0, voice?: { buffer: AudioBuffer; offset: number }) => {
     reviewPlaying = Boolean(voice);
     if (!voice) lane.trail = liveTrail;
@@ -586,11 +665,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     lastSource = -1;
     const useCountIn = withRecording && countIn.checked;
     const leadIn = useCountIn ? 1.9 : 0.12;
-    const ranges = voice && review ? review.ranges : selectedRanges();
+    const ranges = voice && review ? review.ranges : playbackRanges();
     const reps = voice && review ? review.repeats : repeats();
-    player.setLevel('voice', voice ? levels.voice / 100 : 0);
+    const model = voice ? undefined : await echoModelVoice();
+    player.setLevel('voice', voice || model ? levels.voice / 100 : 0);
     if (withRecording) mic.startRecording();
-    const origin = await player.play(ranges, reps, { from, leadIn, voice });
+    const origin = await player.play(ranges, reps, { from, leadIn, voice, model });
     if (useCountIn) {
       [1.8, 1.2, 0.6].forEach((before, index) => beep(origin - before, index === 0));
       showCountdown(origin);
@@ -644,7 +724,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const offset = result.startTime - recordingOrigin - latency;
     const voice = player.ctx.createBuffer(1, result.samples.length, result.sampleRate);
     voice.copyToChannel(result.samples, 0);
-    const ranges = selectedRanges();
+    const ranges = playbackRanges();
     const reps = repeats();
     await buildReview(voice, offset, ranges, reps, labelForSelection());
     reviewEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -691,8 +771,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <div><span>On the note</span><b>${s.onPitchWhenSinging}%</b></div>
           <div><span>Sang along</span><b>${s.coverage}%</b></div>
           <div><span>Average</span><b>${cents}</b></div>
+          <div title="How evenly you hold each note (separate from hitting it)"><span>Steadiness</span><b>${s.steadiness === null ? '—' : s.steadiness + '%'}</b></div>
         </div>
       </div>
+      <p id="progressNote" class="progressNote hidden"></p>
+      ${s.vibrato.verdict ? `<p class="vibratoNote">〰 ${escapeHtml(s.vibrato.verdict)}</p>` : ''}
+      ${bestLineHtml(s)}
       <p class="tip">💡 ${escapeHtml(coachingTip(s))}</p>
       <div class="row wrap">
         <button id="reviewPlay" class="btn primary">▶ Listen to my take</button>
@@ -706,6 +790,22 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <button id="downloadVoice" class="btn ghost">Download my voice only</button>
       </div>
       <p class="hint small">Lines in the lyrics list are now colored by how close you were. Tap one to hear the original again.</p>`;
+    void renderProgress();
+    reviewEl.querySelector('#playBest')?.addEventListener('click', async () => {
+      if (!review) return;
+      const best = bestLine(review.score);
+      if (!best) return;
+      const timeline = review.timeline;
+      const piece = timeline.pieces.find(item => (!timeline.hasTurns || item.turn) && best.line.start >= item.sourceStart - 0.5 && best.line.start < item.sourceStart + item.duration);
+      if (!piece) return;
+      const from = piece.timelineStart + Math.max(0, best.line.start - 0.3 - piece.sourceStart);
+      lane.trail = review.score.trail;
+      await startPlayback(false, from, { buffer: review.voice, offset: review.offset });
+      lane.trail = review.score.trail;
+      renderReviewButtons();
+      const stopAt = (best.line.end - best.line.start + 1.2) * 1000;
+      window.setTimeout(() => { if (reviewPlaying) stopAll(); }, stopAt);
+    });
     el(reviewEl, '#reviewClose').addEventListener('click', () => {
       if (reviewPlaying) stopAll();
       review = null;
@@ -775,6 +875,28 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     });
   };
 
+  /** Compare this take with your earlier ones on the same part — seeing progress builds confidence. */
+  const renderProgress = async () => {
+    if (!review || !session.saved) return;
+    const current = review;
+    const singer = current.singer ?? prefs.get('singer', '');
+    const earlier = (await listTakes(song.id).catch(() => [] as StoredTake[]))
+      .filter(take => take.id !== current.savedId && take.label === current.label && (!singer || take.singer === singer))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const note = root.querySelector<HTMLElement>('#progressNote');
+    if (!note || review !== current) return;
+    const score = current.score.score;
+    if (!earlier.length) { note.textContent = '🌱 Your first saved take on this part — save it to track your progress.'; }
+    else {
+      const last = earlier[0].score;
+      const best = Math.max(...earlier.map(take => take.score));
+      note.textContent = score > last ? '📈 Up ' + (score - last) + ' points from your last take (' + last + ')' + (score > best ? ' — a new personal best!' : '.')
+        : score === last ? '➡️ Same as your last take — nice and consistent.'
+        : '💪 Your best here is ' + best + '. You’ve done it before — you can do it again.';
+    }
+    note.classList.remove('hidden');
+  };
+
   // ---------------------------------------------------------------- takes / leaderboard
   const renderTakes = async () => {
     const list = el(root, '#takesList');
@@ -810,7 +932,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   const progressFill = el(root, '#progressFill');
   const clock = el(root, '#clock');
   const updateClock = () => {
-    const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(selectedRanges(), repeats() === 99 ? 1 : repeats()).duration;
+    const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(playbackRanges(), repeats() === 99 ? 1 : repeats()).duration;
     const t = Math.max(0, Math.min(total, player.timelineTime()));
     clock.textContent = formatTime(t) + ' / ' + formatTime(total);
     progressFill.style.width = (total ? (100 * t) / total : 0).toFixed(2) + '%';
@@ -819,7 +941,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     if (recording) return;
     const rect = progress.getBoundingClientRect();
     const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(selectedRanges(), repeats()).duration;
+    const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(playbackRanges(), repeats()).duration;
     if (reviewPlaying && review) void startPlayback(false, fraction * total, { buffer: review.voice, offset: review.offset });
     else void startPlayback(false, fraction * total);
   });
@@ -889,7 +1011,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       return;
     }
     coachYou.textContent = midiToNote(sung);
-    coachYouOct.textContent = 'octave ' + octaveOf(sung);
+    const vibText = vibratoLabel(liveVib.reading());
+    coachYouOct.textContent = 'octave ' + octaveOf(sung) + (vibText ? ' · ' + vibText.replace('〰 vibrato ', '〰 ') : '');
     if (!target) { coachYou.className = ''; coachHint.textContent = inBreath ? '🌬 Breathe now' : 'You’re singing ' + midiToNote(sung) + '.'; return; }
     const error = lane.errorAt(sung, target);
     const cents = Math.round(error * 100);
@@ -917,12 +1040,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     let sung: number | null = null;
     if (mic.active) {
       const reading = mic.read();
-      sung = reading.midi;
-      lane.liveMidi = sung;
+      liveVib.push(performance.now() / 1000, reading.midi);
+      // Coach + encouragement judge the center of any vibrato; the lane still draws the real wave.
+      sung = reading.midi === null ? null : liveVib.center();
+      lane.liveMidi = reading.midi;
       if (playing && source !== null && !reviewPlaying) {
         if (source < lastSource - 0.3) liveTrail.length = 0;
         lastSource = source;
-        if (sung !== null) liveTrail.push({ t: source, midi: sung });
+        if (reading.midi !== null) liveTrail.push({ t: source, midi: reading.midi });
         if (liveTrail.length > 2000) liveTrail.splice(0, liveTrail.length - 1500);
       }
     }
@@ -930,8 +1055,95 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     lane.draw(now);
     updateUpNext(now);
     updateCoach(player.state !== 'stopped' || mic.active ? now : null, sung);
+    if (player.state !== 'stopped' && player.timeline.hasTurns && !reviewPlaying) {
+      const piece = player.timeline.pieceAt(player.timelineTime());
+      if (piece?.turn) coachHint.textContent = '🎤 Your turn — sing it back!' + (sung !== null ? ' · ' + coachHint.textContent : '');
+      else if (piece) coachHint.textContent = '👂 Listen to the line…';
+    }
+    trackLine(playing && !reviewPlaying ? source : null, sung);
     updateClock();
   };
+
+  // Encouragement after each line you sing (never negative): research links confidence to both
+  // lower performance anxiety and better singing.
+  const lineFlash = el(root, '#lineFlash');
+  let lineStats: { id: string; frames: number; voiced: number; hits: number } | null = null;
+  let flashTimer: number | null = null;
+  const flash = (text: string, detail: string) => {
+    lineFlash.innerHTML = `<strong>${text}</strong><span>${detail}</span>`;
+    lineFlash.classList.remove('show');
+    void lineFlash.offsetWidth;
+    lineFlash.classList.add('show');
+    if (flashTimer !== null) window.clearTimeout(flashTimer);
+    flashTimer = window.setTimeout(() => lineFlash.classList.remove('show'), 1600);
+  };
+  const finishLine = () => {
+    if (!lineStats) return;
+    const { frames, voiced, hits } = lineStats;
+    lineStats = null;
+    if (frames < 12 || voiced / frames < 0.3) return;
+    const pct = Math.round((100 * hits) / frames);
+    const [text] = pct >= 80 ? ['🌟 Perfect!'] : pct >= 60 ? ['Great!'] : pct >= 40 ? ['Nice!'] : ['💪 Keep going'];
+    flash(text, pct >= 40 ? pct + '% on the note' : 'you’re getting it');
+  };
+  const trackLine = (source: number | null, sung: number | null) => {
+    if (source === null || !mic.active) { if (player.state === 'stopped') finishLine(); return; }
+    if (player.timeline.hasTurns && !player.timeline.pieceAt(player.timelineTime())?.turn) { finishLine(); return; }
+    const line = analysis.lines.find(item => source >= item.start - 0.2 && source <= item.end + 0.2);
+    if (!line) { finishLine(); return; }
+    if (lineStats && lineStats.id !== line.id) finishLine();
+    lineStats ??= { id: line.id, frames: 0, voiced: 0, hits: 0 };
+    const target = lane.targetAt(source);
+    if (!target) return;
+    lineStats.frames += 1;
+    if (sung === null) return;
+    lineStats.voiced += 1;
+    if (Math.abs(lane.errorAt(sung, target)) <= 0.5) lineStats.hits += 1;
+  };
+
+  // Tap a note bar to hear its exact pitch — handy for checking a note (and its octave) by ear.
+  const laneCanvas = el<HTMLCanvasElement>(root, '#lane');
+  laneCanvas.addEventListener('click', event => {
+    const rect = laneCanvas.getBoundingClientRect();
+    const note = lane.noteAtPoint(event.clientX - rect.left, event.clientY - rect.top);
+    if (!note) return;
+    const midi = Math.round(note.midi);
+    const ctx = player.ctx;
+    // People match a human voice far better than a synthetic tone, so play the singer's own note
+    // (from the separated vocal). Shift+tap, or a song without separation, plays a pure tone.
+    const useVoice = analysis.separated && !(event as MouseEvent).shiftKey;
+    void ctx.resume().then(() => {
+      const at = ctx.currentTime + 0.02;
+      const out = ctx.createGain();
+      out.connect(ctx.destination);
+      if (useVoice) {
+        const length = Math.min(2.5, note.end - note.start + 0.12);
+        out.gain.setValueAtTime(0.0001, at);
+        out.gain.exponentialRampToValueAtTime(1, at + 0.03);
+        out.gain.setValueAtTime(1, at + Math.max(0.03, length - 0.08));
+        out.gain.exponentialRampToValueAtTime(0.0001, at + length);
+        const sourceNode = ctx.createBufferSource();
+        sourceNode.buffer = buffers.lead;
+        sourceNode.connect(out);
+        sourceNode.start(at, Math.max(0, note.start - 0.03), length);
+        return;
+      }
+      out.gain.setValueAtTime(0.0001, at);
+      out.gain.exponentialRampToValueAtTime(0.35, at + 0.03);
+      out.gain.exponentialRampToValueAtTime(0.0001, at + 1.1);
+      [1, 2, 3].forEach((harmonic, index) => {
+        const osc = ctx.createOscillator();
+        const level = ctx.createGain();
+        osc.frequency.value = midiToFrequency(midi) * harmonic;
+        level.gain.value = [1, 0.35, 0.15][index];
+        osc.connect(level).connect(out);
+        osc.start(at);
+        osc.stop(at + 1.15);
+      });
+    });
+    toast('♪ ' + midiToNote(midi) + ' · ' + midiToFrequency(midi).toFixed(0) + ' Hz · octave ' + octaveOf(midi) + (useVoice ? ' — the singer’s own note' : ''));
+  });
+  laneCanvas.title = 'Tap a note bar to hear the singer sing it (Shift+tap for a pure tone)';
 
   const onResize = () => lane.resize();
   window.addEventListener('resize', onResize);
@@ -960,6 +1172,19 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     player.close();
     void navigate;
   };
+}
+
+/** The line you sang best (self-modelling: replaying yourself at your best builds confidence). */
+function bestLine(score: TakeScore) {
+  const candidates = score.lines.filter(item => item.frames >= 10 && item.line.words.some(word => word.text !== '♪'));
+  return candidates.sort((a, b) => b.percent - a.percent)[0] ?? null;
+}
+
+function bestLineHtml(score: TakeScore): string {
+  const best = bestLine(score);
+  if (!best || best.percent < 35) return '';
+  const text = best.line.words.map(word => word.text).join(' ');
+  return `<p class="bestLine">⭐ Your best line: <b>“${escapeHtml(text)}”</b> — ${best.percent}% <button id="playBest" class="chip">▶ Hear yourself</button></p>`;
 }
 
 function safeName(value: string): string {

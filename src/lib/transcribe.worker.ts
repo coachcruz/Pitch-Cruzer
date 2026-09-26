@@ -2,12 +2,16 @@
 /**
  * Transcribes the isolated lead vocal with word-level timestamps using Whisper (transformers.js).
  *
- * The vocal is sent as short clips (one or a few sung phrases each), and the language is detected
- * separately for every clip. transformers.js does not detect language itself — without an explicit
- * language it silently forces English — so bilingual songs lost their non-English lines. Here we ask
- * the model which language token is most likely for each clip, limited to the languages the singer chose.
+ * Speed matters: Whisper always processes 30-second windows, so the vocal is sent as windows of up
+ * to ~25 s of sung phrases (a 5-second phrase would cost as much as 30 seconds).
+ *
+ * Languages: transformers.js does not detect language itself — without an explicit language it
+ * silently forces English, which dropped the non-English lines of bilingual songs. When more than one
+ * language is allowed we score the model's language tokens for each window. If a window sounds like a
+ * mix (the top two languages are close), its phrases are transcribed one by one, each in its own
+ * language. Words are streamed back after every window so partial lyrics survive a timeout.
  */
-export interface TranscribeClip { audio: Float32Array; offset: number }
+export interface TranscribeClip { audio: Float32Array; offset: number; phrases: Array<{ start: number; end: number }> }
 export interface TranscribeJob { clips: TranscribeClip[]; languages: string[]; quality: 'fast' | 'best' }
 export interface TimedWord { text: string; start: number; end: number; lang?: string }
 
@@ -15,6 +19,9 @@ const MODELS: Record<TranscribeJob['quality'], string[]> = {
   best: ['Xenova/whisper-small', 'Xenova/whisper-base', 'Xenova/whisper-tiny'],
   fast: ['Xenova/whisper-base', 'Xenova/whisper-tiny']
 };
+const RATE = 16000;
+/** Logit gap below which a window is treated as a language mix and split into phrases. */
+const MIXED_GAP = 2.5;
 
 let transformers: typeof import('@huggingface/transformers') | null = null;
 let transcriber: any = null;
@@ -27,6 +34,7 @@ async function loadModel(quality: TranscribeJob['quality']): Promise<any> {
     try {
       const files = new Map<string, number>();
       transcriber = await transformers.pipeline('automatic-speech-recognition', model, {
+        dtype: 'q8',
         progress_callback: (info: any) => {
           if (info?.status !== 'progress' || typeof info.progress !== 'number') return;
           files.set(String(info.file), info.progress);
@@ -34,6 +42,7 @@ async function loadModel(quality: TranscribeJob['quality']): Promise<any> {
           self.postMessage({ stage: 'download', progress: values.reduce((a, b) => a + b, 0) / (values.length * 100), model });
         }
       });
+      self.postMessage({ stage: 'model', model, threads: (self as any).crossOriginIsolated ? 'multi' : 'single' });
       return transcriber;
     } catch (error) {
       lastError = error;
@@ -42,15 +51,13 @@ async function loadModel(quality: TranscribeJob['quality']): Promise<any> {
   throw lastError ?? new Error('Could not load a transcription model.');
 }
 
-/** Scores each allowed language token after <|startoftranscript|> and returns the likeliest code. */
-async function detectLanguage(audio: Float32Array, allowed: string[]): Promise<string> {
+/** Scores the allowed language tokens after <|startoftranscript|>; returns them best first. */
+async function languageScores(audio: Float32Array, allowed: string[]): Promise<Array<[string, number]>> {
   const model = transcriber.model;
   const config = model.generation_config;
   const langToId: Record<string, number> = config.lang_to_id ?? {};
-  const candidates = (allowed.length ? allowed : Object.keys(langToId).map(token => token.slice(2, -2)))
-    .filter(code => langToId['<|' + code + '|>'] !== undefined);
-  if (candidates.length <= 1) return candidates[0] ?? 'en';
-
+  const candidates = allowed.filter(code => langToId['<|' + code + '|>'] !== undefined);
+  if (candidates.length <= 1) return candidates.map(code => [code, 0]);
   const inputs = await transcriber.processor(audio);
   const start = config.decoder_start_token_id ?? langToId['<|en|>'] - 1;
   const decoderInput = new transformers!.Tensor('int64', BigInt64Array.from([BigInt(start)]), [1, 1]);
@@ -58,13 +65,29 @@ async function detectLanguage(audio: Float32Array, allowed: string[]): Promise<s
   const logits = output.logits;
   const vocab = logits.dims[logits.dims.length - 1];
   const offset = (logits.dims[1] - 1) * vocab;
-  let best = candidates[0];
-  let bestScore = -Infinity;
-  for (const code of candidates) {
-    const score = Number(logits.data[offset + langToId['<|' + code + '|>']]);
-    if (score > bestScore) { bestScore = score; best = code; }
+  return candidates
+    .map(code => [code, Number(logits.data[offset + langToId['<|' + code + '|>']])] as [string, number])
+    .sort((a, b) => b[1] - a[1]);
+}
+
+async function transcribePiece(audio: Float32Array, offset: number, lang: string, multilingual: boolean): Promise<TimedWord[]> {
+  const output: any = await transcriber(audio, {
+    return_timestamps: 'word',
+    ...(audio.length > RATE * 30 ? { chunk_length_s: 30, stride_length_s: 5 } : {}),
+    ...(multilingual ? { task: 'transcribe', language: lang } : {})
+  });
+  const words: TimedWord[] = [];
+  for (const chunk of Array.isArray(output?.chunks) ? output.chunks : []) {
+    const text = String(chunk?.text ?? '').replace(/♪/g, '').trim();
+    const start = Number(chunk?.timestamp?.[0]);
+    const endRaw = chunk?.timestamp?.[1];
+    const end = endRaw == null ? start + 0.4 : Number(endRaw);
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end)) continue;
+    // Whisper hallucinates stock phrases / sound tags on music and silence; drop the obvious ones.
+    if (/^[\[(]|^(thank you|thanks for watching|subtitles by)/i.test(text)) continue;
+    words.push({ text, start: offset + start, end: offset + Math.max(end, start + 0.08), lang });
   }
-  return best;
+  return words;
 }
 
 self.onmessage = async (event: MessageEvent<TranscribeJob>) => {
@@ -72,28 +95,31 @@ self.onmessage = async (event: MessageEvent<TranscribeJob>) => {
   try {
     const asr = await loadModel(quality);
     const multilingual = Boolean(asr.model.generation_config?.lang_to_id);
-    const words: TimedWord[] = [];
+    const allowed = multilingual ? languages : ['en'];
     for (let index = 0; index < clips.length; index += 1) {
       const clip = clips[index];
-      const lang = multilingual ? await detectLanguage(clip.audio, languages) : 'en';
-      const output: any = await asr(clip.audio, {
-        return_timestamps: 'word',
-        ...(clip.audio.length > 16000 * 30 ? { chunk_length_s: 30, stride_length_s: 5 } : {}),
-        ...(multilingual ? { task: 'transcribe', language: lang } : {})
-      });
-      for (const chunk of Array.isArray(output?.chunks) ? output.chunks : []) {
-        const text = String(chunk?.text ?? '').trim();
-        const start = Number(chunk?.timestamp?.[0]);
-        const endRaw = chunk?.timestamp?.[1];
-        const end = endRaw == null ? start + 0.4 : Number(endRaw);
-        if (!text || !Number.isFinite(start) || !Number.isFinite(end)) continue;
-        // Whisper hallucinates stock phrases on silence/instrumental; drop the obvious ones.
-        if (/^[\[(♪]|^(thank you|thanks for watching|subtitles by)/i.test(text)) continue;
-        words.push({ text, start: clip.offset + start, end: clip.offset + Math.max(end, start + 0.08), lang });
+      const scores = multilingual && allowed.length > 1 ? await languageScores(clip.audio, allowed) : [[allowed[0] ?? 'en', 0] as [string, number]];
+      const mixed = scores.length > 1 && clip.phrases.length > 1 && scores[0][1] - scores[1][1] < MIXED_GAP;
+      let words: TimedWord[] = [];
+      const langs = new Set<string>();
+      if (mixed) {
+        // Sounds like more than one language: give each phrase its own language.
+        for (const phrase of clip.phrases) {
+          const piece = clip.audio.subarray(Math.floor(phrase.start * RATE), Math.ceil(phrase.end * RATE));
+          if (piece.length < RATE * 0.4) continue;
+          const pieceScores = await languageScores(piece, allowed);
+          const lang = pieceScores[0]?.[0] ?? 'en';
+          langs.add(lang);
+          words = words.concat(await transcribePiece(piece, clip.offset + phrase.start, lang, multilingual));
+        }
+      } else {
+        const lang = scores[0]?.[0] ?? 'en';
+        langs.add(lang);
+        words = await transcribePiece(clip.audio, clip.offset, lang, multilingual);
       }
-      self.postMessage({ stage: 'transcribe', progress: (index + 1) / clips.length, lang });
+      self.postMessage({ stage: 'transcribe', progress: (index + 1) / clips.length, langs: [...langs], mixed, words });
     }
-    self.postMessage({ words });
+    self.postMessage({ done: true });
   } catch (error) {
     self.postMessage({ error: error instanceof Error ? error.message : String(error) });
   }

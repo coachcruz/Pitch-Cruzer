@@ -1,6 +1,8 @@
-import { buildLines, buildSections, keyAndRange, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { buildLines, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
+import { formatTime } from './music';
 import * as lalal from './lalal';
+import { diag } from './diag';
 import type { StoredSong } from './library';
 import type { PitchJobResult } from './pitch.worker';
 import type { TimedWord } from './transcribe.worker';
@@ -63,47 +65,105 @@ export const LANGUAGE_CHOICES: Array<{ value: string; label: string }> = [
 export function lyricsOptionsFrom(language: string, quality: string): LyricsOptions {
   return {
     languages: language === 'auto' || !language ? AUTO_LANGUAGES : language.split(','),
-    quality: quality === 'fast' ? 'fast' : 'best'
+    quality: quality === 'best' ? 'best' : 'fast'
   };
 }
 
-/** Cuts the vocal into clips of one or a few phrases so the language can change line by line. */
-function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number; end: number }> {
-  const clips: Array<{ start: number; end: number }> = [];
+/**
+ * Groups the vocal into windows of up to ~25 s of sung phrases. Whisper processes 30-second windows
+ * whatever the clip length, so bigger windows mean far fewer model passes (much faster). Each window
+ * keeps its phrase boundaries so a bilingual window can still be split phrase by phrase.
+ */
+function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number; end: number; phrases: Array<{ start: number; end: number }> }> {
+  const phrases: Array<{ start: number; end: number }> = [];
   for (const note of notes) {
-    const last = clips[clips.length - 1];
-    if (last && note.start - last.end < 1.2 && note.end - last.start <= 10) last.end = Math.max(last.end, note.end);
-    else clips.push({ start: note.start, end: note.end });
+    const last = phrases[phrases.length - 1];
+    if (last && note.start - last.end < 0.7 && note.end - last.start <= 12) last.end = Math.max(last.end, note.end);
+    else phrases.push({ start: note.start, end: note.end });
   }
-  const padded = clips
-    .filter(clip => clip.end - clip.start >= 0.4)
-    .map(clip => ({ start: Math.max(0, clip.start - 0.3), end: Math.min(duration, clip.end + 0.4) }));
+  const sung = phrases.filter(phrase => phrase.end - phrase.start >= 0.4);
+  const clips: Array<{ start: number; end: number; phrases: Array<{ start: number; end: number }> }> = [];
+  for (const phrase of sung) {
+    const last = clips[clips.length - 1];
+    if (last && phrase.end + 0.4 - last.start <= 25 && phrase.start - last.end < 6) {
+      last.end = phrase.end;
+      last.phrases.push(phrase);
+    } else clips.push({ start: phrase.start, end: phrase.end, phrases: [phrase] });
+  }
+  const padded = clips.map(clip => {
+    const start = Math.max(0, clip.start - 0.3);
+    return {
+      start,
+      end: Math.min(duration, clip.end + 0.4),
+      phrases: clip.phrases.map(phrase => ({ start: Math.max(0, phrase.start - 0.2 - start), end: phrase.end + 0.3 - start }))
+    };
+  });
   if (padded.length) return padded;
   const windows = [];
-  for (let start = 0; start < duration; start += 25) windows.push({ start, end: Math.min(duration, start + 25) });
+  for (let start = 0; start < duration; start += 25) windows.push({ start, end: Math.min(duration, start + 25), phrases: [{ start: 0, end: Math.min(25, duration - start) }] });
   return windows;
 }
 
-function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<TimedWord[]> {
+function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
   return resampleMono(buffer, 16000).then(audio => new Promise((resolve, reject) => {
     const clips = vocalClips(notes, buffer.duration).map(clip => ({
       audio: audio.slice(Math.floor(clip.start * 16000), Math.ceil(clip.end * 16000)),
-      offset: clip.start
+      offset: clip.start,
+      phrases: clip.phrases
     }));
     const worker = new Worker(new URL('./transcribe.worker.ts', import.meta.url), { type: 'module' });
-    const timeout = window.setTimeout(() => { worker.terminate(); reject(new Error('Transcription timed out.')); }, 15 * 60 * 1000);
+    const words: TimedWord[] = [];
     const heard = new Set<string>();
+    let modelNoted = false;
+    let clipsDone = 0;
+    let transcribeStarted = 0;
+    let settled = false;
+    // Generous limit that grows with song length; whatever was transcribed before it is kept.
+    const limitMs = Math.max(15, (buffer.duration / 60) * 8) * 60 * 1000;
+    const finish = (partial: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      worker.terminate();
+      resolve({ words: words.sort((a, b) => a.start - b.start), partial });
+    };
+    const timeout = window.setTimeout(() => {
+      diag('Lyrics: time limit reached after ' + clipsDone + '/' + clips.length + ' windows — keeping what was heard', 'warn');
+      if (words.length) finish(true);
+      else { settled = true; worker.terminate(); reject(new Error('Transcription took too long. Try “Faster” accuracy, or paste the lyrics.')); }
+    }, limitMs);
+    diag('Lyrics: ' + clips.length + ' windows of singing to transcribe (' + options.quality + ' model, languages: ' + options.languages.join('+') + ')');
     worker.onmessage = (event: MessageEvent<any>) => {
       const data = event.data;
-      if (data.words) { window.clearTimeout(timeout); worker.terminate(); resolve(data.words); }
-      else if (data.error) { window.clearTimeout(timeout); worker.terminate(); reject(new Error(data.error)); }
-      else if (data.stage === 'download') onProgress(data.progress * 0.4, 'Downloading the lyrics model (first time only)…');
-      else if (data.stage === 'transcribe') {
-        if (data.lang) heard.add(String(data.lang).toUpperCase());
-        onProgress(0.4 + data.progress * 0.6, 'Listening line by line' + (heard.size ? ' · heard ' + [...heard].join(' + ') : '') + '…');
+      if (data.done) finish(false);
+      else if (data.error) {
+        if (settled) return;
+        diag('Lyrics failed: ' + data.error, 'error');
+        if (words.length) finish(true);
+        else { settled = true; window.clearTimeout(timeout); worker.terminate(); reject(new Error(data.error)); }
+      } else if (data.stage === 'download') {
+        if (!modelNoted) { modelNoted = true; diag('Downloading lyrics model ' + (data.model ?? '') + ' (first time only)'); }
+        onProgress(data.progress * 0.4, 'Downloading the lyrics model (first time only)… ' + Math.round(data.progress * 100) + '%');
+      } else if (data.stage === 'model') {
+        diag('Lyrics model ready: ' + data.model + ' · ' + data.threads + '-threaded');
+        transcribeStarted = performance.now();
+        onProgress(0.4, 'Listening to the singer…');
+      } else if (data.stage === 'transcribe') {
+        (data.langs as string[] | undefined)?.forEach(lang => heard.add(lang.toUpperCase()));
+        words.push(...(data.words ?? []));
+        clipsDone += 1;
+        const elapsed = (performance.now() - (transcribeStarted || performance.now())) / 1000;
+        const left = clipsDone ? (elapsed / clipsDone) * (clips.length - clipsDone) : 0;
+        diag('Lyrics: window ' + clipsDone + '/' + clips.length + ' in ' + elapsed.toFixed(0) + 's total' + (data.mixed ? ' (mixed languages — line by line)' : '') + ' · ' + (data.words?.length ?? 0) + ' words');
+        onProgress(0.4 + data.progress * 0.6, 'Listening · ' + clipsDone + '/' + clips.length + (heard.size ? ' · heard ' + [...heard].join(' + ') : '') + (left > 5 ? ' · about ' + formatTime(left) + ' left' : ''));
       }
     };
-    worker.onerror = event => { window.clearTimeout(timeout); worker.terminate(); reject(new Error(event.message || 'Transcription failed.')); };
+    worker.onerror = event => {
+      if (settled) return;
+      diag('Lyrics worker crashed: ' + (event.message || 'unknown error'), 'error');
+      if (words.length) finish(true);
+      else { settled = true; window.clearTimeout(timeout); worker.terminate(); reject(new Error(event.message || 'Transcription failed.')); }
+    };
     worker.postMessage({ clips, languages: options.languages, quality: options.quality }, clips.map(clip => clip.audio.buffer));
   }));
 }
@@ -117,11 +177,13 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
   const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
   progress('lyrics', 0);
   try {
-    words = await transcribe(lead, analysis.notes, options, (fraction, detail) => progress('lyrics', fraction, detail));
+    const result = await transcribe(lead, analysis.notes, options, (fraction, detail) => progress('lyrics', fraction, detail));
+    words = result.words;
     analysis.transcript = words.length ? 'ok' : 'none';
-    progress('lyrics', 1, words.length ? words.length + ' words' : 'No clear words heard');
+    progress('lyrics', 1, words.length ? words.length + ' words' + (result.partial ? ' (partial — use Redo lyrics or Fix lyrics for the rest)' : '') : 'No clear words heard');
   } catch (error) {
     console.warn('Transcription failed', error);
+    diag('Lyrics failed: ' + (error instanceof Error ? error.message : String(error)), 'error');
     analysis.transcript = 'failed';
     progress('lyrics', 1, 'Lyrics unavailable — you can paste them in later');
   }
@@ -143,9 +205,27 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
   const notes = segmentNotes(track);
   const { key, range } = keyAndRange(notes);
   progress('pitch', 1, notes.length + ' notes found');
-  const analysis: SongAnalysis = { duration: lead.duration, key, range, notes, lines: [], sections: [], transcript: 'none', separated };
+  const analysis: SongAnalysis = { duration: lead.duration, key, range, notes, lines: [], sections: [], transcript: 'none', separated, notesVersion: NOTES_VERSION };
   await transcribeLyrics(lead, analysis, lyrics, progress);
   return analysis;
+}
+
+/**
+ * Re-detects the notes of an already prepared song (after note detection improves), keeping its
+ * lyrics, timing and sections. Runs locally from the saved vocal — no LALAL.AI minutes.
+ */
+export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): Promise<void> {
+  const track = await pitchTrackFor(lead, undefined, analysis.separated);
+  const notes = segmentNotes(track);
+  const { key, range } = keyAndRange(notes);
+  analysis.notes = notes;
+  analysis.key = key;
+  analysis.range = range;
+  analysis.lines = analysis.lines.map(line => ({
+    ...line,
+    words: line.words.map(word => word.text === '♪' ? word : buildWord(word.text, word.start, word.end, notes, word.lang))
+  }));
+  analysis.notesVersion = NOTES_VERSION;
 }
 
 export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal): Promise<PreparedSong> {
