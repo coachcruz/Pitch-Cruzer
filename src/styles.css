@@ -3257,36 +3257,44 @@ footer {
 
 .mode-phrase .phraseUnit {
   position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px 8px;
-  align-items: center;
+  display: block;
   padding: 8px 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   background: transparent;
+  isolation: isolate;
 }
 
 .mode-phrase .phraseUnitTarget {
+  position: relative;
+  z-index: 2;
   display: flex;
+  width: 100%;
   min-width: 0;
-  min-height: 42px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  padding: 7px 9px;
-  border: 1px solid transparent;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 9px;
   color: #edf2f7;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.02);
   cursor: pointer;
   text-align: left;
+  pointer-events: auto;
   touch-action: manipulation;
 }
 
 .mode-phrase .phraseUnitTarget:hover,
-.mode-phrase .currentPhraseUnit .phraseUnitTarget {
-  border-color: rgba(34, 230, 194, 0.42);
-  background: rgba(34, 230, 194, 0.07);
+.mode-phrase .currentPhraseUnit .phraseUnitTarget,
+.mode-phrase .phraseUnitTarget.playing {
+  border-color: rgba(34, 230, 194, 0.58);
+  background: rgba(34, 230, 194, 0.1);
+}
+
+.mode-phrase .phraseUnitTarget:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .mode-phrase .phraseUnitWord {
@@ -3300,49 +3308,9 @@ footer {
 
 .mode-phrase .phraseUnitNote {
   flex: 0 0 auto;
-  color: #aeb8c5;
+  color: #a7f8e8;
   font-size: 12px;
   font-weight: 900;
-}
-
-.mode-phrase .unitToneButton {
-  position: relative;
-  z-index: 5;
-  min-width: 92px;
-  min-height: 42px;
-  padding: 7px 10px;
-  border: 1px solid rgba(34, 230, 194, 0.34);
-  border-radius: 8px;
-  color: #a7f8e8;
-  background: rgba(34, 230, 194, 0.08);
-  cursor: pointer;
-  pointer-events: auto !important;
-  touch-action: manipulation;
-  user-select: none;
-  white-space: nowrap;
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.mode-phrase .unitToneButton:hover,
-.mode-phrase .unitToneButton:active,
-.mode-phrase .unitToneButton.playing {
-  color: #06130f;
-  background: #22e6c2;
-}
-
-.mode-phrase .unitToneButton:disabled {
-  cursor: not-allowed;
-  opacity: 0.38;
-}
-
-.mode-phrase .vowelSelect {
-  position: relative;
-  z-index: 2;
-  grid-column: 1 / -1;
-  width: 100%;
-  min-height: 32px;
-  margin: 0;
 }
 
 .mode-phrase .vowelCoach {
@@ -3475,9 +3443,6 @@ footer {
     grid-template-columns: 1fr;
   }
 
-  .mode-phrase .unitToneButton {
-    width: 100%;
-  }
 
   .cadencePanel > summary {
     align-items: flex-start;
