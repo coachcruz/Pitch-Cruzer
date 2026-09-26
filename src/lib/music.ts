@@ -8,16 +8,6 @@ export function midiToNote(midi: number): string {
   return NOTE_NAMES[((rounded % 12) + 12) % 12] + String(Math.floor(rounded / 12) - 1);
 }
 
-export function noteToMidi(note: string): number | null {
-  const match = note.trim().match(/^([A-Ga-g])([#b]?)(-?\d)$/);
-  if (!match) return null;
-  const natural: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  let pc = natural[match[1].toUpperCase()];
-  if (match[2] === '#') pc += 1;
-  if (match[2] === 'b') pc -= 1;
-  return (Number(match[3]) + 1) * 12 + pc;
-}
-
 export function median(values: ArrayLike<number>): number {
   const sorted = Array.from(values).sort((a, b) => a - b);
   if (!sorted.length) return NaN;
@@ -33,11 +23,6 @@ export function foldToOctave(midi: number, target: number): number {
 export interface MusicalKey { tonic: number; mode: 'major' | 'minor'; confidence: number }
 
 export const keyName = (key: MusicalKey) => NOTE_NAMES[key.tonic] + (key.mode === 'major' ? ' major' : ' minor');
-
-export function scalePitchClasses(key: MusicalKey): number[] {
-  const steps = key.mode === 'major' ? [0, 2, 4, 5, 7, 9, 11] : [0, 2, 3, 5, 7, 8, 10];
-  return steps.map(step => (key.tonic + step) % 12);
-}
 
 /** Krumhansl–Schmuckler key estimate from a duration-weighted pitch-class histogram. */
 export function estimateKey(histogram: number[]): MusicalKey | null {

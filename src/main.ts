@@ -33,7 +33,7 @@ function route(): void {
     link.classList.toggle('active', (link.dataset.nav === 'tuner') === hash.startsWith('#/tuner') && !song);
   });
   window.scrollTo(0, 0);
-  if (song) dispose = renderPractice(view, song[1], navigate);
+  if (song) dispose = renderPractice(view, song[1]);
   else if (hash.startsWith('#/tuner')) dispose = renderTuner(view);
   else dispose = renderHome(view, navigate);
 }

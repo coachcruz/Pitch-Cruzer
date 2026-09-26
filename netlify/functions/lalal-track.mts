@@ -1,9 +1,7 @@
 import type { Config } from '@netlify/functions';
+import { json } from '../lib/lalal.mts';
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-}
-
+/** Streams a separated track from LALAL.AI's download host (only) when the browser can't fetch it directly. */
 export default async (req: Request) => {
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   const urlValue = new URL(req.url).searchParams.get('url');

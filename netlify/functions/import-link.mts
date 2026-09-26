@@ -26,6 +26,20 @@ function isPrivateHost(hostname: string): boolean {
     hostname.endsWith('.internal') || hostname.endsWith('.local') || hostname.includes(':');
 }
 
+/** Fetches a public URL, re-checking every redirect so a link can't bounce the server to a private address. */
+async function fetchPublic(url: string, hops = 5): Promise<Response | null> {
+  let current = new URL(url);
+  for (let hop = 0; hop <= hops; hop += 1) {
+    if ((current.protocol !== 'https:' && current.protocol !== 'http:') || isPrivateHost(current.hostname)) return null;
+    const response = await fetch(current, { redirect: 'manual' }).catch(() => null);
+    if (!response) return null;
+    const location = response.headers.get('location');
+    if (response.status >= 300 && response.status < 400 && location) { current = new URL(location, current); continue; }
+    return response;
+  }
+  return null;
+}
+
 export default async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const key = lalalKey();
@@ -44,7 +58,7 @@ export default async (req: Request) => {
   const resolved = resolveAudioUrl(link);
   if ('error' in resolved) return json({ error: resolved.error }, 400);
 
-  const upstream = await fetch(resolved.url, { redirect: 'follow' }).catch(() => null);
+  const upstream = await fetchPublic(resolved.url);
   if (!upstream || !upstream.ok) {
     return json({ error: 'Could not download audio from that link (status ' + (upstream?.status ?? 'network error') + ').' }, 502);
   }

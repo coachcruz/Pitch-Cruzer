@@ -9,7 +9,7 @@ import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
 import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { LYRICS_READY, session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
-import { PitchLane, type TrailPoint } from '../ui/lane';
+import { PitchLane, type LaneWord, type TrailPoint } from '../ui/lane';
 
 interface Review {
   voice: AudioBuffer;
@@ -33,7 +33,7 @@ function shortLabel(section: Section): string {
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
 
-export function renderPractice(root: HTMLElement, songId: string, navigate: (hash: string) => void): () => void {
+export function renderPractice(root: HTMLElement, songId: string): () => void {
   root.innerHTML = '<div class="card loading">Loading song…</div>';
   let cleanup: (() => void) | null = null;
   let disposed = false;
@@ -62,7 +62,7 @@ export function renderPractice(root: HTMLElement, songId: string, navigate: (has
       toast('Notes re-checked with improved octave detection.');
     }
     if (disposed) return;
-    cleanup = mount(root, song, buffers, navigate);
+    cleanup = mount(root, song, buffers);
   })().catch(error => {
     console.error(error);
     root.innerHTML = '<div class="card"><p>Could not open this song.</p><a class="btn" href="#/">Back to songs</a></div>';
@@ -85,9 +85,8 @@ function syllablesHtml(line: LyricLine, withData: boolean): string {
   }).join('') + '</span>').join(' ');
 }
 
-function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, navigate: (hash: string) => void): () => void {
+function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () => void {
   const analysis = song.analysis;
-  const hasBacking = Boolean(buffers.backing); void hasBacking;
   const hasMusic = Boolean(buffers.instrumental);
   const range = analysis.range;
 
@@ -151,11 +150,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <output id="mixLeadOut"></output>
           <div class="presets"><button class="chip" data-lead="0">Mute</button><button class="chip" data-lead="30">Guide</button><button class="chip" data-lead="100">Full</button></div>
         </div>
-        <div class="mixRow hidden">
-          <label for="mixBacking">Backing vocals</label>
-          <input id="mixBacking" type="range" min="0" max="100" step="1" ${hasBacking ? '' : 'disabled'}>
-          <output id="mixBackingOut"></output>
-        </div>
         <div class="mixRow ${hasMusic ? '' : 'disabled'}">
           <label for="mixMusic">Music <small>(incl. backing vocals)</small></label>
           <input id="mixMusic" type="range" min="0" max="100" step="1" ${hasMusic ? '' : 'disabled'}>
@@ -178,8 +172,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
 
       <div class="stageRow" id="stageRow">
         <div class="karaoke hidden" id="karaoke">
-          <p id="lyricsHint" class="hint small">${analysis.transcript === 'failed' || analysis.transcript === 'none'
-            ? 'Lyrics couldn’t be heard automatically — use ⋯ → Fix lyrics to paste or find them.' : ''}</p>
+          <p id="lyricsHint" class="hint small"></p>
           <div id="lyricsList" class="lyricsList"></div>
         </div>
         <div class="laneWrap" id="laneWrap"><canvas id="lane" aria-label="Lyrics scroll across the top; the singer’s notes sit on a treble and bass staff below; your voice is the blue line"></canvas>
@@ -239,12 +232,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   // ---------------------------------------------------------------- state
   const player = new Player(buffers);
   const mic = new LiveMic(player.ctx);
-  // Conveyor text: whole words written straight (each carries the note it starts on).
-  const allSyllables = (): Syllable[] => analysis.lines.flatMap(line => line.words.map(word => ({
-    text: word.text, start: word.start, end: word.end,
-    midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null, notes: []
-  })));
-  const lane = new PitchLane(el<HTMLCanvasElement>(root, '#lane'), analysis.notes, allSyllables(), analysis.range, analysis.key, breathMarks(analysis.notes));
+  // The staff's lyrics belt: whole words written straight, each with the note it starts on
+  // ("♪" placeholders for notes without lyrics are left off).
+  const laneWords = (): LaneWord[] => analysis.lines.flatMap(line => line.words)
+    .filter(word => word.text !== '♪')
+    .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
+  const lane = new PitchLane(el<HTMLCanvasElement>(root, '#lane'), analysis.notes, laneWords(), analysis.range, breathMarks(analysis.notes));
 
   let selected = new Set<string>();
   let custom: { start: number; end: number; label: string } | null = null;
@@ -262,7 +255,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   let disposed = false;
 
   const levels = {
-    lead: prefs.get('mix.lead', 100), backing: prefs.get('mix.backing', 100),
+    lead: prefs.get('mix.lead', 100),
     music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100
   };
   const forgiveOctave = el<HTMLInputElement>(root, '#forgiveOctave');
@@ -439,8 +432,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   }
 
   // Start on the first chorus (or first sung section) — the part most people want to try first.
-  const firstPick = analysis.sections.find(s => s.kind === 'chorus') ?? analysis.sections.find(s => !['intro', 'outro', 'instrumental'].includes(s.kind));
-  if (firstPick) selected.add(firstPick.id);
+  const defaultSelection = () => {
+    const pick = analysis.sections.find(s => s.kind === 'chorus') ?? analysis.sections.find(s => !['intro', 'outro', 'instrumental'].includes(s.kind));
+    return new Set(pick ? [pick.id] : []);
+  };
+  selected = defaultSelection();
 
   // ---------------------------------------------------------------- lyrics sheet
   const sectionFor = (time: number): Section | undefined => analysis.sections.find(s => time >= s.start && time < s.end);
@@ -459,7 +455,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       const scored = review?.score.lines.find(item => item.line.id === line.id);
       const scoreClass = scored ? (scored.percent >= 70 ? ' good' : scored.percent >= 40 ? ' ok' : ' bad') : '';
       return header + `<button class="lyricLine${outside ? ' outside' : ''}${anchor}${scoreClass}" data-line="${line.id}">
-        <span class="lineTime">${formatTime(line.start)}</span><span class="lineText">${syllablesHtml(line, true)}</span>
+        <span class="lineText">${syllablesHtml(line, true)}</span>
         ${scored ? `<span class="lineScore">${scored.percent}%</span>` : ''}</button>`;
     }).join('') || '<p class="empty">No sung lines were found.</p>';
 
@@ -489,17 +485,45 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     }));
   };
 
+  const lyricsHintText = () => {
+    if (session.lyricsJobs.has(song.id)) return '✍️ Writing the lyrics in the background — start practicing, they’ll appear when ready.';
+    if (analysis.lyricsPending) return 'The lyrics were interrupted before they finished — use ⋯ → Redo lyrics.';
+    if (analysis.transcript === 'failed' || analysis.transcript === 'none') return 'Lyrics couldn’t be heard automatically — use ⋯ → Fix lyrics to paste or find them.';
+    return '';
+  };
+  /** New lyrics (written in the background, redone or fixed): refresh everything that shows them. */
+  const lyricsChanged = () => {
+    lane.setLyrics(laneWords());
+    review = null;
+    el(root, '#review').classList.add('hidden');
+    upNextKey = '';
+    el(root, '#lyricsHint').textContent = lyricsHintText();
+    // Sections may have been re-found. While stopped, start again on the first chorus; while playing,
+    // keep going (only drop picks that no longer exist) so the music isn't interrupted.
+    if (player.state === 'stopped') {
+      custom = null;
+      selected = defaultSelection();
+      idleTime = selectedRanges()[0].start;
+      liveTrail = [];
+    } else {
+      selected = new Set([...selected].filter(id => analysis.sections.some(section => section.id === id)));
+    }
+    renderSections();
+    renderLyrics();
+    updateClock();
+  };
+
   const setPicking = (on: boolean) => {
     pickingLines = on;
     pickAnchor = null;
     el(root, '#pickLines').textContent = on ? 'Cancel picking lines' : 'Pick lines to practice';
-    el(root, '#lyricsHint').textContent = on ? 'Tap the first line you want to practice, then the last one.' : '';
+    el(root, '#lyricsHint').textContent = on ? 'Tap the first line you want to practice, then the last one.' : lyricsHintText();
     if (on) setView('karaoke');
     renderLyrics();
   };
   el(root, '#pickLines').addEventListener('click', () => setPicking(!pickingLines));
 
-  const dialog = el<HTMLDialogElement>(root, '#lyricsDialog');
+  const lyricsDialog = el<HTMLDialogElement>(root, '#lyricsDialog');
   const showNotes = el<HTMLInputElement>(root, '#showNotes');
   showNotes.checked = prefs.get('showNotes', false);
   const applyShowNotes = () => el(root, '#lyricsList').classList.toggle('hideNotes', !showNotes.checked);
@@ -578,15 +602,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.';
         return;
       }
-      lane.setLyrics(allSyllables());
-      selected = new Set();
-      custom = null;
-      review = null;
-      el(root, '#review').classList.add('hidden');
-      upNextKey = '';
+      lyricsChanged();
       void persist();
-      selectionChanged();
-      el(root, '#lyricsHint').textContent = 'Tap a line to play from there.';
       toast('Lyrics redone.');
       redoDialog.close();
     } finally {
@@ -606,21 +623,19 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   el(root, '#fixLyrics').addEventListener('click', () => {
     el<HTMLTextAreaElement>(root, '#lyricsText').value = analysis.lines
       .map(line => line.words.map(word => word.text).join(' ')).filter(text => !/^[♪\s]+$/.test(text)).join('\n');
-    dialog.showModal();
+    lyricsDialog.showModal();
   });
-  dialog.addEventListener('close', () => {
-    if (dialog.returnValue !== 'apply') return;
+  lyricsDialog.addEventListener('close', () => {
+    if (lyricsDialog.returnValue !== 'apply') return;
     const text = el<HTMLTextAreaElement>(root, '#lyricsText').value;
     if (!text.trim()) return;
     analysis.lines = applyTypedLyrics(analysis, text);
     analysis.transcript = 'edited';
-    el(root, '#lyricsHint').textContent = 'Tap a line to play from there.';
-    lane.setLyrics(allSyllables());
-    upNextKey = '';
-    review = null;
-    el(root, '#review').classList.add('hidden');
+    analysis.lyricsPending = false;
+    // Real words make repeated choruses much easier to spot, so re-find the sections.
+    analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
+    lyricsChanged();
     void persist();
-    renderLyrics();
     toast('Lyrics updated.');
   });
 
@@ -657,9 +672,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     return set;
   };
   const setLead = bindSlider('mixLead', 'lead', value => player.setLevel('lead', value));
-  // Two simple sliders: Singer and Music. Backing vocals travel with the music.
-  const setBacking = bindSlider('mixBacking', 'backing', value => player.setLevel('backing', value));
-  bindSlider('mixMusic', 'music', value => { player.setLevel('music', value); setBacking(Math.round(value * 100)); });
+  // Two simple sliders: Singer and Music (the music includes any backing vocals).
+  bindSlider('mixMusic', 'music', value => player.setLevel('music', value));
   bindSlider('mixMonitor', 'monitor', value => mic.setMonitor(value));
   root.querySelectorAll<HTMLButtonElement>('[data-lead]').forEach(button => button.addEventListener('click', () => setLead(Number(button.dataset.lead))));
   forgiveOctave.addEventListener('change', () => {
@@ -893,7 +907,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const grade = s.score >= 85 ? 'Superstar' : s.score >= 70 ? 'Great' : s.score >= 50 ? 'Nice work' : s.score >= 30 ? 'Getting there' : 'Keep going';
     const cents = s.meanCents === null ? '—' : (Math.abs(s.meanCents) < 10 ? 'centered' : Math.abs(Math.round(s.meanCents)) + '¢ ' + (s.meanCents < 0 ? 'flat' : 'sharp'));
     reviewEl.innerHTML = `
-      <div class="cardHead"><h2>Your take · ${escapeHtml(review.label)}</h2><button id="reviewClose" class="btn ghost small">Close</button></div>
+      <div class="cardHead"><h2>Your take · ${escapeHtml(review.label)}</h2><button id="reviewDiscard" class="btn ghost small">${review.savedId ? 'Done' : 'Discard'}</button></div>
       <div class="scoreRow">
         <div class="bigScore"><strong>${s.score}</strong><span>${grade}</span></div>
         <div class="stats">
@@ -918,7 +932,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <button id="downloadMix" class="btn ghost">Download mix (WAV)</button>
         <button id="downloadVoice" class="btn ghost">Download my voice only</button>
       </div>
-      <p class="hint small">Lines in the lyrics list are now colored by how close you were. Tap one to hear the original again.</p>`;
+      <p class="hint small">In 🎤 Karaoke view each line is now marked by how close you were — tap one to hear the original again.</p>`;
     void renderProgress();
     reviewEl.querySelector('#playBest')?.addEventListener('click', async () => {
       if (!review) return;
@@ -935,7 +949,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       const stopAt = (best.line.end - best.line.start + 1.2) * 1000;
       window.setTimeout(() => { if (reviewPlaying) stopAll(); }, stopAt);
     });
-    el(reviewEl, '#reviewClose').addEventListener('click', () => {
+    el(reviewEl, '#reviewDiscard').addEventListener('click', () => {
       if (!review?.savedId && !confirm('Discard this take without saving it?')) return;
       if (reviewPlaying) stopAll();
       review = null;
@@ -966,7 +980,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       if (!review) return;
       toast('Mixing your take…');
       const blob = await mixdown(buffers, review.timeline, {
-        lead: levels.lead / 100, backing: levels.backing / 100, music: levels.music / 100, voice: levels.voice / 100
+        lead: levels.lead / 100, music: levels.music / 100, voice: levels.voice / 100
       }, review.voice, review.offset);
       downloadBlob(blob, safeName(song.title + ' - ' + (el<HTMLInputElement>(reviewEl, '#singerName').value || 'my take')) + '.wav');
     });
@@ -1103,8 +1117,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         return `<li class="${i === 0 ? 'now' : ''}" data-up="${line.id}"><span>${escapeHtml(lineText(line))}</span>
           <small>${lineNotes(line)}${line.words[0]?.lang && line.words[0].lang !== 'en' ? ' · ' + line.words[0].lang.toUpperCase() : ''}${scored ? ' · ' + scored.percent + '%' : ''}</small></li>` + breath;
       }).join('');
-      el(root, '#lyricsList').querySelectorAll('.lyricLine.current').forEach(node => node.classList.remove('current'));
-      if (shown[0]) root.querySelector(`[data-line="${shown[0].id}"]`)?.classList.add('current');
     }
     const first = upNext.querySelector('li.now');
     if (first && shown[0]) first.classList.toggle('singing', time >= shown[0].start);
@@ -1270,22 +1282,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   // Lyrics still being written in the background? Keep practicing; they drop in when ready.
   const onLyricsReady = (event: Event) => {
     if ((event as CustomEvent<string>).detail !== song.id) return;
-    lane.setLyrics(allSyllables());
-    selected = new Set();
-    const pick = analysis.sections.find(s => s.kind === 'chorus') ?? analysis.sections.find(s => !['intro', 'outro', 'instrumental'].includes(s.kind));
-    if (pick && player.state === 'stopped') selected.add(pick.id);
-    upNextKey = '';
-    renderSections();
-    renderLyrics();
-    el(root, '#lyricsHint').textContent = analysis.transcript === 'failed' || analysis.transcript === 'none'
-      ? 'Lyrics couldn’t be heard automatically — use ⋯ → Fix lyrics to paste or find them.' : 'Tap a line to play from there.';
+    lyricsChanged();
     toast(analysis.transcript === 'failed' || analysis.transcript === 'none' ? 'Couldn’t write the lyrics — use ⋯ → Fix lyrics.' : '✍️ Lyrics are ready.');
   };
   window.addEventListener(LYRICS_READY, onLyricsReady);
-  if (session.lyricsJobs.has(song.id)) {
-    el(root, '#lyricsHint').textContent = '✍️ Writing the lyrics in the background — start practicing, they’ll appear when ready.';
-    toast('✍️ The notes are ready — lyrics are still being written. You can start practicing now.');
-  }
+  if (session.lyricsJobs.has(song.id)) toast('✍️ The notes are ready — lyrics are still being written. You can start practicing now.');
 
   // The stage fills whatever height is left, so redraw the canvas whenever its box changes size.
   const laneResize = new ResizeObserver(() => lane.resize());
@@ -1297,6 +1298,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   };
   window.addEventListener('keydown', onKey);
 
+  el(root, '#lyricsHint').textContent = lyricsHintText();
   renderSections();
   renderLyrics();
   renderTransport();
@@ -1314,7 +1316,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     mic.stop();
     player.onEnded = null;
     player.close();
-    void navigate;
   };
 }
 

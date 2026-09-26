@@ -244,6 +244,8 @@ input[type='range'] { accent-color: var(--accent); }
 .step.done { color: var(--text); }
 .step.done .dot { border-color: var(--good); background: var(--good); }
 .step.skipped { opacity: 0.55; }
+.step.later { opacity: 0.7; }
+.step.later .dot { border-style: dashed; }
 .step > div { flex: 1; }
 .bar { height: 6px; border-radius: 99px; background: var(--surface-2); overflow: hidden; margin-top: 6px; }
 .bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.3s ease; }
@@ -409,7 +411,6 @@ input[type='range'] { accent-color: var(--accent); }
 .lyricLine.good .lineScore { color: var(--good); }
 .lyricLine.ok .lineScore { color: var(--close); }
 .lyricLine.bad .lineScore { color: var(--off); }
-.lineTime { display: none; }
 .lineText { font-size: clamp(1.4rem, 3.2vw, 2.2rem); font-weight: 700; display: flex; flex-wrap: wrap; justify-content: center; column-gap: 0.3em; row-gap: 2px; }
 .lineText .syl i { font-size: 0.42em; }
 .hideNotes .syl .hy { display: none; }

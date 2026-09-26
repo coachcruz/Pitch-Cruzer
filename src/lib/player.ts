@@ -4,7 +4,8 @@ import type { SongBuffers } from './prepare';
 export interface Range { start: number; end: number; turn?: boolean }
 export interface TimelinePiece { timelineStart: number; sourceStart: number; duration: number; turn: boolean }
 
-export type StemName = 'lead' | 'backing' | 'music' | 'voice';
+/** Backing vocals play through the "music" channel: the singer is the only voice you control separately. */
+export type StemName = 'lead' | 'music' | 'voice';
 
 /** Lays the chosen ranges end to end (with repeats) and maps timeline time ↔ song time. */
 export class Timeline {
@@ -23,15 +24,13 @@ export class Timeline {
     this.duration = cursor;
   }
 
-  sourceTimeAt(t: number): number | null {
-    for (const piece of this.pieces) {
-      if (t >= piece.timelineStart && t < piece.timelineStart + piece.duration) return piece.sourceStart + (t - piece.timelineStart);
-    }
-    return null;
-  }
-
   pieceAt(t: number): TimelinePiece | null {
     return this.pieces.find(piece => t >= piece.timelineStart && t < piece.timelineStart + piece.duration) ?? null;
+  }
+
+  sourceTimeAt(t: number): number | null {
+    const piece = this.pieceAt(t);
+    return piece ? piece.sourceStart + (t - piece.timelineStart) : null;
   }
 
   /** Echo practice timelines have silent "your turn" pieces; only those are scored. */
@@ -60,19 +59,19 @@ export class Player {
   totalDuration = 0;
   onEnded: (() => void) | null = null;
 
-  constructor(public buffers: SongBuffers) {
+  constructor(private buffers: SongBuffers) {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     const gain = () => { const node = this.ctx.createGain(); node.connect(this.ctx.destination); return node; };
-    this.gains = { lead: gain(), backing: gain(), music: gain(), voice: gain() };
+    this.gains = { lead: gain(), music: gain(), voice: gain() };
   }
 
   setLevel(stem: StemName, value: number): void {
     this.gains[stem].gain.setTargetAtTime(Math.max(0, value), this.ctx.currentTime, 0.02);
   }
 
-  /** Builds the timeline for the given ranges and starts playing at `from` seconds into it. */
   /**
-   * `model`: Echo practice with your own best take as the guide. For each listen piece, `locate`
+   * Builds the timeline for the given ranges and starts playing at `from` seconds into it.
+   * `voice`: a recorded take to play along (review). `model`: Echo practice with your own best take as the guide. For each listen piece, `locate`
    * returns where in the take's audio that song moment was sung (or null → the artist sings it).
    */
   async play(ranges: Range[], repeats: number, options: {
@@ -92,7 +91,7 @@ export class Player {
 
     const stems: Array<[AudioBuffer | null, GainNode]> = [
       [this.buffers.lead, this.gains.lead],
-      [this.buffers.backing, this.gains.backing],
+      [this.buffers.backing, this.gains.music],
       [this.buffers.instrumental, this.gains.music]
     ];
     for (const piece of this.timeline.pieces) {
@@ -156,8 +155,6 @@ export class Player {
 
   /** Where in the original song the timeline position `t` is (null during lead-in/after the end). */
   sourceTimeAt(t: number): number | null { return this.timeline.sourceTimeAt(t); }
-
-  get origin(): number { return this.originAt; }
 
   async pause(): Promise<void> {
     if (this.state !== 'playing') return;

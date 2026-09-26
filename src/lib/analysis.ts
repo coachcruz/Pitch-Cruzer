@@ -10,6 +10,7 @@ export interface Syllable { text: string; start: number; end: number; midi: numb
 export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string }
 export interface LyricLine { id: string; start: number; end: number; words: Word[] }
 
+/** 'part' only appears in songs saved by older versions (they're relabeled when opened). */
 export type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'instrumental' | 'outro' | 'part';
 export interface Section { id: string; kind: SectionKind; label: string; start: number; end: number }
 
