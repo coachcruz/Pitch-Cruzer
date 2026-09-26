@@ -26,6 +26,7 @@ export class PitchLane {
   forgiveOctave = false;
   windowSeconds = 8;
   liveMidi: number | null = null;
+  private view = { t0: 0, t1: 1, low: 45, rowHeight: 10, laneHeight: 100 };
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -73,6 +74,22 @@ export class PitchLane {
     return null;
   }
 
+  /** The artist's note bar under a point on the canvas (CSS pixels), if any — for tap-to-hear. */
+  noteAtPoint(px: number, py: number): NoteEvent | null {
+    const { t0, t1, low, rowHeight, laneHeight } = this.view;
+    if (py < CONVEYOR || px < GUTTER) return null;
+    const time = t0 + ((px - GUTTER) / (this.width - GUTTER)) * (t1 - t0);
+    const midi = low - 0.5 + (CONVEYOR + laneHeight - py) / rowHeight;
+    let best: NoteEvent | null = null;
+    let bestDistance = 1.6;
+    for (const note of this.notes) {
+      if (note.end < time - 0.15 || note.start > time + 0.15) continue;
+      const distance = Math.abs(Math.round(note.midi) - midi);
+      if (distance < bestDistance) { bestDistance = distance; best = note; }
+    }
+    return best;
+  }
+
   /** True while in a breathing gap between phrases. */
   breathAt(time: number): boolean {
     return this.breaths.some(breath => time >= breath.time && time < breath.time + breath.length && breath.length >= 0.35);
@@ -114,6 +131,7 @@ export class PitchLane {
     const span = this.high - this.low + 1;
     const rowHeight = laneHeight / span;
     const y = (midi: number) => laneTop + laneHeight - (midi - this.low + 0.5) * rowHeight;
+    this.view = { t0, t1, low: this.low, rowHeight, laneHeight };
 
     ctx.clearRect(0, 0, width, height);
 

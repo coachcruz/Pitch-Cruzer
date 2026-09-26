@@ -1,4 +1,4 @@
-import { buildLines, buildSections, keyAndRange, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { buildLines, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import * as lalal from './lalal';
 import { diag } from './diag';
@@ -153,9 +153,27 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
   const notes = segmentNotes(track);
   const { key, range } = keyAndRange(notes);
   progress('pitch', 1, notes.length + ' notes found');
-  const analysis: SongAnalysis = { duration: lead.duration, key, range, notes, lines: [], sections: [], transcript: 'none', separated };
+  const analysis: SongAnalysis = { duration: lead.duration, key, range, notes, lines: [], sections: [], transcript: 'none', separated, notesVersion: NOTES_VERSION };
   await transcribeLyrics(lead, analysis, lyrics, progress);
   return analysis;
+}
+
+/**
+ * Re-detects the notes of an already prepared song (after note detection improves), keeping its
+ * lyrics, timing and sections. Runs locally from the saved vocal — no LALAL.AI minutes.
+ */
+export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): Promise<void> {
+  const track = await pitchTrackFor(lead, undefined, analysis.separated);
+  const notes = segmentNotes(track);
+  const { key, range } = keyAndRange(notes);
+  analysis.notes = notes;
+  analysis.key = key;
+  analysis.range = range;
+  analysis.lines = analysis.lines.map(line => ({
+    ...line,
+    words: line.words.map(word => word.text === '♪' ? word : buildWord(word.text, word.start, word.end, notes, word.lang))
+  }));
+  analysis.notesVersion = NOTES_VERSION;
 }
 
 export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal): Promise<PreparedSong> {

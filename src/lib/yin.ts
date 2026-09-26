@@ -46,11 +46,13 @@ export function yin(
   }
   if (lag < 0) return null;
 
-  // Only meaningful for a single voice: in a full mix, chords also repeat every few cycles.
-  // Subharmonic (period-doubled) voices: alternate cycles differ, so the waveform only truly
-  // repeats every two cycles. If that doubled period is far cleaner, the heard pitch is an octave lower.
+  // Octave check: if the waveform repeats far more cleanly at twice the period, the true pitch is an
+  // octave lower. This fixes vowels whose resonance boosts the 2nd harmonic (read an octave high) and
+  // catches subharmonic (period-doubled) singing. In a full mix, chords also repeat every few cycles,
+  // so there it only applies above the normal voice floor (see minHz).
   const doubled = lag * 2;
-  if (subharmonics && sampleRate / lag < 300 && doubled + 2 <= maxLag && cmnd[lag] > 0.05) {
+  // (Not above ~800 Hz: there a period is only a dozen samples long and the doubled one looks falsely clean.)
+  if (sampleRate / lag < 800 && (subharmonics || sampleRate / doubled >= 65) && doubled + 2 <= maxLag && cmnd[lag] > 0.05) {
     let best = doubled;
     for (let tau = doubled - 2; tau <= doubled + 2; tau += 1) if (cmnd[tau] < cmnd[best]) best = tau;
     if (cmnd[best] < cmnd[lag] * 0.4) lag = best;

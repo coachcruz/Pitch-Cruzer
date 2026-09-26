@@ -13,8 +13,12 @@ export interface LyricLine { id: string; start: number; end: number; words: Word
 export type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'instrumental' | 'outro' | 'part';
 export interface Section { id: string; kind: SectionKind; label: string; start: number; end: number }
 
+/** Bump when note detection changes, so saved songs re-check their notes when opened. */
+export const NOTES_VERSION = 2;
+
 export interface SongAnalysis {
   duration: number;
+  notesVersion?: number;
   key: MusicalKey | null;
   range: [number, number] | null;
   notes: NoteEvent[];
@@ -57,13 +61,50 @@ function smoothTrack(midi: Float32Array): Float32Array {
     }
     out[i] = median(window);
   }
-  // Remove isolated octave errors: a frame an octave away from both neighbours.
-  for (let i = 1; i < out.length - 1; i += 1) {
-    const a = out[i - 1], b = out[i], c = out[i + 1];
-    if ([a, b, c].some(Number.isNaN)) continue;
-    if (Math.abs(b - a) > 10 && Math.abs(b - c) > 10 && Math.abs(a - c) < 2) out[i] = (a + c) / 2;
+  // Octave flips: pitch detectors sometimes read a moment of a held note exactly an octave off.
+  // A real voice doesn't jump an octave for a fraction of a second and back, so any reading an
+  // octave away from its surroundings (±0.25 s) is moved back into line.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const snapshot = out.slice();
+    for (let i = 0; i < out.length; i += 1) {
+      if (Number.isNaN(snapshot[i])) continue;
+      window.length = 0;
+      for (let j = i - 12; j <= i + 12; j += 1) {
+        if (j !== i && j >= 0 && j < out.length && !Number.isNaN(snapshot[j])) window.push(snapshot[j]);
+      }
+      if (window.length < 6) continue;
+      const context = median(window);
+      const offset = snapshot[i] - context;
+      if (offset < -9.5 && offset > -14.5) out[i] = snapshot[i] + 12;
+      else if (offset > 9.5 && offset < 14.5) out[i] = snapshot[i] - 12;
+    }
   }
   return out;
+}
+
+/**
+ * Note-level octave check: a short note sitting an octave below (or above) everything sung around it
+ * (±3 s) is almost always a detection error. Long notes are kept as sung, so deliberate low drops
+ * (e.g. a held subharmonic at the end of a phrase) are not "corrected".
+ */
+function fixOctaveOutliers(notes: NoteEvent[]): NoteEvent[] {
+  const fixed = notes.map(note => ({ ...note }));
+  for (let i = 0; i < fixed.length; i += 1) {
+    const note = fixed[i];
+    const duration = note.end - note.start;
+    const around: number[] = [];
+    for (const other of notes) {
+      if (other === notes[i] || other.end < note.start - 3 || other.start > note.end + 3) continue;
+      const weight = Math.max(1, Math.round((other.end - other.start) / 0.1));
+      for (let k = 0; k < weight; k += 1) around.push(other.midi);
+    }
+    if (around.length < 4) continue;
+    const context = median(around);
+    const offset = note.midi - context;
+    if (offset <= -9.5 && duration < 1.0 && Math.abs(note.midi + 12 - context) <= 6) note.midi += 12;
+    else if (offset >= 9.5 && duration < 0.6 && Math.abs(note.midi - 12 - context) <= 6) note.midi -= 12;
+  }
+  return fixed;
 }
 
 /** Splits a pitch track into held notes, tolerant of vibrato and brief dropouts. */
@@ -115,7 +156,7 @@ export function segmentNotes(track: PitchTrack): NoteEvent[] {
 
   // Merge repeated notes separated by a tiny gap (consonants).
   const merged: NoteEvent[] = [];
-  for (const note of notes) {
+  for (const note of fixOctaveOutliers(notes)) {
     const last = merged[merged.length - 1];
     if (last && Math.round(last.midi) === Math.round(note.midi) && note.start - last.end < 0.09) {
       const total = (last.end - last.start) + (note.end - note.start);

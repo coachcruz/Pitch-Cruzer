@@ -295,7 +295,7 @@ input[type='range'] { accent-color: var(--accent); }
 
 .stageRow { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 12px; }
 .laneWrap { position: relative; border-radius: 12px; overflow: hidden; background: var(--lane-bg); border: 1px solid var(--border); }
-#lane { display: block; width: 100%; height: clamp(320px, 52vh, 520px); }
+#lane { display: block; width: 100%; height: clamp(320px, 52vh, 520px); cursor: pointer; }
 .countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: 5rem; font-weight: 900; color: var(--text); background: color-mix(in srgb, var(--lane-bg) 60%, transparent); }
 
 .upNext { background: var(--surface-2); border-radius: 12px; padding: 12px; overflow: hidden; }

@@ -1,10 +1,10 @@
-import { applyTypedLyrics, breathMarks, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
+import { applyTypedLyrics, breathMarks, buildLines, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
 import { decodeAudio, downloadBlob, encodeWav } from '../lib/audio';
 import { getSong, listTakes, saveSong, saveTake, deleteTake, type StoredSong, type StoredTake } from '../lib/library';
 import { LiveMic } from '../lib/mic';
 import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation } from '../lib/music';
 import { Player, Timeline, type Range } from '../lib/player';
-import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, transcribeLyrics, type SongBuffers } from '../lib/prepare';
+import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
 import { session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
@@ -42,6 +42,16 @@ export function renderPractice(root: HTMLElement, songId: string, navigate: (has
     if (!buffers) {
       buffers = await decodeStems(song);
       session.buffers = buffers;
+    }
+    if (disposed) return;
+    if ((song.analysis.notesVersion ?? 1) < NOTES_VERSION) {
+      // Prepared with older note detection: re-check notes from the saved vocal (no LALAL minutes).
+      root.innerHTML = '<div class="card loading">Updating this song’s notes with improved octave detection…</div>';
+      const notesOnly = !song.analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
+      await recheckNotes(buffers.lead, song.analysis);
+      if (notesOnly) song.analysis.lines = buildLines([], song.analysis.notes);
+      if (session.saved) await saveSong(song).catch(() => undefined);
+      toast('Notes re-checked with improved octave detection.');
     }
     if (disposed) return;
     cleanup = mount(root, song, buffers, navigate);
@@ -932,6 +942,35 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     updateCoach(player.state !== 'stopped' || mic.active ? now : null, sung);
     updateClock();
   };
+
+  // Tap a note bar to hear its exact pitch — handy for checking a note (and its octave) by ear.
+  const laneCanvas = el<HTMLCanvasElement>(root, '#lane');
+  laneCanvas.addEventListener('click', event => {
+    const rect = laneCanvas.getBoundingClientRect();
+    const note = lane.noteAtPoint(event.clientX - rect.left, event.clientY - rect.top);
+    if (!note) return;
+    const midi = Math.round(note.midi);
+    const ctx = player.ctx;
+    void ctx.resume().then(() => {
+      const at = ctx.currentTime + 0.02;
+      const out = ctx.createGain();
+      out.gain.setValueAtTime(0.0001, at);
+      out.gain.exponentialRampToValueAtTime(0.35, at + 0.03);
+      out.gain.exponentialRampToValueAtTime(0.0001, at + 1.1);
+      out.connect(ctx.destination);
+      [1, 2, 3].forEach((harmonic, index) => {
+        const osc = ctx.createOscillator();
+        const level = ctx.createGain();
+        osc.frequency.value = midiToFrequency(midi) * harmonic;
+        level.gain.value = [1, 0.35, 0.15][index];
+        osc.connect(level).connect(out);
+        osc.start(at);
+        osc.stop(at + 1.15);
+      });
+    });
+    toast('♪ ' + midiToNote(midi) + ' · ' + midiToFrequency(midi).toFixed(0) + ' Hz · octave ' + octaveOf(midi));
+  });
+  laneCanvas.title = 'Tap a note bar to hear it';
 
   const onResize = () => lane.resize();
   window.addEventListener('resize', onResize);
