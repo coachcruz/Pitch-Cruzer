@@ -18,10 +18,12 @@ app.innerHTML = `
   <section class="modeChooser">
     <div class="modeButtons" aria-label="Practice mode">
       <button class="modeButton active" data-app-mode="single"><strong>Note</strong></button>
-      <button class="modeButton" data-app-mode="phrase"><strong>Phrase</strong></button>
       <button class="modeButton" data-app-mode="reference"><strong>Match</strong></button>
     </div>
-    <button id="advancedToggle" class="textButton">Tuner tools</button>
+    <div class="modeUtilities">
+      <button id="phraseToolToggle" class="phraseToolButton" type="button" aria-expanded="false">Phrase</button>
+      <button id="advancedToggle" class="textButton">Tuner tools</button>
+    </div>
   </section>
 
   <div class="tunerStack">
@@ -85,11 +87,11 @@ app.innerHTML = `
   </section>
   </div>
 
-  <section id="phraseCard" class="phraseCard hidden">
+  <section id="phraseCard" class="phraseCard phraseMini hidden" aria-label="Phrase utility">
     <div class="phraseWorkspaceHeader">
       <div>
-        <p class="eyebrow">PHRASE PRACTICE</p>
-        <h2>Build one line</h2>
+        <p class="eyebrow">PHRASE</p>
+        <h2>One line</h2>
       </div>
       <span id="phraseBuildState" class="phraseBuildState" aria-live="polite">Enter lyrics + notes.</span>
     </div>
@@ -106,65 +108,27 @@ app.innerHTML = `
     <div id="phraseWarning" class="phraseWarning hidden"></div>
     <div id="phraseUnits" class="phraseUnits emptyPhrase hidden"></div>
 
-    <div id="vowelCoach" class="vowelCoach hidden">
-      <div class="coachGrid">
-        <div><span class="coachLabel">VOWEL</span><p id="coachVowel">—</p></div>
-        <div><span class="coachLabel">MOUTH</span><p id="mouthCue"></p></div>
-        <div><span class="coachLabel">RESONANCE</span><p id="resonanceCue"></p></div>
-      </div>
-    </div>
-
     <div class="phraseActionRow">
       <button id="practicePhrase" class="primaryButton" disabled>Start practice</button>
     </div>
 
-    <details class="cadencePanel">
-      <summary>
-        <strong>Entrance cues</strong>
-        <span class="cadenceNote">Optional · count-in · tempo · tone / speech</span>
-      </summary>
-
-      <div class="cadenceControls">
-        <label>BPM
-          <input id="cadenceBpm" type="number" min="40" max="220" step="1" value="84">
-        </label>
-        <label>Count-in
-          <select id="cadenceCountIn">
-            <option value="0">None</option>
-            <option value="1">1 beat</option>
-            <option value="2">2 beats</option>
-            <option value="4" selected>4 beats</option>
-          </select>
-        </label>
-        <label>Beats / unit
-          <select id="cadenceBeats">
-            <option value="0.5">½ beat</option>
-            <option value="1" selected>1 beat</option>
-            <option value="2">2 beats</option>
-            <option value="4">4 beats</option>
-          </select>
-        </label>
-        <label>Cue
-          <select id="cadenceMode">
-            <option value="both" selected>Both</option>
-            <option value="tone">Tone</option>
-            <option value="speak">Speak</option>
-          </select>
-        </label>
-        <label>Speech
-          <select id="cadenceSpeechMode">
-            <option value="unit" selected>Word / unit</option>
-            <option value="attack">First syllable</option>
-          </select>
-        </label>
+    <div class="phraseSupport hidden" aria-hidden="true">
+      <div id="vowelCoach" class="vowelCoach hidden">
+        <div class="coachGrid">
+          <div><span class="coachLabel">VOWEL</span><p id="coachVowel">—</p></div>
+          <div><span class="coachLabel">MOUTH</span><p id="mouthCue"></p></div>
+          <div><span class="coachLabel">RESONANCE</span><p id="resonanceCue"></p></div>
+        </div>
       </div>
-
-      <div class="buttonRow cadenceButtons">
-        <button id="startCadence" class="primaryButton" disabled>Start cues</button>
-        <button id="stopCadence" class="secondaryButton" disabled>Stop</button>
-      </div>
-      <div id="cadenceStatus" class="cadenceStatus"></div>
-    </details>
+      <input id="cadenceBpm" type="number" value="84">
+      <select id="cadenceCountIn"><option value="4" selected>4</option></select>
+      <select id="cadenceBeats"><option value="1" selected>1</option></select>
+      <select id="cadenceMode"><option value="tone" selected>Tone</option></select>
+      <select id="cadenceSpeechMode"><option value="unit" selected>Unit</option></select>
+      <button id="startCadence" type="button" disabled>Start cues</button>
+      <button id="stopCadence" type="button" disabled>Stop</button>
+      <div id="cadenceStatus"></div>
+    </div>
   </section>
 
   <section id="referenceCard" class="referenceCard hidden">
@@ -333,6 +297,7 @@ const listeningModeLabelEl = qs<HTMLElement>('#listeningModeLabel');
 const listeningForTextEl = qs<HTMLElement>('#listeningForText');
 const listeningDetailEl = qs<HTMLElement>('#listeningDetail');
 const advancedToggleButton = qs<HTMLButtonElement>('#advancedToggle');
+const phraseToolToggleButton = qs<HTMLButtonElement>('#phraseToolToggle');
 const modeButtons = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-app-mode]'));
 const phraseCardEl = qs<HTMLElement>('#phraseCard');
 const referenceCardEl = qs<HTMLElement>('#referenceCard');
@@ -445,10 +410,11 @@ let phraseWords: string[] = [];
 let phraseNotes: string[] = [];
 let phraseVowels: string[] = [];
 let selectedPhraseIndex = 0;
-type AppMode = 'single' | 'phrase' | 'reference';
+type AppMode = 'single' | 'reference';
 
 const requestedMode = new URLSearchParams(window.location.search).get('mode');
-let appMode: AppMode = requestedMode === 'phrase' || requestedMode === 'reference' ? requestedMode : 'single';
+let appMode: AppMode = requestedMode === 'reference' ? 'reference' : 'single';
+let phraseToolOpen = false;
 let advancedControls = false;
 let cadencePlaying = false;
 let cadenceIndex = 0;
@@ -1713,11 +1679,8 @@ function getActiveTarget(): string {
     return sequence[Math.min(sequenceIndex, sequence.length - 1)];
   }
 
-  if (appMode === 'phrase' && phraseNotes.length > 0) {
-    const phraseIndex = cadencePlaying
-      ? cadenceIndex
-      : selectedPhraseIndex;
-    return phraseNotes[Math.min(phraseIndex, phraseNotes.length - 1)];
+  if (phraseMode && phraseNotes.length > 0) {
+    return phraseNotes[Math.min(sequenceIndex, phraseNotes.length - 1)];
   }
 
   if (appMode === 'reference' && derivedReferenceNotes.length > 0) {
@@ -1728,8 +1691,8 @@ function getActiveTarget(): string {
 }
 
 function canListenInCurrentMode(): boolean {
+  if (phraseMode) return phraseWords.length > 0 && phraseNotes.length > 0;
   if (appMode === 'single') return true;
-  if (appMode === 'phrase') return phraseWords.length > 0 && phraseNotes.length > 0;
   return derivedReferenceNotes.length > 0;
 }
 
@@ -1741,7 +1704,16 @@ function updateListeningContext(): void {
   const target = getActiveTarget();
   activeTargetEl.textContent = target;
 
-  if (appMode === 'single') {
+  if (phraseMode) {
+    listeningModeLabelEl.textContent = 'PHRASE';
+    const line = getPhraseLine();
+    const index = Math.min(sequenceIndex, Math.max(0, phraseWords.length - 1));
+    const word = phraseWords[index] ?? '';
+    const note = phraseNotes[index] ?? target;
+    listeningForTextEl.textContent = line || 'Phrase practice';
+    listeningDetailEl.textContent =
+      'Current unit: ' + word + ' · target ' + note + '.';
+  } else if (appMode === 'single') {
     listeningModeLabelEl.textContent = cruiseOn ? 'SEQUENCE' : 'SINGLE NOTE';
     listeningForTextEl.textContent = cruiseOn
       ? getSequence().join(' → ')
@@ -1749,25 +1721,6 @@ function updateListeningContext(): void {
     listeningDetailEl.textContent = cruiseOn
       ? 'Current target: ' + target + '. Hold it inside the lock window to advance.'
       : 'The tuner is grading one pitch only: ' + target + '.';
-  } else if (appMode === 'phrase') {
-    listeningModeLabelEl.textContent = 'PHRASE';
-    const line = getPhraseLine();
-    if (!line || phraseNotes.length === 0) {
-      listeningForTextEl.textContent = 'No phrase loaded';
-      listeningDetailEl.textContent = 'Enter matching lyric units and target notes.';
-    } else {
-      const index = cadencePlaying
-        ? Math.min(cadenceIndex, phraseWords.length - 1)
-        : phraseMode
-          ? Math.min(sequenceIndex, phraseWords.length - 1)
-          : Math.min(selectedPhraseIndex, phraseWords.length - 1);
-      const word = phraseWords[index] ?? '';
-      const note = phraseNotes[index] ?? target;
-      listeningForTextEl.textContent = line;
-      listeningDetailEl.textContent =
-        'Current unit: ' + word + ' · target ' + note +
-        '. Tap another lyric unit to practice that part.';
-    }
   } else {
     listeningModeLabelEl.textContent = 'MATCH RECORDING';
     if (derivedReferenceNotes.length === 0) {
@@ -1793,7 +1746,7 @@ function applyModeVisibility(): void {
   shellEl.classList.add('mode-' + appMode);
   shellEl.classList.toggle('advanced-open', advancedControls);
 
-  phraseCardEl.classList.toggle('hidden', appMode !== 'phrase');
+  phraseCardEl.classList.toggle('hidden', !phraseToolOpen);
   referenceCardEl.classList.toggle('hidden', appMode !== 'reference');
 
   singleTargetPanelEl.classList.toggle('hidden', appMode !== 'single');
@@ -1812,11 +1765,12 @@ function applyModeVisibility(): void {
   });
 
   const modeNames: Record<AppMode, string> = {
-    single: 'Single note',
-    phrase: 'Phrase',
+    single: phraseMode ? 'Phrase practice' : 'Single note',
     reference: 'Match recording'
   };
   topModeStatusEl.textContent = modeNames[appMode];
+  phraseToolToggleButton.classList.toggle('active', phraseToolOpen);
+  phraseToolToggleButton.setAttribute('aria-expanded', String(phraseToolOpen));
   advancedToggleButton.classList.toggle('active', advancedControls);
   advancedToggleButton.textContent = advancedControls
     ? 'Hide tools'
@@ -1838,7 +1792,6 @@ function setAppMode(mode: AppMode): void {
   setHoldProgress(0);
   applyModeVisibility();
   if (mode === 'reference') void checkLalalConnection();
-  if (mode === 'phrase') window.requestAnimationFrame(syncPhraseFromInputs);
 }
 
 function getTargetFrequency(): number {
@@ -1941,7 +1894,7 @@ function estimatePitch(
 }
 
 function renderPhraseCoach(): void {
-  shellEl.classList.toggle('phrase-practicing', appMode === 'phrase' && phraseMode);
+  shellEl.classList.toggle('phrase-practicing', phraseMode);
 
   if (phraseWords.length === 0) {
     phraseNowEl.classList.add('hidden');
@@ -2591,6 +2544,12 @@ modeButtons.forEach(button => {
   });
 });
 
+phraseToolToggleButton.addEventListener('click', () => {
+  phraseToolOpen = !phraseToolOpen;
+  if (phraseToolOpen) syncPhraseFromInputs();
+  applyModeVisibility();
+});
+
 advancedToggleButton.addEventListener('click', () => {
   advancedControls = !advancedControls;
   applyModeVisibility();
@@ -2602,6 +2561,7 @@ stopCadenceButton.addEventListener('click', () => stopCadence());
 practicePhraseButton.addEventListener('click', () => {
   stopCadence(false);
   if (phraseWords.length === 0 || phraseNotes.length === 0) return;
+  appMode = 'single';
   sequenceTextEl.value = phraseNotes.join(' → ');
   phraseMode = true;
   cruiseOn = true;
@@ -2611,6 +2571,7 @@ practicePhraseButton.addEventListener('click', () => {
   traceLineEl.setAttribute('points', '');
   lockStart = null;
   setHoldProgress(0);
+  applyModeVisibility();
   renderSequence();
   renderPhraseCoach();
   practicePhraseButton.textContent = 'Practice active';
@@ -2633,7 +2594,8 @@ setSourceUiState('idle');
 updatePitchRangeUi();
 
 if (new URLSearchParams(window.location.search).get('debug') === 'phrase-buttons') {
-  appMode = 'phrase';
+  appMode = 'single';
+  phraseToolOpen = true;
   lyricsTextEl.value = 'hey | there | you';
   phraseNotesEl.value = 'G3 → A3 → B3';
   applyModeVisibility();
