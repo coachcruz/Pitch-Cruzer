@@ -1,0 +1,485 @@
+import { estimateKey, median, type MusicalKey } from './music';
+import type { TimedWord } from './transcribe.worker';
+
+export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSeconds: number }
+
+/** One sung note of the original vocal: a stable pitch held for a stretch of time. */
+export interface NoteEvent { start: number; end: number; midi: number }
+
+export interface Syllable { text: string; start: number; end: number; midi: number | null; notes: number[] }
+export interface Word { text: string; start: number; end: number; syllables: Syllable[] }
+export interface LyricLine { id: string; start: number; end: number; words: Word[] }
+
+export type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'instrumental' | 'outro' | 'part';
+export interface Section { id: string; kind: SectionKind; label: string; start: number; end: number }
+
+export interface SongAnalysis {
+  duration: number;
+  key: MusicalKey | null;
+  range: [number, number] | null;
+  notes: NoteEvent[];
+  lines: LyricLine[];
+  sections: Section[];
+  transcript: 'ok' | 'none' | 'failed' | 'edited';
+  separated: boolean;
+}
+
+export const SECTION_NAMES: Record<SectionKind, string> = {
+  intro: 'Intro', verse: 'Verse', pre: 'Pre-Chorus', chorus: 'Chorus', bridge: 'Bridge',
+  instrumental: 'Instrumental', outro: 'Outro', part: 'Part'
+};
+
+// ---------------------------------------------------------------- notes
+
+function smoothTrack(midi: Float32Array): Float32Array {
+  const out = new Float32Array(midi.length);
+  const window: number[] = [];
+  for (let i = 0; i < midi.length; i += 1) {
+    if (Number.isNaN(midi[i])) { out[i] = NaN; continue; }
+    window.length = 0;
+    for (let j = i - 2; j <= i + 2; j += 1) {
+      if (j >= 0 && j < midi.length && !Number.isNaN(midi[j])) window.push(midi[j]);
+    }
+    out[i] = median(window);
+  }
+  // Remove isolated octave errors: a frame an octave away from both neighbours.
+  for (let i = 1; i < out.length - 1; i += 1) {
+    const a = out[i - 1], b = out[i], c = out[i + 1];
+    if ([a, b, c].some(Number.isNaN)) continue;
+    if (Math.abs(b - a) > 10 && Math.abs(b - c) > 10 && Math.abs(a - c) < 2) out[i] = (a + c) / 2;
+  }
+  return out;
+}
+
+/** Splits a pitch track into held notes, tolerant of vibrato and brief dropouts. */
+export function segmentNotes(track: PitchTrack): NoteEvent[] {
+  const midi = smoothTrack(track.midi);
+  const hop = track.hopSeconds;
+  const notes: NoteEvent[] = [];
+  let runStart = -1;
+  let values: number[] = [];
+  let pending: number[] = [];
+  let unvoiced = 0;
+
+  const close = (endIndex: number) => {
+    if (runStart >= 0 && values.length) {
+      const start = runStart * hop;
+      const end = endIndex * hop;
+      if (end - start >= 0.08) notes.push({ start, end, midi: median(values) });
+    }
+    runStart = -1;
+    values = [];
+    pending = [];
+  };
+
+  for (let i = 0; i < midi.length; i += 1) {
+    const value = midi[i];
+    if (Number.isNaN(value)) {
+      unvoiced += 1;
+      if (unvoiced >= 3) close(i - unvoiced + 1);
+      continue;
+    }
+    unvoiced = 0;
+    if (runStart < 0) { runStart = i; values = [value]; continue; }
+    const recent = values.slice(-12);
+    const center = recent.reduce((a, b) => a + b, 0) / recent.length;
+    if (Math.abs(value - center) > 0.8) {
+      pending.push(value);
+      if (pending.length >= 3) {
+        const carry = pending;
+        close(i - carry.length + 1);
+        runStart = i - carry.length + 1;
+        values = carry;
+      }
+    } else {
+      values.push(...pending, value);
+      pending = [];
+    }
+  }
+  close(midi.length);
+
+  // Merge repeated notes separated by a tiny gap (consonants).
+  const merged: NoteEvent[] = [];
+  for (const note of notes) {
+    const last = merged[merged.length - 1];
+    if (last && Math.round(last.midi) === Math.round(note.midi) && note.start - last.end < 0.09) {
+      const total = (last.end - last.start) + (note.end - note.start);
+      last.midi = (last.midi * (last.end - last.start) + note.midi * (note.end - note.start)) / total;
+      last.end = note.end;
+    } else merged.push({ ...note });
+  }
+  return merged;
+}
+
+export function keyAndRange(notes: NoteEvent[]): { key: MusicalKey | null; range: [number, number] | null } {
+  if (!notes.length) return { key: null, range: null };
+  const histogram = new Array<number>(12).fill(0);
+  const weighted: Array<[number, number]> = [];
+  for (const note of notes) {
+    const duration = note.end - note.start;
+    const rounded = Math.round(note.midi);
+    histogram[((rounded % 12) + 12) % 12] += duration;
+    weighted.push([rounded, duration]);
+  }
+  weighted.sort((a, b) => a[0] - b[0]);
+  const total = weighted.reduce((sum, [, d]) => sum + d, 0);
+  const percentile = (p: number) => {
+    let acc = 0;
+    for (const [value, duration] of weighted) {
+      acc += duration;
+      if (acc >= total * p) return value;
+    }
+    return weighted[weighted.length - 1][0];
+  };
+  return { key: estimateKey(histogram), range: [percentile(0.02), percentile(0.98)] };
+}
+
+// ---------------------------------------------------------------- syllables + lines
+
+/** Rough English syllabification: vowel groups, with silent-e and -ed/-es endings merged back. */
+export function syllabify(word: string): string[] {
+  const clean = word.replace(/[^A-Za-z']/g, '');
+  if (clean.length <= 3) return [clean || word];
+  const parts = clean.match(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]*$|[^aeiouy](?=[^aeiouy]))?/gi);
+  if (!parts || parts.length < 2 || parts.join('') !== clean) return [clean];
+  const last = parts[parts.length - 1];
+  const previous = parts[parts.length - 2];
+  const silentE = /^[^aeiouy]*e$/i.test(last) && !/[^aeiouy]le$/i.test(previous.slice(-1) + last);
+  const quietEnding = /^[^aeiouy]*e[sd]$/i.test(last) && !/[td]$/i.test(previous) && !/^[td]/i.test(last);
+  if (silentE || quietEnding) {
+    parts.splice(parts.length - 2, 2, previous + last);
+  }
+  return parts;
+}
+
+function overlapping(notes: NoteEvent[], start: number, end: number): NoteEvent[] {
+  return notes.filter(note => note.end > start && note.start < end);
+}
+
+function dominantMidi(notes: NoteEvent[], start: number, end: number): number | null {
+  let best: NoteEvent | null = null;
+  let bestOverlap = 0;
+  for (const note of notes) {
+    const overlap = Math.min(end, note.end) - Math.max(start, note.start);
+    if (overlap > bestOverlap) { bestOverlap = overlap; best = note; }
+  }
+  return best ? best.midi : null;
+}
+
+function distinctRounded(notes: NoteEvent[]): number[] {
+  const out: number[] = [];
+  for (const note of notes) {
+    const rounded = Math.round(note.midi);
+    if (out[out.length - 1] !== rounded) out.push(rounded);
+  }
+  return out.slice(0, 6);
+}
+
+export function buildWord(text: string, start: number, end: number, notes: NoteEvent[]): Word {
+  const parts = syllabify(text);
+  const inside = overlapping(notes, start, end);
+  const syllables: Syllable[] = [];
+
+  if (inside.length >= parts.length && parts.length > 1) {
+    // Enough sung notes: give each syllable its own run of notes.
+    parts.forEach((part, k) => {
+      const from = Math.floor((k * inside.length) / parts.length);
+      const to = Math.max(from + 1, Math.floor(((k + 1) * inside.length) / parts.length));
+      const slice = inside.slice(from, to);
+      const s = k === 0 ? start : Math.max(start, slice[0].start);
+      const e = k === parts.length - 1 ? end : Math.min(end, slice[slice.length - 1].end);
+      syllables.push({ text: part, start: s, end: Math.max(e, s + 0.02), midi: dominantMidi(slice, s, e), notes: distinctRounded(slice) });
+    });
+  } else {
+    // Otherwise split the word's time by syllable length.
+    const weights = parts.map(part => Math.max(1, part.length));
+    const total = weights.reduce((a, b) => a + b, 0);
+    let cursor = start;
+    parts.forEach((part, k) => {
+      const e = k === parts.length - 1 ? end : cursor + ((end - start) * weights[k]) / total;
+      const slice = overlapping(inside, cursor, e);
+      syllables.push({ text: part, start: cursor, end: e, midi: dominantMidi(slice, cursor, e), notes: distinctRounded(slice) });
+      cursor = e;
+    });
+  }
+  return { text, start, end, syllables };
+}
+
+let lineCounter = 0;
+const lineId = () => 'l' + (lineCounter += 1).toString(36) + Math.random().toString(36).slice(2, 6);
+
+export function groupLines(words: Word[], hardBreaks: Set<number> = new Set()): LyricLine[] {
+  const lines: LyricLine[] = [];
+  let current: Word[] = [];
+  const flush = () => {
+    if (current.length) lines.push({ id: lineId(), start: current[0].start, end: current[current.length - 1].end, words: current });
+    current = [];
+  };
+  words.forEach((word, index) => {
+    const previous = current[current.length - 1];
+    if (previous) {
+      const gap = word.start - previous.end;
+      const lineDuration = word.end - current[0].start;
+      const punctuated = /[.,!?;:]$/.test(previous.text) && current.length >= 4;
+      if (hardBreaks.has(index) || (hardBreaks.size === 0 && (
+        gap >= 1.0 || (gap >= 0.45 && current.length >= 3) || lineDuration > 7 || current.length >= 12 || punctuated
+      ))) flush();
+    }
+    current.push(word);
+  });
+  flush();
+  return lines;
+}
+
+/** Without lyrics, turn sung phrases into lines of ♪ so notes are still shown in time. */
+function linesFromNotes(notes: NoteEvent[]): LyricLine[] {
+  const words: Word[] = notes.map(note => ({
+    text: '♪', start: note.start, end: note.end,
+    syllables: [{ text: '♪', start: note.start, end: note.end, midi: note.midi, notes: [Math.round(note.midi)] }]
+  }));
+  const lines: LyricLine[] = [];
+  let current: Word[] = [];
+  for (const word of words) {
+    const previous = current[current.length - 1];
+    if (previous && (word.start - previous.end > 0.5 || word.end - current[0].start > 7)) {
+      lines.push({ id: lineId(), start: current[0].start, end: previous.end, words: current });
+      current = [];
+    }
+    current.push(word);
+  }
+  if (current.length) lines.push({ id: lineId(), start: current[0].start, end: current[current.length - 1].end, words: current });
+  return lines;
+}
+
+export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] {
+  if (!timed.length) return linesFromNotes(notes);
+  const words = timed.map(word => buildWord(word.text, word.start, word.end, notes));
+  return groupLines(words);
+}
+
+const normalizeWord = (value: string) => value.toLowerCase().replace(/[^a-z0-9']/g, '');
+
+/**
+ * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to the
+ * automatic transcript (edit-distance alignment) to keep timing; unmatched words are interpolated.
+ */
+export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLine[] {
+  const typedLines = text.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const typed: string[] = [];
+  const hardBreaks = new Set<number>();
+  for (const line of typedLines) {
+    hardBreaks.add(typed.length);
+    typed.push(...line.split(/\s+/).filter(Boolean));
+  }
+  if (!typed.length) return analysis.lines;
+
+  const old = analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪');
+  const times: Array<[number, number] | null> = new Array(typed.length).fill(null);
+
+  if (old.length) {
+    const n = typed.length, m = old.length;
+    const cost: number[][] = Array.from({ length: n + 1 }, (_, i) => Array.from({ length: m + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+    for (let i = 1; i <= n; i += 1) {
+      for (let j = 1; j <= m; j += 1) {
+        const same = normalizeWord(typed[i - 1]) === normalizeWord(old[j - 1].text) ? 0 : 1;
+        cost[i][j] = Math.min(cost[i - 1][j - 1] + same, cost[i - 1][j] + 1, cost[i][j - 1] + 1);
+      }
+    }
+    let i = n, j = m;
+    while (i > 0 && j > 0) {
+      const same = normalizeWord(typed[i - 1]) === normalizeWord(old[j - 1].text) ? 0 : 1;
+      if (cost[i][j] === cost[i - 1][j - 1] + same) {
+        times[i - 1] = [old[j - 1].start, old[j - 1].end];
+        i -= 1; j -= 1;
+      } else if (cost[i][j] === cost[i - 1][j] + 1) i -= 1;
+      else j -= 1;
+    }
+  } else if (analysis.notes.length) {
+    // No automatic transcript: spread the typed words across the sung notes in order.
+    const notes = analysis.notes;
+    typed.forEach((_, index) => {
+      const from = Math.floor((index * notes.length) / typed.length);
+      const to = Math.max(from, Math.floor(((index + 1) * notes.length) / typed.length) - 1);
+      times[index] = [notes[from].start, notes[Math.min(notes.length - 1, to)].end];
+    });
+  }
+
+  // Interpolate words that did not match anything.
+  const filled: Array<[number, number]> = [];
+  for (let index = 0; index < typed.length; index += 1) {
+    if (times[index]) { filled.push(times[index]!); continue; }
+    let next = index + 1;
+    while (next < typed.length && !times[next]) next += 1;
+    const prevEnd = index > 0 ? filled[index - 1][1] : 0;
+    const nextStart = next < typed.length ? times[next]![0] : Math.min(analysis.duration, prevEnd + 0.4 * (next - index));
+    const slot = Math.max(0.1, (nextStart - prevEnd) / (next - index));
+    filled.push([prevEnd, prevEnd + slot * 0.9]);
+  }
+
+  const words = typed.map((text, index) => buildWord(text, filled[index][0], Math.max(filled[index][1], filled[index][0] + 0.08), analysis.notes));
+  return groupLines(words, hardBreaks);
+}
+
+// ---------------------------------------------------------------- sections
+
+interface Block { units: LyricLine[]; start: number; end: number }
+
+function makeBlock(units: LyricLine[]): Block {
+  return { units, start: units[0].start, end: units[units.length - 1].end };
+}
+
+function splitLongBlock(block: Block): Block[] {
+  const duration = block.end - block.start;
+  if (duration <= 38 || block.units.length < 2) return [block];
+  let bestIndex = -1;
+  let bestScore = -1;
+  for (let i = 1; i < block.units.length; i += 1) {
+    const left = block.units[i - 1].end - block.start;
+    const right = block.end - block.units[i].start;
+    if (left < 8 || right < 8) continue;
+    const gap = block.units[i].start - block.units[i - 1].end;
+    const score = gap * (0.5 + Math.min(left, right) / duration);
+    if (score > bestScore) { bestScore = score; bestIndex = i; }
+  }
+  if (bestIndex < 0) return [block];
+  return [
+    ...splitLongBlock(makeBlock(block.units.slice(0, bestIndex))),
+    ...splitLongBlock(makeBlock(block.units.slice(bestIndex)))
+  ];
+}
+
+function blockWords(block: Block): Set<string> {
+  const words = new Set<string>();
+  block.units.forEach(line => line.words.forEach(word => {
+    const value = normalizeWord(word.text);
+    if (value.length >= 2) words.add(value);
+  }));
+  return words;
+}
+
+function blockIntervals(block: Block, notes: NoteEvent[]): Set<string> {
+  const midis = overlapping(notes, block.start, block.end).map(note => Math.round(note.midi));
+  const grams = new Set<string>();
+  for (let i = 0; i + 3 < midis.length; i += 1) {
+    grams.add([midis[i + 1] - midis[i], midis[i + 2] - midis[i + 1], midis[i + 3] - midis[i + 2]].join(','));
+  }
+  return grams;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let shared = 0;
+  a.forEach(value => { if (b.has(value)) shared += 1; });
+  return shared / (a.size + b.size - shared);
+}
+
+function blockPitch(block: Block, notes: NoteEvent[]): number {
+  const inside = overlapping(notes, block.start, block.end);
+  return inside.length ? median(inside.map(note => note.midi)) : 0;
+}
+
+let sectionCounter = 0;
+const sectionId = () => 's' + (sectionCounter += 1).toString(36) + Math.random().toString(36).slice(2, 6);
+
+export function relabel(sections: Section[]): Section[] {
+  const counts: Partial<Record<SectionKind, number>> = {};
+  const totals: Partial<Record<SectionKind, number>> = {};
+  sections.forEach(section => { totals[section.kind] = (totals[section.kind] ?? 0) + 1; });
+  return sections.map(section => {
+    counts[section.kind] = (counts[section.kind] ?? 0) + 1;
+    const numbered = (totals[section.kind] ?? 0) > 1 && section.kind !== 'intro' && section.kind !== 'outro';
+    return { ...section, label: SECTION_NAMES[section.kind] + (numbered ? ' ' + counts[section.kind] : '') };
+  });
+}
+
+/** Finds intro / verse / pre-chorus / chorus / bridge / outro from lyric lines, gaps and repetition. */
+export function buildSections(lines: LyricLine[], notes: NoteEvent[], duration: number, hasLyrics: boolean): Section[] {
+  if (!lines.length) return [{ id: sectionId(), kind: 'part', label: 'Full song', start: 0, end: duration }];
+
+  let blocks: Block[] = [];
+  let current: LyricLine[] = [];
+  for (const line of lines) {
+    const previous = current[current.length - 1];
+    if (previous && line.start - previous.end >= 2.2) { blocks.push(makeBlock(current)); current = []; }
+    current.push(line);
+  }
+  if (current.length) blocks.push(makeBlock(current));
+  blocks = blocks.flatMap(splitLongBlock);
+
+  // Very short blocks (a stray ad-lib) join their nearest neighbour.
+  for (let i = 0; i < blocks.length && blocks.length > 1; i += 1) {
+    if (blocks[i].end - blocks[i].start >= 5) continue;
+    const target = i === 0 ? 1 : i === blocks.length - 1 ? i - 1
+      : (blocks[i].start - blocks[i - 1].end < blocks[i + 1].start - blocks[i].end ? i - 1 : i + 1);
+    const mergedUnits = [...blocks[Math.min(i, target)].units, ...blocks[Math.max(i, target)].units];
+    blocks.splice(Math.min(i, target), 2, makeBlock(mergedUnits));
+    i = -1;
+  }
+
+  // Similarity between vocal blocks: repeated lyrics + repeated melody → same kind of section.
+  const wordsOf = blocks.map(blockWords);
+  const melodyOf = blocks.map(block => blockIntervals(block, notes));
+  const similarity = (a: number, b: number) => {
+    const melody = jaccard(melodyOf[a], melodyOf[b]);
+    return hasLyrics ? 0.65 * jaccard(wordsOf[a], wordsOf[b]) + 0.35 * melody : melody;
+  };
+  const threshold = hasLyrics ? 0.42 : 0.3;
+  const parent = blocks.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  for (let a = 0; a < blocks.length; a += 1) {
+    for (let b = a + 1; b < blocks.length; b += 1) {
+      const da = blocks[a].end - blocks[a].start;
+      const db = blocks[b].end - blocks[b].start;
+      if (Math.min(da, db) / Math.max(da, db) > 0.45 && similarity(a, b) >= threshold) parent[find(b)] = find(a);
+    }
+  }
+  const clusters = new Map<number, number[]>();
+  blocks.forEach((_, i) => clusters.set(find(i), [...(clusters.get(find(i)) ?? []), i]));
+
+  const songPitch = median(notes.map(note => note.midi)) || 0;
+  let chorus: number[] = [];
+  let chorusScore = -Infinity;
+  clusters.forEach(members => {
+    if (members.length < 2) return;
+    const pitch = median(members.map(i => blockPitch(blocks[i], notes))) - songPitch;
+    let simTotal = 0, pairs = 0;
+    for (let x = 0; x < members.length; x += 1) for (let y = x + 1; y < members.length; y += 1) {
+      simTotal += similarity(members[x], members[y]); pairs += 1;
+    }
+    const score = members.length + (pairs ? simTotal / pairs : 0) * 2 + pitch / 6;
+    if (score > chorusScore) { chorusScore = score; chorus = members; }
+  });
+  const chorusSet = new Set(chorus);
+  const chorusDuration = chorus.length ? median(chorus.map(i => blocks[i].end - blocks[i].start)) : 0;
+
+  const kinds: SectionKind[] = blocks.map((block, i) => {
+    if (!chorus.length) return 'part';
+    if (chorusSet.has(i)) return 'chorus';
+    const choruses = chorus.filter(c => c < i).length;
+    if (chorusSet.has(i + 1) && i > 0 && !chorusSet.has(i - 1) && block.end - block.start < chorusDuration * 0.75) return 'pre';
+    const unique = blocks.every((_, j) => j === i || similarity(i, j) < 0.25);
+    if (choruses >= 2 && unique && i < blocks.length - 1) return 'bridge';
+    return 'verse';
+  });
+
+  // Turn vocal blocks into contiguous time ranges, with a short musical lead-in before each one.
+  const sections: Section[] = [];
+  const firstStart = blocks[0].start;
+  if (firstStart >= 4) sections.push({ id: sectionId(), kind: 'intro', label: '', start: 0, end: Math.max(0, firstStart - 2) });
+  blocks.forEach((block, i) => {
+    const previousEnd = sections.length ? sections[sections.length - 1].end : 0;
+    const gap = block.start - (i > 0 ? blocks[i - 1].end : previousEnd);
+    if (i > 0 && gap >= 8) {
+      sections.push({ id: sectionId(), kind: 'instrumental', label: '', start: blocks[i - 1].end, end: block.start - 2 });
+    }
+    const start = i === 0 ? (sections.length ? sections[sections.length - 1].end : 0) : sections[sections.length - 1].end;
+    const leadIn = i === 0 && !sections.length ? start : Math.max(start, block.start - 3);
+    if (sections.length && leadIn > start) sections[sections.length - 1].end = leadIn;
+    sections.push({ id: sectionId(), kind: kinds[i], label: '', start: leadIn, end: block.end });
+  });
+  const last = sections[sections.length - 1];
+  if (duration - last.end >= 5) sections.push({ id: sectionId(), kind: 'outro', label: '', start: last.end, end: duration });
+  else last.end = duration;
+
+  return relabel(sections);
+}
