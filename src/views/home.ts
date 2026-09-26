@@ -2,7 +2,7 @@ import { deleteSong, listSongs, saveSong, type StoredSong } from '../lib/library
 import * as lalal from '../lib/lalal';
 import { formatTime, keyName } from '../lib/music';
 import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type SongInput, type StepId } from '../lib/prepare';
-import { TabRecorder } from '../lib/tabcapture';
+import { CaptureMixer, type InputId } from '../lib/tabcapture';
 import { showRecordingReview } from '../ui/recordingReview';
 import { session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
@@ -14,6 +14,16 @@ let lalalMinutes: number | null = null;
 const STREAMING_NAMES: Record<string, string> = {
   youtube: 'YouTube', spotify: 'Spotify', apple: 'Apple Music', soundcloud: 'SoundCloud', other: 'This site'
 };
+
+function inputRow(id: string, name: string, connectLabel: string, help: string): string {
+  return `<div class="inputRow" data-input="${id}">
+    <button class="power" aria-pressed="false" aria-label="${name} on/off">⏻</button>
+    <div class="inputInfo"><strong>${name}</strong><small class="inputStatus">Not connected</small></div>
+    <div class="vu" aria-hidden="true"><span></span></div>
+    <button class="btn small connect" data-label="${connectLabel}">${connectLabel}</button>
+    <small class="inputHelp">${help}</small>
+  </div>`;
+}
 
 export function renderHome(root: HTMLElement, navigate: (hash: string) => void): () => void {
   root.innerHTML = `
@@ -60,17 +70,24 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
           <a href="https://open.spotify.com/" target="_blank" rel="noopener">Spotify ↗</a>
           <a href="https://music.apple.com/" target="_blank" rel="noopener">Apple Music ↗</a>
           <a href="https://suno.com/" target="_blank" rel="noopener">Suno ↗</a></span></li>
-        <li>Press <b>Start recording</b>, pick that tab, and keep <b>“Share tab audio”</b> switched on.</li>
-        <li>Play the song from the start. Press <b>Stop</b> when it ends — then play it back, trim it, and prepare it.</li>
+        <li><b>Connect</b> the song’s tab below (keep “Share tab audio” on). Its meter moves when sound arrives.</li>
+        <li>Press <b>● Record</b>, play the song from the start, then <b>■ Stop</b> — play it back, trim it, and prepare it.</li>
       </ol>
-      <div class="recordRow">
-        <button id="tabStart" class="btn primary">Start recording</button>
-        <button id="tabStop" class="btn danger hidden">■ Stop</button>
-        <button id="tabRestart" class="btn ghost hidden recordRestart" title="Throw away what’s recorded and start over on the same tab">↺ Restart</button>
-        <span id="tabTime" class="mono">0:00</span>
-        <span class="meter"><span id="tabLevel"></span></span>
+
+      <div class="inputs" role="group" aria-label="Recording inputs">
+        ${inputRow('tab', 'Song (browser tab)', 'Connect tab', 'The song playing in another tab.')}
+        ${inputRow('desktop', 'Desktop audio', 'Connect screen', 'Everything your computer plays. Windows / ChromeOS: share “Entire screen” with “Share system audio”. Not available on Mac.')}
+        ${inputRow('mic', 'Microphone', 'Turn on mic', 'Usually leave off — your voice would be mixed into the song.')}
       </div>
-      <div id="tabHelp" class="hint">Works in Chrome and Edge on a computer. Your recording is used only to prepare this song.</div>
+
+      <div class="recordRow">
+        <button id="recStart" class="btn record">● Record</button>
+        <button id="recStop" class="btn danger hidden">■ Stop</button>
+        <button id="recRestart" class="btn ghost hidden" title="Throw away what’s recorded and start over from the same inputs">↺ Restart</button>
+        <span id="recTime" class="mono">0:00</span>
+        <span id="recState" class="hint small"></span>
+      </div>
+      <div class="hint">Meters are silent — you see the level, you don’t hear it twice. Works in Chrome and Edge on a computer.</div>
     </div>
 
     <div id="capturePreview" class="capturePreview hidden">
@@ -125,8 +142,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const prepError = el(root, '#prepError');
   let abort: AbortController | null = null;
   let disposed = false;
-  const recorder = new TabRecorder();
-  let meterTimer: number | null = null;
+  const mixer = new CaptureMixer();
+  let meterFrame = 0;
+  let timerHandle: number | null = null;
 
   // ------------------------------------------------ LALAL status
   const renderLalal = () => {
@@ -242,29 +260,30 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     takeFile(event.dataTransfer?.files?.[0]);
   });
 
-  // ------------------------------------------------ tab recording
-  const tabStart = el<HTMLButtonElement>(root, '#tabStart');
-  const tabStop = el<HTMLButtonElement>(root, '#tabStop');
+  // ------------------------------------------------ tab recording: input mixer + record / stop / restart
   const capturePreview = el(root, '#capturePreview');
   const captureVideo = el<HTMLVideoElement>(root, '#captureVideo');
   const capturePip = el<HTMLButtonElement>(root, '#capturePip');
   const pipSupported = 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
   capturePip.classList.toggle('hidden', !pipSupported);
-  const floatTab = async () => {
+  capturePip.addEventListener('click', async () => {
     try {
       if (document.pictureInPictureElement) await document.exitPictureInPicture();
       else await captureVideo.requestPictureInPicture();
     } catch {
       toast('Couldn’t float the tab. Press “⧉ Float the tab” again.', 'error');
     }
-  };
-  capturePip.addEventListener('click', () => void floatTab());
+  });
   captureVideo.addEventListener('enterpictureinpicture', () => { capturePip.textContent = '⧉ Bring it back'; });
   captureVideo.addEventListener('leavepictureinpicture', () => { capturePip.textContent = '⧉ Float the tab'; });
-  const showPreview = (on: boolean) => {
-    if (on && recorder.videoStream) {
-      captureVideo.srcObject = recorder.videoStream;
-      void captureVideo.play().catch(() => undefined);
+  const syncPreview = () => {
+    const stream = mixer.videoStream;
+    if (stream) {
+      const current = captureVideo.srcObject as MediaStream | null;
+      if (current?.getVideoTracks()[0] !== stream.getVideoTracks()[0]) {
+        captureVideo.srcObject = stream;
+        void captureVideo.play().catch(() => undefined);
+      }
       capturePreview.classList.remove('hidden');
     } else {
       if (document.pictureInPictureElement === captureVideo) void document.exitPictureInPicture().catch(() => undefined);
@@ -273,63 +292,131 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     }
   };
 
-  const setRecording = (on: boolean) => {
-    showPreview(on);
-    tabStart.classList.toggle('hidden', on);
-    tabStop.classList.toggle('hidden', !on);
-    root.querySelectorAll<HTMLButtonElement>('.recordStart').forEach(button => button.classList.toggle('hidden', on));
-    root.querySelectorAll<HTMLButtonElement>('.linkStop, .recordRestart').forEach(button => button.classList.toggle('hidden', !on));
-    if (meterTimer !== null) window.clearInterval(meterTimer);
-    let warned = false;
-    meterTimer = on ? window.setInterval(() => {
-      root.querySelectorAll<HTMLElement>('#tabTime, .linkTime').forEach(node => { node.textContent = formatTime(recorder.seconds); });
-      if (!warned && recorder.seconds > 6 && recorder.peak < 0.02) {
-        warned = true;
-        toast('No sound from that tab yet. Is the song playing? If you picked a window or screen, stop and pick the browser TAB with “Share tab audio” on.', 'error');
-      }
-      root.querySelectorAll<HTMLElement>('#tabLevel, .linkLevel').forEach(node => { node.style.width = Math.round(recorder.level * 100) + '%'; });
-    }, 200) : null;
-  };
+  const recStart = el<HTMLButtonElement>(root, '#recStart');
+  const recStop = el<HTMLButtonElement>(root, '#recStop');
+  const recRestart = el<HTMLButtonElement>(root, '#recRestart');
+  const recTime = el(root, '#recTime');
+  const recState = el(root, '#recState');
   const reviewHost = el(root, '#capReviewHost');
   let closeReview: (() => void) | null = null;
-  const startTab = async () => {
-    closeReview?.();
-    closeReview = null;
-    if (!TabRecorder.supported()) { toast('This browser can’t record tab audio. Use Chrome or Edge on a computer, or upload a file.', 'error'); return; }
-    try {
-      recorder.seconds = 0;
-      await recorder.start();
-      recorder.onEnded = () => void stopTab();
-      setRecording(true);
-      toast('Recording… play the song in the other tab. Use “⧉ Float the tab” to watch it from here.');
-    } catch (error) {
-      setRecording(false);
-      const name = error instanceof Error ? error.name : '';
-      const message = name === 'NotAllowedError' ? 'Recording was cancelled (or screen sharing is blocked for this browser in your system settings).'
-        : name === 'NotSupportedError' || name === 'TypeError' ? 'This browser can’t record tab audio. Use Chrome or Edge on a computer, or upload a file.'
-        : name === 'NotReadableError' || name === 'AbortError' ? 'The browser couldn’t start sharing that tab. Close other screen-sharing apps and try again.'
-        : error instanceof Error ? error.message : 'Recording failed.';
-      toast(message + (name ? ' [' + name + ']' : ''), 'error');
+  const INPUTS: InputId[] = ['tab', 'desktop', 'mic'];
+
+  const shareError = (error: unknown) => {
+    const name = error instanceof Error ? error.name : '';
+    const message = name === 'NotAllowedError' ? 'Sharing was cancelled (or screen sharing is blocked for this browser in your system settings).'
+      : name === 'NotSupportedError' || name === 'TypeError' ? 'This browser can’t share tab audio. Use Chrome or Edge on a computer, or upload a file.'
+      : name === 'NotReadableError' || name === 'AbortError' ? 'The browser couldn’t start sharing. Close other screen-sharing apps and try again.'
+      : error instanceof Error ? error.message : 'Couldn’t connect that input.';
+    toast(message + (name && name !== 'Error' ? ' [' + name + ']' : ''), 'error');
+  };
+
+  const renderInputs = () => {
+    for (const id of INPUTS) {
+      const row = el(root, `[data-input="${id}"]`);
+      const state = mixer.state(id);
+      row.classList.toggle('connected', state.connected);
+      row.classList.toggle('muted', state.connected && !state.on);
+      const power = el<HTMLButtonElement>(row, '.power');
+      power.setAttribute('aria-pressed', String(state.connected && state.on));
+      power.title = !state.connected ? 'Not connected' : state.on ? 'On — recorded. Click to mute' : 'Muted — not recorded. Click to turn on';
+      el(row, '.inputStatus').textContent = !state.connected ? 'Not connected' : (state.on ? 'On · ' : 'Muted · ') + state.label;
+      el<HTMLButtonElement>(row, '.connect').textContent = state.connected ? 'Disconnect' : el(row, '.connect').dataset.label!;
+    }
+    const any = mixer.hasLiveInput;
+    recStart.disabled = !any;
+    recStart.title = any ? '' : 'Connect and switch on at least one input first';
+    syncPreview();
+  };
+  mixer.onChange = renderInputs;
+
+  // Silent meters: redraw every frame while anything is connected.
+  const meters = () => {
+    meterFrame = requestAnimationFrame(meters);
+    for (const id of INPUTS) {
+      const state = mixer.state(id);
+      const bar = root.querySelector<HTMLElement>(`[data-input="${id}"] .vu span`);
+      if (bar) bar.style.width = Math.round(state.level * 100) + '%';
     }
   };
-  const stopTab = async () => {
-    if (tabStop.classList.contains('hidden')) return;
-    setRecording(false);
-    const recording = await recorder.stop();
-    if (!recording) { toast('No sound was captured. Make sure the song was playing and “Share tab audio” was on.', 'error'); return; }
+  meters();
+
+  root.querySelectorAll<HTMLElement>('[data-input]').forEach(row => {
+    const id = row.dataset.input as InputId;
+    const connect = async () => {
+      if (!CaptureMixer.supported() && id !== 'mic') { toast('This browser can’t share tab audio. Use Chrome or Edge on a computer, or upload a file.', 'error'); return; }
+      try {
+        if (id === 'mic') await mixer.connectMic();
+        else await mixer.connectShare(id);
+        if (id !== 'mic') toast('Connected. Play the song in that tab — its meter should move.');
+      } catch (error) {
+        if (id === 'mic') toast('Microphone blocked. Allow the mic for this site and try again.', 'error');
+        else shareError(error);
+      }
+      renderInputs();
+    };
+    el(row, '.connect').addEventListener('click', () => {
+      if (mixer.state(id).connected) { mixer.disconnect(id); renderInputs(); }
+      else void connect();
+    });
+    el(row, '.power').addEventListener('click', () => {
+      const state = mixer.state(id);
+      if (!state.connected) void connect();
+      else mixer.setOn(id, !state.on);
+    });
+  });
+
+  const setRecordingUi = (on: boolean) => {
+    recStart.classList.toggle('hidden', on);
+    recStop.classList.toggle('hidden', !on);
+    recRestart.classList.toggle('hidden', !on);
+    recState.textContent = on ? 'Recording…' : '';
+    recTime.classList.toggle('live', on);
+    if (timerHandle !== null) window.clearInterval(timerHandle);
+    let warned = false;
+    timerHandle = on ? window.setInterval(() => {
+      recTime.textContent = formatTime(mixer.seconds);
+      if (!warned && mixer.seconds > 6 && mixer.peak < 0.02) {
+        warned = true;
+        toast('Nothing audible is being recorded. Is the song playing, and is its input switched on?', 'error');
+      }
+    }, 200) : null;
+  };
+
+  const startRecording = () => {
+    closeReview?.();
+    closeReview = null;
+    if (!mixer.hasLiveInput) { toast('Connect the song’s tab first.', 'error'); return; }
+    mixer.startRecording();
+    recTime.textContent = '0:00';
+    setRecordingUi(true);
+  };
+  const stopRecording = () => {
+    if (!mixer.recording) return;
+    setRecordingUi(false);
+    const recording = mixer.stopRecording();
+    if (!recording) { toast('Nothing audible was recorded. Check that the song was playing and its input was on.', 'error'); return; }
     closeReview = showRecordingReview(reviewHost, recording, {
-      use: wav => { closeReview = null; void start({ kind: 'recording', blob: wav, name: 'Recorded song ' + new Date().toLocaleDateString() + '.wav' }); },
-      redo: () => { closeReview = null; void startTab(); },
+      use: wav => {
+        closeReview = null;
+        mixer.close();
+        renderInputs();
+        void start({ kind: 'recording', blob: wav, name: 'Recorded song ' + new Date().toLocaleDateString() + '.wav' });
+      },
+      redo: () => { closeReview = null; startRecording(); },
       discard: () => { closeReview = null; toast('Recording discarded.'); }
     });
     reviewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
-  root.querySelectorAll<HTMLButtonElement>('.recordRestart').forEach(button => button.addEventListener('click', () => {
-    recorder.reset();
+  recStart.addEventListener('click', startRecording);
+  recStop.addEventListener('click', stopRecording);
+  recRestart.addEventListener('click', () => {
+    mixer.reset();
+    recTime.textContent = '0:00';
     toast('Starting over — play the song from the beginning.');
-  }));
-  tabStart.addEventListener('click', () => void startTab());
-  tabStop.addEventListener('click', () => void stopTab());
+  });
+  renderInputs();
+
+  const openRecorder = () => el<HTMLButtonElement>(root, '[data-tab="tab"]').click();
 
   // ------------------------------------------------ links
   const linkRecord = el(root, '#linkRecord');
@@ -352,16 +439,11 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     linkRecord.innerHTML = `<p><b>${name} doesn’t allow downloading songs</b> — so let’s record it while it plays:</p>
       <div class="recordRow">
         <a class="btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">1 · Open song ↗</a>
-        <button class="btn primary recordStart">2 · Start recording that tab</button>
-        <button class="btn danger linkStop hidden">3 · ■ Stop</button>
-        <button class="btn ghost hidden recordRestart" title="Throw away what’s recorded and start over on the same tab">↺ Restart</button>
-        <span class="mono linkTime">0:00</span><span class="meter"><span class="linkLevel"></span></span>
+        <button class="btn primary goRecorder">2 · Go to the recorder</button>
       </div>
-      <p class="hint">In the picker choose the tab you just opened and keep “Share tab audio” on. Then press play in that tab.</p>`;
+      <p class="hint">In the recorder, press “Connect tab”, pick the tab you just opened (keep “Share tab audio” on), then Record.</p>`;
     linkRecord.classList.remove('hidden');
-    el(linkRecord, '.recordStart').addEventListener('click', () => void startTab());
-    el(linkRecord, '.linkStop').addEventListener('click', () => void stopTab());
-    el(linkRecord, '.recordRestart').addEventListener('click', () => { recorder.reset(); toast('Starting over — play the song from the beginning.'); });
+    el(linkRecord, '.goRecorder').addEventListener('click', openRecorder);
   });
 
   // ------------------------------------------------ library
@@ -390,9 +472,10 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   return () => {
     disposed = true;
     abort?.abort();
-    if (meterTimer !== null) window.clearInterval(meterTimer);
-    if (!tabStop.classList.contains('hidden')) void recorder.stop();
-    showPreview(false);
+    cancelAnimationFrame(meterFrame);
+    if (timerHandle !== null) window.clearInterval(timerHandle);
     closeReview?.();
+    if (document.pictureInPictureElement === captureVideo) void document.exitPictureInPicture().catch(() => undefined);
+    mixer.close();
   };
 }

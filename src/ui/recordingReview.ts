@@ -32,24 +32,29 @@ export function showRecordingReview(container: HTMLElement, recording: Recording
         <button id="capDiscard" class="btn ghost">Discard</button>
         <button id="capUse" class="btn primary">Prepare this song</button>
       </div>
-      <details id="capTrim" class="capTrim">
+      <details id="capTrim" class="capTrim" open>
         <summary>✂ Trim <span id="capTrimLabel"></span></summary>
-        <canvas id="capWave" aria-label="Waveform — click to play from a spot"></canvas>
-        <div class="trimRow">
-          <label>Start <input id="trimStart" type="range" min="0" max="${duration.toFixed(2)}" step="0.05"><output id="trimStartOut"></output></label>
-          <button id="trimStartHere" class="chip ghost">Start at playhead</button>
+        <p class="hint small">Drag the two handles. Only the highlighted part between them is used. Tap the waveform to listen from a spot.</p>
+        <div id="trimTrack" class="trimTrack">
+          <canvas id="capWave" aria-hidden="true"></canvas>
+          <div id="trimRange" class="trimRange"></div>
+          <button id="handleStart" class="trimHandle start" role="slider" aria-label="Trim start" aria-valuemin="0" aria-valuemax="${duration.toFixed(1)}"><span id="handleStartTime"></span></button>
+          <button id="handleEnd" class="trimHandle end" role="slider" aria-label="Trim end" aria-valuemin="0" aria-valuemax="${duration.toFixed(1)}"><span id="handleEndTime"></span></button>
         </div>
-        <div class="trimRow">
-          <label>End <input id="trimEnd" type="range" min="0" max="${duration.toFixed(2)}" step="0.05"><output id="trimEndOut"></output></label>
-          <button id="trimEndHere" class="chip ghost">End at playhead</button>
+        <div class="row wrap trimTools">
+          <button id="trimStartHere" class="chip ghost">⇤ Start at playhead</button>
+          <button id="trimEndHere" class="chip ghost">End at playhead ⇥</button>
+          <button id="trimReset" class="chip ghost">Reset to automatic trim</button>
         </div>
-        <button id="trimReset" class="chip ghost">Reset to automatic trim</button>
       </details>
     </div>`;
 
   const canvas = el<HTMLCanvasElement>(container, '#capWave');
-  const startInput = el<HTMLInputElement>(container, '#trimStart');
-  const endInput = el<HTMLInputElement>(container, '#trimEnd');
+  const track = el(container, '#trimTrack');
+  const handleStart = el<HTMLButtonElement>(container, '#handleStart');
+  const handleEnd = el<HTMLButtonElement>(container, '#handleEnd');
+  const rangeBox = el(container, '#trimRange');
+  const MIN_KEEP = 1;
   const playButton = el<HTMLButtonElement>(container, '#capPlay');
   const position = el(container, '#capPos');
 
@@ -88,23 +93,28 @@ export function showRecordingReview(container: HTMLElement, recording: Recording
       g.globalAlpha = column >= x(start) && column <= x(end) ? 0.9 : 0.25;
       g.fillRect(column, (height - h) / 2, 1, h);
     });
-    g.globalAlpha = 0.55;
+    // Dim the parts that will be cut off.
+    g.globalAlpha = 0.6;
     g.fillStyle = style.getPropertyValue('--bg').trim();
     g.fillRect(0, 0, x(start), height);
     g.fillRect(x(end), 0, width - x(end), height);
     g.globalAlpha = 1;
-    g.fillStyle = style.getPropertyValue('--accent-2').trim();
-    g.fillRect(x(start) - 1, 0, 2, height);
-    g.fillRect(x(end) - 1, 0, 2, height);
     g.fillStyle = style.getPropertyValue('--text').trim();
     g.fillRect(x(playhead()), 0, 1.5, height);
   };
 
   const render = () => {
-    startInput.value = String(start);
-    endInput.value = String(end);
-    el(container, '#trimStartOut').textContent = formatTime(start);
-    el(container, '#trimEndOut').textContent = formatTime(end);
+    const pct = (t: number) => ((t / duration) * 100).toFixed(3) + '%';
+    handleStart.style.left = pct(start);
+    handleEnd.style.left = pct(end);
+    rangeBox.style.left = pct(start);
+    rangeBox.style.width = (((end - start) / duration) * 100).toFixed(3) + '%';
+    el(container, '#handleStartTime').textContent = formatTime(start);
+    el(container, '#handleEndTime').textContent = formatTime(end);
+    handleStart.setAttribute('aria-valuenow', start.toFixed(1));
+    handleStart.setAttribute('aria-valuetext', formatTime(start));
+    handleEnd.setAttribute('aria-valuenow', end.toFixed(1));
+    handleEnd.setAttribute('aria-valuetext', formatTime(end));
     el(container, '#capTrimLabel').textContent = '(' + formatTime(start) + ' – ' + formatTime(end) + ')';
     el(container, '#capLength').textContent = 'keeping ' + formatTime(end - start) + ' of ' + formatTime(duration);
     position.textContent = formatTime(playhead() - start < 0 ? 0 : playhead() - start) + ' / ' + formatTime(end - start);
@@ -142,14 +152,46 @@ export function showRecordingReview(container: HTMLElement, recording: Recording
   };
 
   playButton.addEventListener('click', () => (source ? stopPlayback() : void play(playFrom >= end - 0.1 ? start : playFrom)));
-  canvas.addEventListener('click', event => {
-    const rect = canvas.getBoundingClientRect();
-    void play(((event.clientX - rect.left) / rect.width) * duration);
+  // Dual-handle trim: drag either handle (touch, mouse or pen); tap the waveform to listen from there.
+  const timeAt = (clientX: number) => {
+    const rect = track.getBoundingClientRect();
+    return Math.max(0, Math.min(duration, ((clientX - rect.left) / rect.width) * duration));
+  };
+  const setStart = (value: number) => { start = Math.max(0, Math.min(value, end - MIN_KEEP)); if (!source) playFrom = start; render(); };
+  const setEnd = (value: number) => { end = Math.min(duration, Math.max(value, start + MIN_KEEP)); render(); };
+  const dragHandle = (handle: HTMLElement, set: (value: number) => void) => {
+    handle.addEventListener('pointerdown', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      handle.setPointerCapture(event.pointerId);
+      handle.classList.add('dragging');
+      if (source) stopPlayback();
+    });
+    handle.addEventListener('pointermove', event => {
+      if (handle.hasPointerCapture(event.pointerId)) set(timeAt(event.clientX));
+    });
+    const release = (event: PointerEvent) => {
+      if (!handle.hasPointerCapture(event.pointerId)) return;
+      handle.releasePointerCapture(event.pointerId);
+      handle.classList.remove('dragging');
+    };
+    handle.addEventListener('pointerup', release);
+    handle.addEventListener('pointercancel', release);
+    handle.addEventListener('keydown', event => {
+      const step = event.shiftKey ? 1 : 0.1;
+      const current = handle === handleStart ? start : end;
+      if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') { event.preventDefault(); set(current - step); }
+      if (event.key === 'ArrowRight' || event.key === 'ArrowUp') { event.preventDefault(); set(current + step); }
+    });
+  };
+  dragHandle(handleStart, setStart);
+  dragHandle(handleEnd, setEnd);
+  track.addEventListener('click', event => {
+    if ((event.target as HTMLElement).closest('.trimHandle')) return;
+    void play(timeAt(event.clientX));
   });
-  startInput.addEventListener('input', () => { start = Math.min(Number(startInput.value), end - 1); if (!source) playFrom = start; render(); });
-  endInput.addEventListener('input', () => { end = Math.max(Number(endInput.value), start + 1); render(); });
-  el(container, '#trimStartHere').addEventListener('click', () => { start = Math.min(playhead(), end - 1); render(); });
-  el(container, '#trimEndHere').addEventListener('click', () => { end = Math.max(playhead(), start + 1); stopPlayback(); render(); });
+  el(container, '#trimStartHere').addEventListener('click', () => setStart(playhead()));
+  el(container, '#trimEndHere').addEventListener('click', () => { const at = playhead(); stopPlayback(); setEnd(at); });
   el(container, '#trimReset').addEventListener('click', () => { start = recording.suggestedStart; end = recording.suggestedEnd; render(); });
   el(container, '#capTrim').addEventListener('toggle', () => requestAnimationFrame(render));
 
