@@ -299,10 +299,17 @@ export class PitchLane {
     ctx.lineWidth = 3;
     ctx.lineCap = 'round';
     let previous: { px: number; py: number; t: number } | null = null;
-    for (const point of this.trail) {
-      if (point.t < t0 || point.t > now + 0.05) { previous = null; continue; }
+    const visible = this.trail.filter(point => point.t >= t0 - 0.2 && point.t <= now + 0.05);
+    for (let i = 0; i < visible.length; i += 1) {
+      const point = visible[i];
+      if (point.t < t0) { previous = null; continue; }
       const target = this.targetAt(point.t);
-      const error = target ? Math.abs(this.errorAt(point.midi, target)) : null;
+      // Color by the center of any vibrato (±0.11 s), so a healthy wave doesn't flash sharp/flat.
+      let sum = 0, count = 0;
+      for (let j = i; j >= 0 && point.t - visible[j].t <= 0.11; j -= 1) { sum += visible[j].midi; count += 1; }
+      for (let j = i + 1; j < visible.length && visible[j].t - point.t <= 0.11; j += 1) { sum += visible[j].midi; count += 1; }
+      const centerMidi = sum / count;
+      const error = target ? Math.abs(this.errorAt(centerMidi, target)) : null;
       const px = x(point.t), py = y(point.midi);
       ctx.strokeStyle = error === null ? color('--voice') : error <= 0.5 ? color('--good') : error <= 1.2 ? color('--close') : color('--off');
       ctx.beginPath();

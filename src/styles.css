@@ -305,6 +305,7 @@ input[type='range'] { accent-color: var(--accent); }
 .lineFlash span { font-size: 0.78rem; color: var(--muted); }
 .lineFlash.show { animation: lineFlash 1.6s ease forwards; }
 @keyframes lineFlash { 0% { opacity: 0; transform: translateY(6px) scale(0.96); } 12% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.vibratoNote { margin: 12px 0 0; padding: 10px 14px; border-radius: 12px; background: var(--surface-2); }
 .progressNote { margin: 12px 0 0; font-weight: 600; }
 .bestLine { margin: 12px 0 0; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--good) 12%, var(--surface-2)); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: 5rem; font-weight: 900; color: var(--text); background: color-mix(in srgb, var(--lane-bg) 60%, transparent); }
@@ -425,6 +426,7 @@ input[type='range'] { accent-color: var(--accent); }
 .wNote.hit { background: color-mix(in srgb, var(--good) 30%, var(--surface-2)); }
 .wNote.close { background: color-mix(in srgb, var(--close) 30%, var(--surface-2)); }
 .wNote.miss { background: color-mix(in srgb, var(--off) 22%, var(--surface-2)); }
+.vibLive { min-height: 1.4em; margin: 6px 0 0; color: var(--accent-2); font-weight: 700; font-size: 0.9rem; }
 .rangeBox { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .rangeBox span { color: var(--muted); }
 

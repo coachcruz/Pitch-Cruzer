@@ -1,4 +1,5 @@
 import { LiveMic } from '../lib/mic';
+import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { midiToFrequency, midiToNote, NOTE_NAMES, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { el, prefs, toast } from '../ui/dom';
 
@@ -10,6 +11,7 @@ export function renderTuner(root: HTMLElement): () => void {
     <div class="tunerNote"><strong id="tNote">—</strong><span id="tHz">Sing any note</span></div>
     <div class="cents"><div class="zone"></div><div id="tNeedle" class="needle"></div></div>
     <div class="centsLabels"><span>Flat (too low)</span><span>In tune</span><span>Sharp (too high)</span></div>
+    <p id="tVib" class="vibLive center" aria-live="off"></p>
     <p id="tHint" class="tip center">Turn on the mic and sing “ahh”.</p>
     <div class="row center wrap">
       <button id="tMic" class="btn primary big">🎤 Start mic</button>
@@ -146,10 +148,20 @@ export function renderTuner(root: HTMLElement): () => void {
   });
   wStop.addEventListener('click', () => finishWarmup(true));
 
+  const vib = new LiveVibrato();
+  const vibOut = el(root, '#tVib');
+  let vibShownAt = 0;
   const loop = () => {
     frame = requestAnimationFrame(loop);
     if (!mic.active) return;
-    const { midi } = mic.read();
+    const raw = mic.read().midi;
+    const now = performance.now() / 1000;
+    vib.push(now, raw);
+    // The needle follows the center of any vibrato instead of bouncing sharp/flat with every wave.
+    const midi = raw === null ? null : vib.center();
+    const label = vibratoLabel(vib.reading());
+    if (label) { vibOut.textContent = label; vibShownAt = now; }
+    else if (now - vibShownAt > 1.5) vibOut.textContent = '';
     if (midi === null) { warmupStep(null); stable = []; needle.style.left = '50%'; needle.className = 'needle idle'; return; }
     warmupStep(midi);
     const goal = target.value ? Number(target.value) : Math.round(midi);

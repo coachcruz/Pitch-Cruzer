@@ -6,6 +6,7 @@ import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveO
 import { Player, Timeline, type Range } from '../lib/player';
 import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
+import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 import { PitchLane, type TrailPoint } from '../ui/lane';
@@ -239,6 +240,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   let review: Review | null = null;
   let reviewPlaying = false;
   let frame = 0;
+  const liveVib = new LiveVibrato();
   let disposed = false;
 
   const levels = {
@@ -773,6 +775,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         </div>
       </div>
       <p id="progressNote" class="progressNote hidden"></p>
+      ${s.vibrato.verdict ? `<p class="vibratoNote">〰 ${escapeHtml(s.vibrato.verdict)}</p>` : ''}
       ${bestLineHtml(s)}
       <p class="tip">💡 ${escapeHtml(coachingTip(s))}</p>
       <div class="row wrap">
@@ -1008,7 +1011,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       return;
     }
     coachYou.textContent = midiToNote(sung);
-    coachYouOct.textContent = 'octave ' + octaveOf(sung);
+    const vibText = vibratoLabel(liveVib.reading());
+    coachYouOct.textContent = 'octave ' + octaveOf(sung) + (vibText ? ' · ' + vibText.replace('〰 vibrato ', '〰 ') : '');
     if (!target) { coachYou.className = ''; coachHint.textContent = inBreath ? '🌬 Breathe now' : 'You’re singing ' + midiToNote(sung) + '.'; return; }
     const error = lane.errorAt(sung, target);
     const cents = Math.round(error * 100);
@@ -1036,12 +1040,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     let sung: number | null = null;
     if (mic.active) {
       const reading = mic.read();
-      sung = reading.midi;
-      lane.liveMidi = sung;
+      liveVib.push(performance.now() / 1000, reading.midi);
+      // Coach + encouragement judge the center of any vibrato; the lane still draws the real wave.
+      sung = reading.midi === null ? null : liveVib.center();
+      lane.liveMidi = reading.midi;
       if (playing && source !== null && !reviewPlaying) {
         if (source < lastSource - 0.3) liveTrail.length = 0;
         lastSource = source;
-        if (sung !== null) liveTrail.push({ t: source, midi: sung });
+        if (reading.midi !== null) liveTrail.push({ t: source, midi: reading.midi });
         if (liveTrail.length > 2000) liveTrail.splice(0, liveTrail.length - 1500);
       }
     }
