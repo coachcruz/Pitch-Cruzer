@@ -2011,11 +2011,15 @@ function renderPhraseCoach(): void {
       if (index < 0 || !note || noteToMidi(note) === null) return;
 
       selectedPhraseIndex = index;
-      button.classList.add('playing');
-      button.textContent = 'Playing ' + note + '…';
-      phraseBuildStateEl.textContent = 'Playing ' + note + ' · ' + (phraseWords[index] ?? 'unit');
       renderPhraseCoach();
       updateListeningContext();
+
+      const liveButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
+        '.unitToneButton[data-tone-index="' + index + '"]'
+      );
+      liveButton?.classList.add('playing');
+      if (liveButton) liveButton.textContent = 'Playing ' + note + '…';
+      phraseBuildStateEl.textContent = 'Playing ' + note + ' · ' + (phraseWords[index] ?? 'unit');
 
       void playNoteTone(note, 800)
         .then(() => {
