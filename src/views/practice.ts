@@ -113,6 +113,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <button class="chip ghost" id="editSections" aria-pressed="false">Rename sections</button>
           <label class="inline">Repeat <select id="repeats"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
           <label class="inline" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet">Style <select id="practiceStyle"><option value="along">Sing along</option><option value="echo">Echo — listen, then sing it back</option></select></label>
+          <label class="inline hidden" id="echoModelWrap" title="Copying your own voice is easier than copying someone else's">Guide <select id="echoModel"><option value="artist">Artist sings first</option><option value="me">My best take sings first</option></select></label>
           <span id="selectionLabel" class="selectionLabel"></span>
         </div>
       </div>
@@ -349,7 +350,17 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     (event.currentTarget as HTMLElement).setAttribute('aria-pressed', String(editingSections));
     renderSections();
   });
+  const echoModelEl = el<HTMLSelectElement>(root, '#echoModel');
+  echoModelEl.value = prefs.get('echoModel', 'artist');
+  const syncEchoModel = () => el(root, '#echoModelWrap').classList.toggle('hidden', !echoMode());
+  syncEchoModel();
+  echoModelEl.addEventListener('change', () => {
+    prefs.set('echoModel', echoModelEl.value);
+    if (player.state !== 'stopped' && !recording) stopAll();
+    if (echoModelEl.value === 'me') toast('Echo will use your best saved take for each line it covers (the artist fills in the rest).');
+  });
   styleEl.addEventListener('change', () => {
+    syncEchoModel();
     prefs.set('practiceStyle', styleEl.value);
     if (styleEl.value === 'echo') toast('Echo practice: listen to each line, then sing it back in the quiet. Only your turns are scored.');
     selectionChanged();
@@ -621,6 +632,30 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     tick();
   };
 
+  // Your best saved take, decoded once, used as the Echo guide ("My best take sings first").
+  let modelCache: { id: string; buffer: AudioBuffer; locate: (sourceTime: number) => number | null } | null = null;
+  const echoModelVoice = async () => {
+    if (!echoMode() || echoModelEl.value !== 'me') return undefined;
+    const takes = session.saved ? await listTakes(song.id).catch(() => [] as StoredTake[]) : [];
+    const singer = prefs.get('singer', '');
+    const take = takes.find(item => item.singer === singer) ?? takes[0];
+    if (!take) { toast('Save a take first — then Echo can use your own voice as the guide. Using the artist for now.'); return undefined; }
+    if (modelCache?.id !== take.id) {
+      const buffer = await decodeAudio(await take.voice.arrayBuffer());
+      const timeline = new Timeline(take.segments, 1);
+      const pieces = timeline.hasTurns ? timeline.pieces.filter(piece => piece.turn) : timeline.pieces;
+      modelCache = {
+        id: take.id,
+        buffer,
+        locate: sourceTime => {
+          const piece = pieces.find(item => sourceTime >= item.sourceStart - 0.05 && sourceTime < item.sourceStart + item.duration);
+          return piece ? piece.timelineStart + Math.max(0, sourceTime - piece.sourceStart) - take.offsetSeconds : null;
+        }
+      };
+    }
+    return modelCache;
+  };
+
   const startPlayback = async (withRecording: boolean, from = 0, voice?: { buffer: AudioBuffer; offset: number }) => {
     reviewPlaying = Boolean(voice);
     if (!voice) lane.trail = liveTrail;
@@ -630,9 +665,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const leadIn = useCountIn ? 1.9 : 0.12;
     const ranges = voice && review ? review.ranges : playbackRanges();
     const reps = voice && review ? review.repeats : repeats();
-    player.setLevel('voice', voice ? levels.voice / 100 : 0);
+    const model = voice ? undefined : await echoModelVoice();
+    player.setLevel('voice', voice || model ? levels.voice / 100 : 0);
     if (withRecording) mic.startRecording();
-    const origin = await player.play(ranges, reps, { from, leadIn, voice });
+    const origin = await player.play(ranges, reps, { from, leadIn, voice, model });
     if (useCountIn) {
       [1.8, 1.2, 0.6].forEach((before, index) => beep(origin - before, index === 0));
       showCountdown(origin);
@@ -733,8 +769,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <div><span>On the note</span><b>${s.onPitchWhenSinging}%</b></div>
           <div><span>Sang along</span><b>${s.coverage}%</b></div>
           <div><span>Average</span><b>${cents}</b></div>
+          <div title="How evenly you hold each note (separate from hitting it)"><span>Steadiness</span><b>${s.steadiness === null ? '—' : s.steadiness + '%'}</b></div>
         </div>
       </div>
+      <p id="progressNote" class="progressNote hidden"></p>
       ${bestLineHtml(s)}
       <p class="tip">💡 ${escapeHtml(coachingTip(s))}</p>
       <div class="row wrap">
@@ -749,6 +787,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <button id="downloadVoice" class="btn ghost">Download my voice only</button>
       </div>
       <p class="hint small">Lines in the lyrics list are now colored by how close you were. Tap one to hear the original again.</p>`;
+    void renderProgress();
     reviewEl.querySelector('#playBest')?.addEventListener('click', async () => {
       if (!review) return;
       const best = bestLine(review.score);
@@ -831,6 +870,28 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         void renderTakes();
       } catch { toast('Could not save the take (storage may be full).', 'error'); }
     });
+  };
+
+  /** Compare this take with your earlier ones on the same part — seeing progress builds confidence. */
+  const renderProgress = async () => {
+    if (!review || !session.saved) return;
+    const current = review;
+    const singer = current.singer ?? prefs.get('singer', '');
+    const earlier = (await listTakes(song.id).catch(() => [] as StoredTake[]))
+      .filter(take => take.id !== current.savedId && take.label === current.label && (!singer || take.singer === singer))
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const note = root.querySelector<HTMLElement>('#progressNote');
+    if (!note || review !== current) return;
+    const score = current.score.score;
+    if (!earlier.length) { note.textContent = '🌱 Your first saved take on this part — save it to track your progress.'; }
+    else {
+      const last = earlier[0].score;
+      const best = Math.max(...earlier.map(take => take.score));
+      note.textContent = score > last ? '📈 Up ' + (score - last) + ' points from your last take (' + last + ')' + (score > best ? ' — a new personal best!' : '.')
+        : score === last ? '➡️ Same as your last take — nice and consistent.'
+        : '💪 Your best here is ' + best + '. You’ve done it before — you can do it again.';
+    }
+    note.classList.remove('hidden');
   };
 
   // ---------------------------------------------------------------- takes / leaderboard

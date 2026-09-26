@@ -71,7 +71,15 @@ export class Player {
   }
 
   /** Builds the timeline for the given ranges and starts playing at `from` seconds into it. */
-  async play(ranges: Range[], repeats: number, options: { from?: number; leadIn?: number; voice?: { buffer: AudioBuffer; offset: number } } = {}): Promise<number> {
+  /**
+   * `model`: Echo practice with your own best take as the guide. For each listen piece, `locate`
+   * returns where in the take's audio that song moment was sung (or null → the artist sings it).
+   */
+  async play(ranges: Range[], repeats: number, options: {
+    from?: number; leadIn?: number;
+    voice?: { buffer: AudioBuffer; offset: number };
+    model?: { buffer: AudioBuffer; locate: (sourceTime: number) => number | null };
+  } = {}): Promise<number> {
     this.stop(false);
     if (this.ctx.state !== 'running') await this.ctx.resume();
 
@@ -94,6 +102,13 @@ export class Player {
       const when = this.originAt + piece.timelineStart + skip;
       const duration = piece.duration - skip;
       if (piece.turn) continue; // Echo practice: silence while the singer sings it back
+      const modelAt = options.model ? options.model.locate(piece.sourceStart + skip) : null;
+      if (options.model && modelAt !== null && modelAt >= 0 && modelAt + duration <= options.model.buffer.duration + 0.5) {
+        // Your own voice replaces the artist's; the music keeps playing underneath.
+        this.schedule(options.model.buffer, this.gains.voice, when, modelAt, duration);
+        for (const [buffer, gain] of stems.slice(1)) this.schedule(buffer, gain, when, piece.sourceStart + skip, duration);
+        continue;
+      }
       for (const [buffer, gain] of stems) this.schedule(buffer, gain, when, piece.sourceStart + skip, duration);
     }
     if (options.voice) {

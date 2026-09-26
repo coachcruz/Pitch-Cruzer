@@ -258,6 +258,9 @@ export class PitchLane {
       const sung = syllable.end <= now;
       ctx.font = (current ? '800 21px' : '600 19px') + ' ui-sans-serif, system-ui, sans-serif';
       const textWidth = ctx.measureText(syllable.text).width;
+      // Already-sung syllables stay where they were sung; if one would overlap, drop it rather than
+      // shoving it along (that made words pile up at the left edge when paused).
+      if (sung && x(syllable.start) < rowRight + 5) continue;
       const left = Math.max(x(syllable.start), rowRight + 5);
       rowRight = left + textWidth;
       if (left > width) break;
