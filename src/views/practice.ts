@@ -1,4 +1,4 @@
-import { applyTypedLyrics, breathMarks, buildLines, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
+import { applyTypedLyrics, breathMarks, buildLines, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
 import { decodeAudio, downloadBlob, encodeWav } from '../lib/audio';
 import { getSong, listTakes, saveSong, saveTake, deleteTake, type StoredSong, type StoredTake } from '../lib/library';
 import { LiveMic } from '../lib/mic';
@@ -24,7 +24,14 @@ interface Review {
   singer?: string;
 }
 
-const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro', 'part'];
+const SHORT_NAMES: Record<SectionKind, string> = { intro: 'In', verse: 'V', pre: 'Pre', chorus: 'C', bridge: 'Br', instrumental: 'Inst', outro: 'Out', part: 'P' };
+/** "Verse 2" → "V2": fits the section bar on a phone. Custom names keep their first letters. */
+function shortLabel(section: Section): string {
+  const number = section.label.match(/\d+$/)?.[0] ?? '';
+  return section.label.startsWith(SECTION_NAMES[section.kind]) ? SHORT_NAMES[section.kind] + number : section.label.slice(0, 3);
+}
+
+const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
 
 export function renderPractice(root: HTMLElement, songId: string, navigate: (hash: string) => void): () => void {
   root.innerHTML = '<div class="card loading">Loading song…</div>';
@@ -103,8 +110,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <button id="saveSong" class="menuItem ${session.saved ? 'hidden' : ''}" role="menuitem">Save to my songs</button>
           <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
           <button id="renameSong" class="menuItem" role="menuitem">Rename song</button>
-          <button id="menuFixLyrics" class="menuItem" role="menuitem">Fix lyrics</button>
-          <button id="menuRedoLyrics" class="menuItem" role="menuitem">Redo lyrics (language)</button>
+          <button id="pickLines" class="menuItem" role="menuitem">Pick lines to practice</button>
+          <button id="renameSections" class="menuItem" role="menuitem">Rename sections</button>
+          <button id="fixLyrics" class="menuItem" role="menuitem">Fix lyrics</button>
+          <button id="redoLyrics" class="menuItem" role="menuitem">Redo lyrics (language)</button>
+          <label class="menuItem check small"><input id="showNotes" type="checkbox"> Notes over the karaoke words</label>
           <label class="menuItem check small"><input id="showUpNext" type="checkbox"> Show “Up next” panel</label>
         </div>
       </div>
@@ -119,18 +129,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <button id="mic" class="tbtn" aria-pressed="false">🎤 <span>Mic</span></button>
           <button id="mixToggle" class="tbtn" aria-expanded="false">🎚 <span>Mix</span></button>
         </div>
-        <div class="menuWrap">
-          <button id="sectionsBtn" class="dropBtn" aria-haspopup="true" aria-expanded="false" title="Choose what to practice"><span id="selectionLabel">Whole song</span> ▾</button>
-          <div id="sectionsMenu" class="popMenu wide hidden">
-            <div class="menuQuick">
-              <button data-quick="all">Whole song</button><button data-quick="verse">All verses</button><button data-quick="chorus">All choruses</button><button data-quick="none">Clear</button>
-            </div>
-            <div id="songMap" class="secList" role="group" aria-label="Sections — pick one or more"></div>
-            <div class="menuFoot">
-              <button id="editSections" class="linkBtn" aria-pressed="false">Rename sections</button>
-              <button id="menuPickLines" class="linkBtn">Pick lines from the lyrics…</button>
-            </div>
-          </div>
+        <div class="viewSwitch" role="radiogroup" aria-label="View">
+          <button data-view="staff" role="radio" aria-checked="true" title="Notes on a staff with the words above them">🎼 Staff</button>
+          <button data-view="karaoke" role="radio" aria-checked="false" title="Just the words, big, lighting up as they're sung">🎤 Karaoke</button>
         </div>
         <select id="repeats" class="miniSelect" title="Repeat" aria-label="Repeat"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select>
         <select id="practiceStyle" class="miniSelect" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet" aria-label="Practice style"><option value="along">Sing along</option><option value="echo">Echo</option></select>
@@ -138,8 +139,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <span id="clock" class="mono clock">0:00 / 0:00</span>
       </div>
 
-      <div class="progress" id="progress" title="The whole song — tap to jump there">
-        <div id="progressSections" class="progSecs"></div><span id="progressFill" class="playhead"></span>
+      <div class="sectionBar" role="group" aria-label="Sections — tap one or more to practice them">
+        <button id="wholeSong" class="secAll" aria-pressed="true">Whole song</button>
+        <div id="sectionBar" class="secTrack"><span id="songPlayhead" class="playhead"></span></div>
       </div>
 
       <div id="mixPanel" class="mixPanel hidden">
@@ -175,7 +177,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       </div>
 
       <div class="stageRow" id="stageRow">
-        <div class="laneWrap"><canvas id="lane" aria-label="Lyrics scroll across the top; the singer’s notes sit on a treble and bass staff below; your voice is the blue line"></canvas>
+        <div class="karaoke hidden" id="karaoke">
+          <p id="lyricsHint" class="hint small">${analysis.transcript === 'failed' || analysis.transcript === 'none'
+            ? 'Lyrics couldn’t be heard automatically — use ⋯ → Fix lyrics to paste or find them.' : ''}</p>
+          <div id="lyricsList" class="lyricsList"></div>
+        </div>
+        <div class="laneWrap" id="laneWrap"><canvas id="lane" aria-label="Lyrics scroll across the top; the singer’s notes sit on a treble and bass staff below; your voice is the blue line"></canvas>
           <div id="countdown" class="countdown hidden"></div>
           <div id="lineFlash" class="lineFlash" aria-live="polite"></div></div>
         <aside class="upNext hidden" id="upNextPanel" aria-label="Up next">
@@ -191,20 +198,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       </div>
     </section>
 
-    <details class="card fold" id="lyricsFold">
-      <summary><h2>Full lyrics &amp; notes</h2><span class="hint small">study the whole song, pick lines, fix or redo lyrics</span></summary>
-      <div class="row wrap tools">
-        <button id="pickLines" class="chip ghost" aria-pressed="false">Pick lines to practice</button>
-        <button id="fixLyrics" class="chip ghost">Fix lyrics</button>
-        <button id="redoLyrics" class="chip ghost">Redo lyrics (language)</button>
-        <label class="check small"><input id="showNotes" type="checkbox"> Show notes</label>
-        <label class="check small"><input id="followLyrics" type="checkbox"> Scroll with the song</label>
-      </div>
-      <p id="lyricsHint" class="hint small">${analysis.transcript === 'failed' || analysis.transcript === 'none'
-        ? 'Lyrics couldn’t be heard automatically — use “Redo lyrics” or “Fix lyrics”. Notes are still shown.'
-        : 'Tap a line to play from there.'}</p>
-      <div id="lyricsList" class="lyricsList"></div>
-    </details>
+    <dialog id="sectionsDialog" class="dialog" aria-label="Rename sections">
+      <h2>Rename sections</h2>
+      <p class="hint small">If a section was guessed wrong, pick what it really is.</p>
+      <div id="sectionEditor" class="secEditor"></div>
+      <div class="row end"><button id="sectionsDone" class="btn primary" type="button">Done</button></div>
+    </dialog>
 
     <dialog id="reviewDialog" class="dialog wide" aria-label="Your take">
       <section id="review" class="review hidden" aria-live="polite"></section>
@@ -249,7 +248,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
 
   let selected = new Set<string>();
   let custom: { start: number; end: number; label: string } | null = null;
-  let editingSections = false;
   let pickingLines = false;
   let pickAnchor: LyricLine | null = null;
   let liveTrail: TrailPoint[] = [];
@@ -313,80 +311,98 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     });
   };
 
+  // ---------------------------------------------------------------- sections (one bar: the whole song)
+  // Every section of the song, sized by its length and named (Intro, Verse 1, Chorus 1…). Tap sections
+  // to practice them (several are fine); "Whole song" clears the choice. The playhead shows where you are.
+  const sectionBar = el(root, '#sectionBar');
+  const songPlayhead = el(root, '#songPlayhead');
+  const isOn = (section: Section) => selected.has(section.id) || Boolean(custom && custom.start < section.end && custom.end > section.start);
   const renderSections = () => {
-    const map = el(root, '#songMap');
-    const isOn = (section: Section) => selected.has(section.id) || Boolean(custom && custom.start < section.end && custom.end > section.start);
-    map.innerHTML = analysis.sections.map(section => {
+    const whole = !selected.size && !custom;
+    sectionBar.querySelectorAll('[data-section]').forEach(node => node.remove());
+    sectionBar.insertAdjacentHTML('afterbegin', analysis.sections.map(section => {
       const on = isOn(section);
-      const editor = editingSections
-        ? `<select data-kind="${section.id}" aria-label="Section type">${KIND_ORDER.map(kind => `<option value="${kind}" ${kind === section.kind ? 'selected' : ''}>${SECTION_NAMES[kind]}</option>`).join('')}</select>`
-        : '';
-      return `<div class="secRow kind-${section.kind} ${on ? 'on' : ''}">
-        <button data-section="${section.id}" aria-pressed="${on ? 'true' : 'false'}"><span class="tick">${on ? '✓' : ''}</span><span class="dot"></span><strong>${escapeHtml(section.label)}</strong><small>${formatTime(section.start)}–${formatTime(section.end)}</small></button>${editor}</div>`;
-    }).join('');
-    // The whole song as a thin strip: every section in its color, the chosen ones bright.
-    el(root, '#progressSections').innerHTML = analysis.sections.map(section =>
-      `<span class="kind-${section.kind} ${isOn(section) || (!selected.size && !custom) ? 'on' : ''}" style="flex-grow:${(section.end - section.start).toFixed(2)}" title="${escapeHtml(section.label)}"></span>`).join('');
-    map.querySelectorAll<HTMLButtonElement>('[data-section]').forEach(button => button.addEventListener('click', () => {
+      return `<button data-section="${section.id}" class="kind-${section.kind}${on ? ' on' : ''}${whole ? ' all' : ''}" aria-pressed="${on}"
+        style="flex-grow:${(section.end - section.start).toFixed(2)}" title="${escapeHtml(section.label)} · ${formatTime(section.start)}–${formatTime(section.end)}"><span class="long">${escapeHtml(section.label)}</span><span class="short">${escapeHtml(shortLabel(section))}</span></button>`;
+    }).join(''));
+    const wholeButton = el(root, '#wholeSong');
+    wholeButton.setAttribute('aria-pressed', String(whole));
+    wholeButton.textContent = custom ? custom.label + ' ✕' : 'Whole song';
+    sectionBar.querySelectorAll<HTMLButtonElement>('[data-section]').forEach(button => button.addEventListener('click', () => {
+      if (recording) return;
       const id = button.dataset.section!;
       custom = null;
       if (selected.has(id)) selected.delete(id); else selected.add(id);
       selectionChanged();
     }));
-    map.querySelectorAll<HTMLSelectElement>('[data-kind]').forEach(select => select.addEventListener('change', () => {
+  };
+  el(root, '#wholeSong').addEventListener('click', () => {
+    if (recording) return;
+    custom = null;
+    selected.clear();
+    selectionChanged();
+  });
+
+  const sectionsDialog = el<HTMLDialogElement>(root, '#sectionsDialog');
+  const renderSectionEditor = () => {
+    const editor = el(root, '#sectionEditor');
+    editor.innerHTML = analysis.sections.map(section => `<label class="secEdit"><span class="mono">${formatTime(section.start)}</span>
+      <select data-kind="${section.id}" aria-label="Section at ${formatTime(section.start)}">${KIND_ORDER.map(kind =>
+        `<option value="${kind}" ${kind === section.kind ? 'selected' : ''}>${SECTION_NAMES[kind]}</option>`).join('')}</select>
+      <strong>${escapeHtml(section.label)}</strong></label>`).join('');
+    editor.querySelectorAll<HTMLSelectElement>('[data-kind]').forEach(select => select.addEventListener('change', () => {
       const section = analysis.sections.find(item => item.id === select.dataset.kind);
       if (!section) return;
       section.kind = select.value as SectionKind;
       analysis.sections = relabel(analysis.sections);
       void persist();
+      renderSectionEditor();
       renderSections();
       renderLyrics();
     }));
-
-    const chosen = analysis.sections.filter(section => selected.has(section.id));
-    const names = custom ? custom.label
-      : chosen.length > 2 ? chosen[0].label + ' + ' + (chosen.length - 1) + ' more'
-      : chosen.length ? chosen.map(section => section.label).join(' + ')
-      : 'Whole song';
-    el(root, '#selectionLabel').textContent = names;
   };
+  el(root, '#sectionsDone').addEventListener('click', () => sectionsDialog.close());
 
-  // ---------------------------------------------------------------- pop-up menus (⋯ and Sections ▾)
-  const menus: Array<[HTMLButtonElement, HTMLElement]> = [
-    [el<HTMLButtonElement>(root, '#moreBtn'), el(root, '#moreMenu')],
-    [el<HTMLButtonElement>(root, '#sectionsBtn'), el(root, '#sectionsMenu')]
-  ];
-  const closeMenus = (except?: HTMLElement) => menus.forEach(([button, menu]) => {
-    if (menu === except) return;
-    menu.classList.add('hidden');
-    button.setAttribute('aria-expanded', 'false');
-  });
-  menus.forEach(([button, menu]) => button.addEventListener('click', event => {
+  // ---------------------------------------------------------------- ⋯ menu
+  const moreBtn = el<HTMLButtonElement>(root, '#moreBtn');
+  const moreMenu = el(root, '#moreMenu');
+  const closeMenu = () => { moreMenu.classList.add('hidden'); moreBtn.setAttribute('aria-expanded', 'false'); };
+  moreBtn.addEventListener('click', event => {
     event.stopPropagation();
-    const open = menu.classList.contains('hidden');
-    closeMenus(menu);
-    menu.classList.toggle('hidden', !open);
-    button.setAttribute('aria-expanded', String(open));
-  }));
-  const onDocClick = (event: MouseEvent) => {
-    if (!(event.target as HTMLElement).closest('.menuWrap')) closeMenus();
-  };
-  const onEsc = (event: KeyboardEvent) => { if (event.key === 'Escape') closeMenus(); };
+    const open = moreMenu.classList.contains('hidden');
+    moreMenu.classList.toggle('hidden', !open);
+    moreBtn.setAttribute('aria-expanded', String(open));
+  });
+  // Picking an action closes the menu; ticking a checkbox leaves it open.
+  moreMenu.addEventListener('click', event => { if ((event.target as HTMLElement).closest('button.menuItem')) closeMenu(); });
+  const onDocClick = (event: MouseEvent) => { if (!(event.target as HTMLElement).closest('.menuWrap')) closeMenu(); };
+  const onEsc = (event: KeyboardEvent) => { if (event.key === 'Escape') closeMenu(); };
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onEsc);
-  const openLyricsFold = () => { (el(root, '#lyricsFold') as HTMLDetailsElement).open = true; el(root, '#lyricsFold').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
-  el(root, '#menuFixLyrics').addEventListener('click', () => { closeMenus(); el<HTMLButtonElement>(root, '#fixLyrics').click(); });
-  el(root, '#menuRedoLyrics').addEventListener('click', () => { closeMenus(); el<HTMLButtonElement>(root, '#redoLyrics').click(); });
-  el(root, '#menuPickLines').addEventListener('click', () => { closeMenus(); openLyricsFold(); if (!pickingLines) el<HTMLButtonElement>(root, '#pickLines').click(); });
+  el(root, '#renameSections').addEventListener('click', () => { renderSectionEditor(); sectionsDialog.showModal(); });
+
   const showUpNext = el<HTMLInputElement>(root, '#showUpNext');
   showUpNext.checked = prefs.get('showUpNext', false);
   const applyUpNext = () => {
     el(root, '#upNextPanel').classList.toggle('hidden', !showUpNext.checked);
     el(root, '#stageRow').classList.toggle('withUpNext', showUpNext.checked);
-    requestAnimationFrame(() => lane.resize());
   };
   showUpNext.addEventListener('change', () => { prefs.set('showUpNext', showUpNext.checked); applyUpNext(); });
   applyUpNext();
+
+  // ---------------------------------------------------------------- Staff ⇄ Karaoke
+  type View = 'staff' | 'karaoke';
+  let view: View = (prefs.get('view', 'staff') as string) === 'karaoke' ? 'karaoke' : 'staff';
+  const setView = (next: View) => {
+    view = next;
+    prefs.set('view', next);
+    root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button => button.setAttribute('aria-checked', String(button.dataset.view === next)));
+    el(root, '#laneWrap').classList.toggle('hidden', next !== 'staff');
+    el(root, '#karaoke').classList.toggle('hidden', next !== 'karaoke');
+    crawlLine = null;
+    crawlTime = NaN;
+  };
+  root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.view as View)));
 
   const selectionChanged = () => {
     if (player.state !== 'stopped' && !recording) stopAll();
@@ -398,20 +414,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     updateClock();
   };
 
-  root.querySelectorAll<HTMLButtonElement>('[data-quick]').forEach(button => button.addEventListener('click', () => {
-    custom = null;
-    const quick = button.dataset.quick;
-    selected = new Set(
-      quick === 'all' || quick === 'none' ? [] : analysis.sections.filter(s => s.kind === quick).map(s => s.id)
-    );
-    if ((quick === 'verse' || quick === 'chorus') && !selected.size) toast('No ' + (quick === 'verse' ? 'verses' : 'choruses') + ' were detected. Use “Rename sections” to label them.');
-    selectionChanged();
-  }));
-  el(root, '#editSections').addEventListener('click', event => {
-    editingSections = !editingSections;
-    (event.currentTarget as HTMLElement).setAttribute('aria-pressed', String(editingSections));
-    renderSections();
-  });
   const echoModelEl = el<HTMLSelectElement>(root, '#echoModel');
   echoModelEl.value = prefs.get('echoModel', 'artist');
   const syncEchoModel = () => el(root, '#echoModelWrap').classList.toggle('hidden', !echoMode());
@@ -429,6 +431,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   });
   repeatsEl.value = String(prefs.get('repeats', 1));
   repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); renderSections(); });
+
+  // Songs prepared by older versions could have generic "Part 1, Part 2…" sections; give them real names.
+  if (analysis.lines.length && analysis.sections.some(section => section.kind === 'part')) {
+    analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, analysis.lines.some(line => line.words.length > 0));
+    void persist();
+  }
 
   // Start on the first chorus (or first sung section) — the part most people want to try first.
   const firstPick = analysis.sections.find(s => s.kind === 'chorus') ?? analysis.sections.find(s => !['intro', 'outro', 'instrumental'].includes(s.kind));
@@ -484,12 +492,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   const setPicking = (on: boolean) => {
     pickingLines = on;
     pickAnchor = null;
-    const button = el(root, '#pickLines');
-    button.setAttribute('aria-pressed', String(on));
-    button.textContent = on ? 'Cancel picking' : 'Pick lines';
-    el(root, '#lyricsHint').textContent = on
-      ? 'Tap the first line you want to practice, then the last one.'
-      : 'Tap a line to play from there.';
+    el(root, '#pickLines').textContent = on ? 'Cancel picking lines' : 'Pick lines to practice';
+    el(root, '#lyricsHint').textContent = on ? 'Tap the first line you want to practice, then the last one.' : '';
+    if (on) setView('karaoke');
     renderLyrics();
   };
   el(root, '#pickLines').addEventListener('click', () => setPicking(!pickingLines));
@@ -500,19 +505,16 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   const applyShowNotes = () => el(root, '#lyricsList').classList.toggle('hideNotes', !showNotes.checked);
   showNotes.addEventListener('change', () => { prefs.set('showNotes', showNotes.checked); applyShowNotes(); });
 
-  // Lyrics crawl: while the song plays, the full lyrics roll upward at an even speed (like a movie
-  // opening crawl) and each word lights up as it's sung. Scrolling by hand pauses it for a few seconds.
-  const followLyrics = el<HTMLInputElement>(root, '#followLyrics');
-  followLyrics.checked = prefs.get('followLyrics', true);
+  // Karaoke view: the lyrics roll upward on their own at an even speed (like a movie opening crawl) and
+  // each word lights up as it's sung. Scrolling by hand pauses the roll for a few seconds.
   const lyricsList = el(root, '#lyricsList');
-  const applyFollow = () => lyricsList.classList.toggle('crawl', followLyrics.checked);
-  followLyrics.addEventListener('change', () => { prefs.set('followLyrics', followLyrics.checked); applyFollow(); });
-  applyFollow();
   let handScrollUntil = 0;
+  let crawlTime = NaN;
   const pauseCrawl = () => { handScrollUntil = performance.now() + 4000; };
   ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(type => lyricsList.addEventListener(type, pauseCrawl, { passive: true }));
+  setView(view);
   const updateCrawl = (time: number, playing: boolean) => {
-    if (!followLyrics.checked || !(el(root, '#lyricsFold') as HTMLDetailsElement).open) return;
+    if (view !== 'karaoke') return;
     const rows = [...lyricsList.querySelectorAll<HTMLElement>('.lyricLine')];
     if (!rows.length) return;
     const lines = analysis.lines;
@@ -530,13 +532,17 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       node.classList.toggle('sung', time >= start);
       node.classList.toggle('now', time >= start && time < end + 0.05);
     });
-    if (!playing || performance.now() < handScrollUntil) return;
-    // Glide at an even speed from this line to the next, so nothing jumps.
-    const line = lines[index], next = lines[index + 1], nextRow = rows[index + 1];
-    const from = line.start, to = next ? next.start : line.end;
-    const progress = Math.max(0, Math.min(1, (time - from) / Math.max(0.1, to - from)));
-    const y = row.offsetTop + (nextRow ? (nextRow.offsetTop - row.offsetTop) * progress : 0);
-    lyricsList.scrollTop = y - lyricsList.clientHeight * 0.38;
+    // Stopped: follow only when the position changes (a new selection), so the list can be browsed.
+    if (performance.now() < handScrollUntil || pickingLines || (!playing && time === crawlTime)) return;
+    crawlTime = time;
+    // Glide at an even speed from one line's start to the next line's start, so the roll never jumps
+    // or stalls — the line being sung sits about a third of the way down.
+    let from = -1;
+    for (let i = 0; i < lines.length && lines[i].start <= time; i += 1) from = i;
+    const a = rows[Math.max(0, from)], b = rows[from + 1];
+    const progress = from < 0 || !b ? 0 : Math.max(0, Math.min(1, (time - lines[from].start) / Math.max(0.1, lines[from + 1].start - lines[from].start)));
+    const y = a.offsetTop + (b ? (b.offsetTop - a.offsetTop) * progress : 0);
+    lyricsList.scrollTop = y - lyricsList.clientHeight * 0.36;
   };
   applyShowNotes();
 
@@ -847,7 +853,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   // ---------------------------------------------------------------- review (a window that opens when you finish)
   const reviewDialog = el<HTMLDialogElement>(root, '#reviewDialog');
   const openReviewDialog = () => {
-    closeMenus();
+    closeMenu();
     if (!reviewDialog.open) reviewDialog.showModal();
     void renderTakes();
   };
@@ -1052,35 +1058,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     }));
   };
 
-  // ---------------------------------------------------------------- progress + clock
-  const progress = el(root, '#progress');
-  const progressFill = el(root, '#progressFill');
+  // ---------------------------------------------------------------- clock + playhead on the section bar
   const clock = el(root, '#clock');
   const updateClock = () => {
     const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(playbackRanges(), repeats() === 99 ? 1 : repeats()).duration;
     const t = Math.max(0, Math.min(total, player.timelineTime()));
     clock.textContent = formatTime(t) + ' / ' + formatTime(total);
-    progressFill.style.left = ((100 * idleTime) / analysis.duration).toFixed(2) + '%';
+    songPlayhead.style.left = ((100 * idleTime) / analysis.duration).toFixed(2) + '%';
   };
-  // The strip is the whole song: tap inside what you're practicing to jump there, or tap another
-  // section to switch to it.
-  progress.addEventListener('click', event => {
-    if (recording) return;
-    const rect = progress.getBoundingClientRect();
-    const time = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * analysis.duration;
-    if (reviewPlaying && review) {
-      const from = review.timeline.timelineFor(time);
-      if (from !== null) void startPlayback(false, from, { buffer: review.voice, offset: review.offset });
-      return;
-    }
-    if (!inSelection(time)) {
-      const section = sectionFor(time);
-      custom = null;
-      selected = new Set(section ? [section.id] : []);
-      selectionChanged();
-    }
-    void startPlayback(false, new Timeline(playbackRanges(), repeats()).timelineFor(time) ?? 0);
-  });
 
   // ---------------------------------------------------------------- up next + coach (every frame)
   const upNext = el(root, '#upNext');
@@ -1302,8 +1287,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     toast('✍️ The notes are ready — lyrics are still being written. You can start practicing now.');
   }
 
-  const onResize = () => lane.resize();
-  window.addEventListener('resize', onResize);
+  // The stage fills whatever height is left, so redraw the canvas whenever its box changes size.
+  const laneResize = new ResizeObserver(() => lane.resize());
+  laneResize.observe(el(root, '#laneWrap'));
   const onKey = (event: KeyboardEvent) => {
     if (event.code !== 'Space' || (event.target as HTMLElement).closest('input, textarea, select, button, dialog')) return;
     event.preventDefault();
@@ -1322,7 +1308,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   return () => {
     disposed = true;
     cancelAnimationFrame(frame);
-    window.removeEventListener('resize', onResize);
+    laneResize.disconnect();
     window.removeEventListener('keydown', onKey);
     window.removeEventListener(LYRICS_READY, onLyricsReady);
     mic.stop();

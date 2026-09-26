@@ -1,11 +1,11 @@
 import type { BreathMark, NoteEvent, Syllable } from '../lib/analysis';
-import { foldToOctave, midiToNote, scalePitchClasses, VOICE_TYPES, type MusicalKey } from '../lib/music';
+import { foldToOctave, midiToNote, VOICE_TYPES, type MusicalKey } from '../lib/music';
 
 export interface TrailPoint { t: number; midi: number }
 
 const CONVEYOR = 84;   // px: lyrics strip across the top (one big row + breath marks)
 const OCTAVE_COL = 18;  // px: TREBLE / BASS labels on the far left
-const NOTE_COL = 34;    // px: note names
+const NOTE_COL = 46;    // px: note names (two zigzag columns so every note fits)
 
 /**
  * The practice stage, drawn on one canvas:
@@ -41,7 +41,7 @@ export class PitchLane {
     private notes: NoteEvent[],
     private syllables: Syllable[],
     range: [number, number] | null,
-    private key: MusicalKey | null,
+    _key: MusicalKey | null,
     private breaths: BreathMark[] = []
   ) {
     this.ctx = canvas.getContext('2d')!;
@@ -146,8 +146,18 @@ export class PitchLane {
 
     ctx.clearRect(0, 0, width, height);
 
+    // ---- note rows: every semitone is a band. The bass half (below middle C) uses darker tones, the
+    // treble half lighter ones, alternating row by row so you can always tell which note you're on.
+    const trebleA = color('--treble-a'), trebleB = color('--treble-b'), bassA = color('--bass-a'), bassB = color('--bass-b');
+    for (let midi = Math.ceil(this.low); midi <= Math.floor(this.high); midi += 1) {
+      const rowY = y(midi);
+      const even = midi % 2 === 0;
+      ctx.fillStyle = midi >= 60 ? (even ? trebleA : trebleB) : (even ? bassA : bassB);
+      ctx.fillRect(0, rowY - rowHeight / 2, width, rowHeight);
+    }
+
     // ---- grand staff: the five treble-clef lines (E4 G4 B4 D5 F5) and bass-clef lines (G2 B2 D3 F3 A3),
-    // like sheet music, with middle C (C4) between them. Clearer than octave numbers for most singers.
+    // like sheet music, with middle C (C4) between them.
     ctx.textBaseline = 'middle';
     const staves: Array<{ name: string; lines: number[] }> = [
       { name: 'TREBLE', lines: [64, 67, 71, 74, 77] },
@@ -155,19 +165,17 @@ export class PitchLane {
     ];
     for (const staff of staves) {
       const top = y(staff.lines[4]), bottom = y(staff.lines[0]);
-      if (bottom < laneTop || top > height) continue;
-      ctx.fillStyle = color('--band-a');
-      ctx.fillRect(0, Math.max(laneTop, top), width, Math.min(height, bottom) - Math.max(laneTop, top));
       ctx.strokeStyle = color('--staff');
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1.2;
       for (const line of staff.lines) {
         const ly = y(line);
         if (ly < laneTop || ly > height) continue;
         ctx.beginPath();
-        ctx.moveTo(0, ly);
+        ctx.moveTo(G, ly);
         ctx.lineTo(width, ly);
         ctx.stroke();
       }
+      if (bottom < laneTop || top > height) continue;
       const mid = Math.min(Math.max((top + bottom) / 2, laneTop + 30), height - 30);
       ctx.save();
       ctx.translate(9, mid);
@@ -178,9 +186,10 @@ export class PitchLane {
       ctx.fillText(staff.name, 0, 0);
       ctx.restore();
     }
-    const cY = y(60);
+    const cY = y(59.5);
     if (cY > laneTop && cY < height) {
       ctx.strokeStyle = color('--accent');
+      ctx.globalAlpha = 0.6;
       ctx.setLineDash([6, 4]);
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -188,38 +197,30 @@ export class PitchLane {
       ctx.lineTo(width, cY);
       ctx.stroke();
       ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
     }
 
-    // ---- note rows
-    const scale = this.key ? new Set(scalePitchClasses(this.key)) : null;
-    ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+    // ---- note names: EVERY note is labeled, zigzagging between two columns so they never collide.
+    const labelSize = Math.max(8, Math.min(12, rowHeight * 1.1));
     for (let midi = Math.ceil(this.low); midi <= Math.floor(this.high); midi += 1) {
-      const pc = ((midi % 12) + 12) % 12;
       const rowY = y(midi);
-      if (scale?.has(pc)) {
-        ctx.fillStyle = color('--lane-row');
-        ctx.fillRect(G, rowY - rowHeight / 2, width - G, rowHeight - 1);
-      }
+      const pc = ((midi % 12) + 12) % 12;
       const natural = [0, 2, 4, 5, 7, 9, 11].includes(pc);
-      if (midi === 60) {
-        ctx.fillStyle = color('--accent');
-        ctx.font = '800 10px ui-sans-serif, system-ui, sans-serif';
-        ctx.fillText('Mid C', G - NOTE_COL + 1, rowY);
-        ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif';
-      } else if (natural && ((rowHeight >= 9 && !this.simple) || pc === 0)) {
-        ctx.fillStyle = pc === 0 ? color('--text') : color('--muted');
-        ctx.fillText(midiToNote(midi), G - NOTE_COL + 4, rowY);
-      }
+      if (this.simple && pc !== 0) continue;
+      ctx.font = (pc === 0 ? '800 ' : natural ? '650 ' : '500 ') + labelSize + 'px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillStyle = pc === 0 ? color('--text') : natural ? color('--text') : color('--muted');
+      ctx.fillText(midiToNote(midi), G - NOTE_COL + (midi % 2 === 0 ? 3 : 23), rowY);
     }
 
-    // ---- voice-type staff: one bar per voice type spanning its typical range
+    // ---- voice-type staff: one quiet bar per voice type spanning its typical range
+    const voiceInk = color('--muted');
     voices.forEach((type, index) => {
       const colX = OCTAVE_COL + index * voiceCol;
       const top = Math.max(laneTop, y(type.high) - rowHeight / 2);
       const bottom = Math.min(height, y(type.low) + rowHeight / 2);
       if (bottom <= top) return;
-      ctx.fillStyle = type.color;
-      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = voiceInk;
+      ctx.globalAlpha = 0.55;
       roundRect(ctx, colX + 1, top + 1, 3, bottom - top - 2, 1.5);
       ctx.globalAlpha = 1;
       if (bottom - top > 34) {
@@ -228,8 +229,8 @@ export class PitchLane {
         ctx.rotate(-Math.PI / 2);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = type.color;
-        ctx.font = '800 ' + (wide ? 9 : 8) + 'px ui-sans-serif, system-ui, sans-serif';
+        ctx.fillStyle = voiceInk;
+        ctx.font = '700 ' + (wide ? 9 : 8) + 'px ui-sans-serif, system-ui, sans-serif';
         const label = wide && bottom - top > 70 ? type.name.replace(' (subharmonic)', '').toUpperCase() : type.short.toUpperCase();
         ctx.fillText(label, 0, 0);
         ctx.restore();
