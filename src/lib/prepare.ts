@@ -1,6 +1,7 @@
-import { buildLines, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { applyTypedLyrics, buildLines, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
+import { compressForUpload } from './mp3';
 import * as lalal from './lalal';
 import { diag } from './diag';
 import type { StoredSong } from './library';
@@ -11,6 +12,25 @@ export type SongInput =
   | { kind: 'file'; file: Blob; name: string }
   | { kind: 'link'; url: string }
   | { kind: 'recording'; blob: Blob; name: string };
+
+/** Where the words come from: pasted by the user, looked up online, or (fallback) speech recognition. */
+export interface LyricsSource { pasted?: string; lookup?: string }
+
+/** Finds the real lyrics in LRCLIB (via /api/lyrics), preferring the result whose length matches. */
+export async function findLyricsOnline(query: string, duration?: number): Promise<{ text: string; label: string } | null> {
+  try {
+    const response = await fetch('/api/lyrics?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
+    if (!response.ok) { diag('Lyrics lookup → HTTP ' + response.status, 'warn'); return null; }
+    const results = (await response.json()) as Array<{ title: string; artist: string; duration?: number; lyrics: string }>;
+    if (!results.length) { diag('Lyrics lookup: nothing found for “' + query + '”', 'warn'); return null; }
+    const best = [...results].sort((a, b) => (duration ? Math.abs((a.duration ?? 0) - duration) - Math.abs((b.duration ?? 0) - duration) : 0))[0];
+    diag('Lyrics found online: ' + best.title + ' — ' + best.artist, 'ok');
+    return { text: best.lyrics, label: best.title + ' — ' + best.artist };
+  } catch {
+    diag('Lyrics lookup failed', 'warn');
+    return null;
+  }
+}
 
 export type StepId = 'upload' | 'separate' | 'download' | 'pitch' | 'lyrics' | 'sections';
 export const STEPS: Array<{ id: StepId; label: string }> = [
@@ -24,7 +44,7 @@ export const STEPS: Array<{ id: StepId; label: string }> = [
 
 export type Progress = (step: StepId, fraction: number, detail?: string) => void;
 
-export interface PreparedSong { song: StoredSong; buffers: SongBuffers }
+export interface PreparedSong { song: StoredSong; buffers: SongBuffers; lyricsJob: () => Promise<void> }
 export interface SongBuffers { lead: AudioBuffer; backing: AudioBuffer | null; instrumental: AudioBuffer | null }
 
 const PITCH_RATE = 11025;
@@ -199,15 +219,36 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
   return words.length > 0;
 }
 
-export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress): Promise<SongAnalysis> {
+/**
+ * Finds the notes (seconds), then returns straight away so practice can start; the lyrics are written
+ * in the background by `lyricsJob`. Pasted or looked-up lyrics supply the exact words, and speech
+ * recognition only supplies their timing.
+ */
+export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<void> }> {
   progress('pitch', 0);
   const track = await pitchTrackFor(lead, fraction => progress('pitch', fraction), separated);
   const notes = segmentNotes(track);
   const { key, range } = keyAndRange(notes);
   progress('pitch', 1, notes.length + ' notes found');
-  const analysis: SongAnalysis = { duration: lead.duration, key, range, notes, lines: [], sections: [], transcript: 'none', separated, notesVersion: NOTES_VERSION };
-  await transcribeLyrics(lead, analysis, lyrics, progress);
-  return analysis;
+  const lines = buildLines([], notes);
+  const analysis: SongAnalysis = {
+    duration: lead.duration, key, range, notes, lines, sections: buildSections(lines, notes, lead.duration, false),
+    transcript: 'none', separated, notesVersion: NOTES_VERSION, lyricsPending: true
+  };
+  const lyricsJob = async () => {
+    let words = source.pasted?.trim() || '';
+    if (!words && source.lookup) words = (await findLyricsOnline(source.lookup, lead.duration))?.text ?? '';
+    // Speech recognition gives timing (and the words, if we have none of our own).
+    await transcribeLyrics(lead, analysis, lyrics, progress);
+    if (words) {
+      analysis.lines = applyTypedLyrics(analysis, words);
+      analysis.transcript = 'edited';
+      analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
+      diag('Lyrics: using ' + (source.pasted?.trim() ? 'your pasted lyrics' : 'lyrics found online') + ', timed to the singer', 'ok');
+    }
+    analysis.lyricsPending = false;
+  };
+  return { analysis, lyricsJob };
 }
 
 /**
@@ -228,15 +269,19 @@ export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): P
   analysis.notesVersion = NOTES_VERSION;
 }
 
-export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal): Promise<PreparedSong> {
+export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal, source: LyricsSource = {}): Promise<PreparedSong> {
   const title = input.kind === 'link' ? titleFromLink(input.url) : input.name.replace(/\.[a-z0-9]{2,5}$/i, '');
   let stems: StoredSong['stems'];
 
   if (useSeparation) {
     progress('upload', 0);
-    const sourceId = input.kind === 'link'
-      ? await lalal.importLink(input.url)
-      : await lalal.uploadFile(input.kind === 'file' ? input.file : input.blob, input.kind === 'file' ? input.name : input.name, f => progress('upload', f));
+    let sourceId: string;
+    if (input.kind === 'link') sourceId = await lalal.importLink(input.url);
+    else {
+      progress('upload', 0, 'Compressing…');
+      const packed = await compressForUpload(input.kind === 'file' ? input.file : input.blob, input.name);
+      sourceId = await lalal.uploadFile(packed.file, packed.name, f => progress('upload', f, (packed.file.size / 1048576).toFixed(1) + ' MB'));
+    }
     progress('upload', 1);
     if (signal?.aborted) throw new lalal.LalalError('Cancelled.');
 
@@ -269,7 +314,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     backing: stems.backing ? await decodeAudio(await stems.backing.arrayBuffer()) : null,
     instrumental: stems.instrumental ? await decodeAudio(await stems.instrumental.arrayBuffer()) : null
   };
-  const analysis = await analyzeLead(buffers.lead, useSeparation, lyrics, progress);
+  const { analysis, lyricsJob } = await analyzeLead(buffers.lead, useSeparation, lyrics, progress, source);
   const song: StoredSong = {
     id: crypto.randomUUID(),
     title: title || 'Untitled song',
@@ -278,7 +323,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     analysis,
     stems
   };
-  return { song, buffers };
+  return { song, buffers, lyricsJob };
 }
 
 export async function decodeStems(song: StoredSong): Promise<SongBuffers> {

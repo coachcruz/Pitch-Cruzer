@@ -5,7 +5,7 @@ import { formatTime, keyName } from '../lib/music';
 import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type SongInput, type StepId } from '../lib/prepare';
 import { CaptureMixer, type InputId } from '../lib/tabcapture';
 import { showRecordingReview } from '../ui/recordingReview';
-import { session } from '../session';
+import { LYRICS_READY, session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 
 type LalalState = 'checking' | 'ready' | 'missing' | 'offline' | 'error';
@@ -105,6 +105,13 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <div class="options">
       <label class="check"><input id="useSeparation" type="checkbox" checked> Separate the singer from the music <small>(LALAL.AI — needed to turn the artist down)</small></label>
       <label class="check"><input id="keepSong" type="checkbox"> Keep this song on this device <small>(so you never have to prepare it again)</small></label>
+      <div class="lyricsSource">
+        <label class="check small"><input id="lookupLyrics" type="checkbox"> Find the real lyrics online</label>
+        <input id="lyricsQuery" class="textInput" placeholder="Song name and artist (optional — otherwise the file name is used)">
+        <details id="pasteWrap"><summary>Paste the lyrics yourself <small>(best for originals, e.g. Suno songs)</small></summary>
+          <textarea id="pasteLyrics" rows="6" placeholder="One sung line per line. Your words are matched to the singer’s timing automatically."></textarea>
+        </details>
+      </div>
       <div class="optionRow">
         <label class="inline">Lyrics language
           <select id="lyricsLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
@@ -134,6 +141,19 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const keepSong = el<HTMLInputElement>(root, '#keepSong');
   keepSong.checked = prefs.get('keepSong', true);
   keepSong.addEventListener('change', () => prefs.set('keepSong', keepSong.checked));
+  const lookupLyrics = el<HTMLInputElement>(root, '#lookupLyrics');
+  lookupLyrics.checked = prefs.get('lookupLyrics', true);
+  lookupLyrics.addEventListener('change', () => prefs.set('lookupLyrics', lookupLyrics.checked));
+  const lyricsQuery = el<HTMLInputElement>(root, '#lyricsQuery');
+  const pasteLyrics = el<HTMLTextAreaElement>(root, '#pasteLyrics');
+  const lyricsSource = (input: SongInput) => {
+    const pasted = pasteLyrics.value.trim();
+    if (pasted) return { pasted };
+    if (!lookupLyrics.checked) return {};
+    const fallback = input.kind === 'link' ? '' : input.name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ');
+    const lookup = lyricsQuery.value.trim() || (/^recorded song/i.test(fallback) ? '' : fallback);
+    return lookup ? { lookup } : {};
+  };
   const lyricsLang = el<HTMLSelectElement>(root, '#lyricsLang');
   const lyricsQuality = el<HTMLSelectElement>(root, '#lyricsQuality');
   lyricsLang.value = prefs.get('lyricsLang', 'auto');
@@ -247,7 +267,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         }
         states[step] = { fraction, detail: detail ?? states[step]?.detail };
         if (!disposed) renderSteps(states, !separate);
-      }, abort.signal);
+      }, abort.signal, lyricsSource(input));
       if (abort.signal.aborted || disposed) return;
       session.song = prepared.song;
       session.buffers = prepared.buffers;
@@ -256,7 +276,20 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         try { await saveSong(prepared.song); session.saved = true; }
         catch { toast('Could not save the song on this device (storage full?). You can still practice it now.', 'error'); }
       }
-      navigate('#/song/' + prepared.song.id);
+      // Open the song as soon as the notes are ready; the lyrics finish in the background and appear
+      // on the practice screen when done.
+      const song = prepared.song;
+      const job = prepared.lyricsJob().catch(error => console.warn('Background lyrics failed', error)).then(async () => {
+        song.analysis.lyricsPending = false;
+        session.lyricsJobs.delete(song.id);
+        if (session.saved && session.song?.id === song.id) await saveSong(song).catch(() => undefined);
+        else if (keepSong.checked) await saveSong(song).catch(() => undefined);
+        window.dispatchEvent(new CustomEvent(LYRICS_READY, { detail: song.id }));
+      });
+      session.lyricsJobs.set(song.id, job);
+      pasteLyrics.value = '';
+      lyricsQuery.value = '';
+      navigate('#/song/' + song.id);
     } catch (error) {
       if (disposed) return;
       const message = error instanceof Error ? error.message : 'Something went wrong.';

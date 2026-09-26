@@ -25,6 +25,8 @@ export interface SongAnalysis {
   lines: LyricLine[];
   sections: Section[];
   transcript: 'ok' | 'none' | 'failed' | 'edited';
+  /** Lyrics are still being written in the background (the song is already practicable). */
+  lyricsPending?: boolean;
   separated: boolean;
   lyricsOptions?: LyricsOptions;
 }
@@ -357,12 +359,27 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
       else j -= 1;
     }
   } else if (analysis.notes.length) {
-    // No automatic transcript: spread the typed words across the sung notes in order.
+    // No automatic transcript: give each typed line a run of sung phrases, in order, then spread
+    // that line's words over the notes in its phrases.
     const notes = analysis.notes;
-    typed.forEach((_, index) => {
-      const from = Math.floor((index * notes.length) / typed.length);
-      const to = Math.max(from, Math.floor(((index + 1) * notes.length) / typed.length) - 1);
-      times[index] = [notes[from].start, notes[Math.min(notes.length - 1, to)].end];
+    const phrases: NoteEvent[][] = [];
+    for (const note of notes) {
+      const last = phrases[phrases.length - 1];
+      if (last && note.start - last[last.length - 1].end < 0.45) last.push(note);
+      else phrases.push([note]);
+    }
+    const lineStarts = [...hardBreaks].sort((a, b) => a - b);
+    lineStarts.forEach((wordStart, lineIndex) => {
+      const wordEnd = lineIndex + 1 < lineStarts.length ? lineStarts[lineIndex + 1] : typed.length;
+      const from = Math.floor((lineIndex * phrases.length) / lineStarts.length);
+      const to = Math.max(from + 1, Math.floor(((lineIndex + 1) * phrases.length) / lineStarts.length));
+      const lineNotes = phrases.slice(from, to).flat();
+      const count = wordEnd - wordStart;
+      for (let k = 0; k < count && lineNotes.length; k += 1) {
+        const a = Math.floor((k * lineNotes.length) / count);
+        const b = Math.max(a, Math.floor(((k + 1) * lineNotes.length) / count) - 1);
+        times[wordStart + k] = [lineNotes[a].start, lineNotes[Math.min(lineNotes.length - 1, b)].end];
+      }
     });
   }
 

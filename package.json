@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@huggingface/transformers": "^3.8.1",
     "@netlify/blobs": "^11.1.1"
   },

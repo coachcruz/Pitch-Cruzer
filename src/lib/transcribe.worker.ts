@@ -29,23 +29,35 @@ let transcriber: any = null;
 async function loadModel(quality: TranscribeJob['quality']): Promise<any> {
   if (transcriber) return transcriber;
   transformers ??= await import('@huggingface/transformers');
+  // Use the graphics chip (WebGPU) when the browser has one — often several times faster — and fall
+  // back to the processor (WebAssembly) everywhere else, or if the GPU route fails.
+  const gpu = 'gpu' in navigator && Boolean(await (navigator as any).gpu?.requestAdapter?.().catch(() => null));
+  const setups: Array<{ device: 'webgpu' | 'wasm'; dtype: any; label: string }> = [
+    ...(gpu ? [{ device: 'webgpu' as const, dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, label: 'graphics chip' }] : []),
+    { device: 'wasm', dtype: 'q8', label: 'processor' }
+  ];
   let lastError: unknown = null;
-  for (const model of MODELS[quality]) {
-    try {
-      const files = new Map<string, number>();
-      transcriber = await transformers.pipeline('automatic-speech-recognition', model, {
-        dtype: 'q8',
-        progress_callback: (info: any) => {
-          if (info?.status !== 'progress' || typeof info.progress !== 'number') return;
-          files.set(String(info.file), info.progress);
-          const values = [...files.values()];
-          self.postMessage({ stage: 'download', progress: values.reduce((a, b) => a + b, 0) / (values.length * 100), model });
-        }
-      });
-      self.postMessage({ stage: 'model', model, threads: (self as any).crossOriginIsolated ? 'multi' : 'single' });
-      return transcriber;
-    } catch (error) {
-      lastError = error;
+  for (const setup of setups) {
+    for (const model of MODELS[quality]) {
+      try {
+        const files = new Map<string, number>();
+        transcriber = await transformers.pipeline('automatic-speech-recognition', model, {
+          device: setup.device,
+          dtype: setup.dtype,
+          progress_callback: (info: any) => {
+            if (info?.status !== 'progress' || typeof info.progress !== 'number') return;
+            files.set(String(info.file), info.progress);
+            const values = [...files.values()];
+            self.postMessage({ stage: 'download', progress: values.reduce((x, y) => x + y, 0) / (values.length * 100), model });
+          }
+        });
+        const threads = setup.device === 'webgpu' ? 'GPU' : (self as any).crossOriginIsolated ? 'multi' : 'single';
+        self.postMessage({ stage: 'model', model: model + ' on the ' + setup.label, threads });
+        return transcriber;
+      } catch (error) {
+        lastError = error;
+        transcriber = null;
+      }
     }
   }
   throw lastError ?? new Error('Could not load a transcription model.');
