@@ -4,10 +4,10 @@ import { getSong, listTakes, saveSong, saveTake, deleteTake, type StoredSong, ty
 import { LiveMic } from '../lib/mic';
 import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { Player, Timeline, type Range } from '../lib/player';
-import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
+import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
 import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
-import { session } from '../session';
+import { LYRICS_READY, session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 import { PitchLane, type TrailPoint } from '../ui/lane';
 
@@ -80,7 +80,7 @@ function syllablesHtml(line: LyricLine, withData: boolean): string {
 
 function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, navigate: (hash: string) => void): () => void {
   const analysis = song.analysis;
-  const hasBacking = Boolean(buffers.backing);
+  const hasBacking = Boolean(buffers.backing); void hasBacking;
   const hasMusic = Boolean(buffers.instrumental);
   const range = analysis.range;
 
@@ -144,18 +144,18 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
 
       <div id="mixPanel" class="mixPanel hidden">
         <div class="mixRow">
-          <label for="mixLead">Original singer</label>
+          <label for="mixLead">Singer</label>
           <input id="mixLead" type="range" min="0" max="100" step="1">
           <output id="mixLeadOut"></output>
           <div class="presets"><button class="chip" data-lead="0">Mute</button><button class="chip" data-lead="30">Guide</button><button class="chip" data-lead="100">Full</button></div>
         </div>
-        <div class="mixRow ${hasBacking ? '' : 'disabled'}">
+        <div class="mixRow hidden">
           <label for="mixBacking">Backing vocals</label>
           <input id="mixBacking" type="range" min="0" max="100" step="1" ${hasBacking ? '' : 'disabled'}>
           <output id="mixBackingOut"></output>
         </div>
         <div class="mixRow ${hasMusic ? '' : 'disabled'}">
-          <label for="mixMusic">Music</label>
+          <label for="mixMusic">Music <small>(incl. backing vocals)</small></label>
           <input id="mixMusic" type="range" min="0" max="100" step="1" ${hasMusic ? '' : 'disabled'}>
           <output id="mixMusicOut"></output>
         </div>
@@ -229,6 +229,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       <form method="dialog">
         <h2>Fix the lyrics</h2>
         <p class="hint">Paste or type the correct lyrics — one line per sung line. Timing is matched to the singer automatically.</p>
+        <div class="row wrap"><input id="lyricsSearch" class="textInput" placeholder="Song name and artist"><button id="lyricsSearchBtn" class="btn small" type="button">Find online</button></div>
         <textarea id="lyricsText" rows="14"></textarea>
         <div class="row end"><button class="btn ghost" value="cancel">Cancel</button><button id="applyLyrics" class="btn primary" value="apply">Apply</button></div>
       </form>
@@ -545,6 +546,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     }
   });
 
+  el(root, '#lyricsSearchBtn').addEventListener('click', async () => {
+    const query = el<HTMLInputElement>(root, '#lyricsSearch').value.trim() || song.title;
+    const found = await findLyricsOnline(query, analysis.duration);
+    if (!found) { toast('No lyrics found online for “' + query + '”. Paste them instead.', 'error'); return; }
+    el<HTMLTextAreaElement>(root, '#lyricsText').value = found.text;
+    toast('Found: ' + found.label + ' — check them, then Apply.');
+  });
   el(root, '#fixLyrics').addEventListener('click', () => {
     el<HTMLTextAreaElement>(root, '#lyricsText').value = analysis.lines
       .map(line => line.words.map(word => word.text).join(' ')).filter(text => !/^[♪\s]+$/.test(text)).join('\n');
@@ -599,8 +607,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     return set;
   };
   const setLead = bindSlider('mixLead', 'lead', value => player.setLevel('lead', value));
-  bindSlider('mixBacking', 'backing', value => player.setLevel('backing', value));
-  bindSlider('mixMusic', 'music', value => player.setLevel('music', value));
+  // Two simple sliders: Singer and Music. Backing vocals travel with the music.
+  const setBacking = bindSlider('mixBacking', 'backing', value => player.setLevel('backing', value));
+  bindSlider('mixMusic', 'music', value => { player.setLevel('music', value); setBacking(Math.round(value * 100)); });
   bindSlider('mixMonitor', 'monitor', value => mic.setMonitor(value));
   root.querySelectorAll<HTMLButtonElement>('[data-lead]').forEach(button => button.addEventListener('click', () => setLead(Number(button.dataset.lead))));
   forgiveOctave.addEventListener('change', () => {
@@ -1228,6 +1237,26 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   });
   laneCanvas.title = 'Tap a note bar to hear the singer sing it (Shift+tap for a pure tone)';
 
+  // Lyrics still being written in the background? Keep practicing; they drop in when ready.
+  const onLyricsReady = (event: Event) => {
+    if ((event as CustomEvent<string>).detail !== song.id) return;
+    lane.setLyrics(allSyllables());
+    selected = new Set();
+    const pick = analysis.sections.find(s => s.kind === 'chorus') ?? analysis.sections.find(s => !['intro', 'outro', 'instrumental'].includes(s.kind));
+    if (pick && player.state === 'stopped') selected.add(pick.id);
+    upNextKey = '';
+    renderSections();
+    renderLyrics();
+    el(root, '#lyricsHint').textContent = analysis.transcript === 'failed' || analysis.transcript === 'none'
+      ? 'Lyrics couldn’t be heard automatically — use ⋯ → Fix lyrics to paste or find them.' : 'Tap a line to play from there.';
+    toast(analysis.transcript === 'failed' || analysis.transcript === 'none' ? 'Couldn’t write the lyrics — use ⋯ → Fix lyrics.' : '✍️ Lyrics are ready.');
+  };
+  window.addEventListener(LYRICS_READY, onLyricsReady);
+  if (session.lyricsJobs.has(song.id)) {
+    el(root, '#lyricsHint').textContent = '✍️ Writing the lyrics in the background — start practicing, they’ll appear when ready.';
+    toast('✍️ The notes are ready — lyrics are still being written. You can start practicing now.');
+  }
+
   const onResize = () => lane.resize();
   window.addEventListener('resize', onResize);
   const onKey = (event: KeyboardEvent) => {
@@ -1250,6 +1279,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     cancelAnimationFrame(frame);
     window.removeEventListener('resize', onResize);
     window.removeEventListener('keydown', onKey);
+    window.removeEventListener(LYRICS_READY, onLyricsReady);
     mic.stop();
     player.onEnded = null;
     player.close();
