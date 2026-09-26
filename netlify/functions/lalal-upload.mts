@@ -1,7 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { getStore } from '@netlify/blobs';
 import {
-  MAX_UPLOAD_BYTES, UPLOAD_STORE, isValidUploadId, json, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal
+  MAX_CHUNKS, MAX_UPLOAD_BYTES, UPLOAD_STORE, isValidUploadId, json, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal
 } from '../lib/lalal.mts';
 
 /** Reassembles the chunks stored by /api/upload/chunk and forwards the file to LALAL.AI. */
@@ -12,7 +12,7 @@ export default async (req: Request) => {
 
   const input = await req.json().catch(() => null) as { upload_id?: string; chunks?: number; filename?: string } | null;
   const chunkCount = Number(input?.chunks);
-  if (!isValidUploadId(input?.upload_id) || !Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > 60) {
+  if (!isValidUploadId(input?.upload_id) || !Number.isInteger(chunkCount) || chunkCount < 1 || chunkCount > MAX_CHUNKS) {
     return json({ error: 'upload_id and chunks are required' }, 400);
   }
 

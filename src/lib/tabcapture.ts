@@ -11,6 +11,8 @@ export class TabRecorder {
   private chunks: Float32Array[] = [];
   level = 0;
   seconds = 0;
+  /** Loudest level heard so far — stays ~0 if the tab is silent or tab audio wasn't shared. */
+  peak = 0;
   onEnded: (() => void) | null = null;
 
   static supported(): boolean {
@@ -29,8 +31,9 @@ export class TabRecorder {
       capture.getTracks().forEach(track => track.stop());
       throw new Error('No audio was shared. Pick a browser TAB and make sure “Share tab audio” is switched on.');
     }
-    capture.getVideoTracks().forEach(track => track.stop());
+    // Keep the (unused) video track running: in some Chrome versions stopping it ends the whole share.
     this.stream = capture;
+    this.peak = 0;
     this.ctx = new AudioContext();
     await this.ctx.resume();
     const source = this.ctx.createMediaStreamSource(new MediaStream([audio]));
@@ -48,11 +51,13 @@ export class TabRecorder {
       }
       for (let i = 0; i < mono.length; i += 1) energy += mono[i] * mono[i];
       this.level = Math.min(1, Math.sqrt(energy / mono.length) * 6);
+      this.peak = Math.max(this.peak, this.level);
       this.chunks.push(mono);
       this.seconds += input.length / input.sampleRate;
     };
     source.connect(this.processor).connect(sink).connect(this.ctx.destination);
     audio.addEventListener('ended', () => this.onEnded?.());
+    capture.getVideoTracks()[0]?.addEventListener('ended', () => this.onEnded?.());
   }
 
   /** Stops and returns a WAV file of what was captured (null if nothing audible). */

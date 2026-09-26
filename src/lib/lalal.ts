@@ -1,5 +1,6 @@
 /** Browser-side client for the Netlify functions that talk to LALAL.AI. */
-const CHUNK_BYTES = 4 * 1024 * 1024;
+// Netlify base64-encodes binary request bodies (+33%), so ~4.5 MB is the real limit per request.
+const CHUNK_BYTES = 3 * 1024 * 1024;
 
 export class LalalError extends Error {
   constructor(message: string, public code?: string) { super(message); }
@@ -33,7 +34,7 @@ export async function minutesLeft(): Promise<number | null> {
 export async function uploadFile(file: Blob, filename: string, onProgress: (fraction: number) => void): Promise<string> {
   const uploadId = crypto.randomUUID();
   const chunks = Math.max(1, Math.ceil(file.size / CHUNK_BYTES));
-  if (chunks > 50) throw new LalalError('That file is too large (limit about 200 MB).');
+  if (chunks > 66) throw new LalalError('That file is too large (limit about 200 MB).');
   for (let index = 0; index < chunks; index += 1) {
     const body = file.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES);
     await requestJson('/api/upload/chunk?upload=' + uploadId + '&index=' + index, { method: 'POST', body });

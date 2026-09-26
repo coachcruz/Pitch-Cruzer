@@ -1,8 +1,9 @@
 declare const Netlify: { env: { get(name: string): string | undefined } };
 
 export const LALAL_BASE = 'https://www.lalal.ai/api/v1';
-/** Browser → function uploads are split into chunks below Netlify's 6 MB request limit. */
-export const MAX_CHUNK_BYTES = 4 * 1024 * 1024;
+/** Browser → function uploads are split into chunks below Netlify's request limit (~4.5 MB for binary). */
+export const MAX_CHUNK_BYTES = 3 * 1024 * 1024 + 1024;
+export const MAX_CHUNKS = 70;
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const UPLOAD_STORE = 'pitch-cruzer-uploads';
 

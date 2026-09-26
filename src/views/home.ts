@@ -238,8 +238,13 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     root.querySelectorAll<HTMLButtonElement>('.recordStart').forEach(button => button.classList.toggle('hidden', on));
     root.querySelectorAll<HTMLButtonElement>('.linkStop').forEach(button => button.classList.toggle('hidden', !on));
     if (meterTimer !== null) window.clearInterval(meterTimer);
+    let warned = false;
     meterTimer = on ? window.setInterval(() => {
       root.querySelectorAll<HTMLElement>('#tabTime, .linkTime').forEach(node => { node.textContent = formatTime(recorder.seconds); });
+      if (!warned && recorder.seconds > 6 && recorder.peak < 0.02) {
+        warned = true;
+        toast('No sound from that tab yet. Is the song playing? If you picked a window or screen, stop and pick the browser TAB with “Share tab audio” on.', 'error');
+      }
       root.querySelectorAll<HTMLElement>('#tabLevel, .linkLevel').forEach(node => { node.style.width = Math.round(recorder.level * 100) + '%'; });
     }, 200) : null;
   };
@@ -253,8 +258,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       toast('Recording… play the song in the other tab.');
     } catch (error) {
       setRecording(false);
-      const message = error instanceof Error && error.name !== 'NotAllowedError' ? error.message : 'Recording was cancelled.';
-      toast(message, 'error');
+      const name = error instanceof Error ? error.name : '';
+      const message = name === 'NotAllowedError' ? 'Recording was cancelled (or screen sharing is blocked for this browser in your system settings).'
+        : name === 'NotSupportedError' || name === 'TypeError' ? 'This browser can’t record tab audio. Use Chrome or Edge on a computer, or upload a file.'
+        : name === 'NotReadableError' || name === 'AbortError' ? 'The browser couldn’t start sharing that tab. Close other screen-sharing apps and try again.'
+        : error instanceof Error ? error.message : 'Recording failed.';
+      toast(message + (name ? ' [' + name + ']' : ''), 'error');
     }
   };
   const stopTab = async () => {

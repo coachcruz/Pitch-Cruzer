@@ -1,6 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { getStore } from '@netlify/blobs';
-import { MAX_CHUNK_BYTES, UPLOAD_STORE, isValidUploadId, json } from '../lib/lalal.mts';
+import { MAX_CHUNK_BYTES, MAX_CHUNKS, UPLOAD_STORE, isValidUploadId, json } from '../lib/lalal.mts';
 
 /**
  * Stores one piece of a song file. Netlify functions reject request bodies over
@@ -11,7 +11,7 @@ export default async (req: Request) => {
   const params = new URL(req.url).searchParams;
   const uploadId = params.get('upload');
   const index = Number(params.get('index'));
-  if (!isValidUploadId(uploadId) || !Number.isInteger(index) || index < 0 || index > 60) {
+  if (!isValidUploadId(uploadId) || !Number.isInteger(index) || index < 0 || index >= MAX_CHUNKS) {
     return json({ error: 'Invalid upload chunk parameters' }, 400);
   }
 
