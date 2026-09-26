@@ -1,6 +1,7 @@
 import { buildLines, buildSections, keyAndRange, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import * as lalal from './lalal';
+import { diag } from './diag';
 import type { StoredSong } from './library';
 import type { PitchJobResult } from './pitch.worker';
 import type { TimedWord } from './transcribe.worker';
@@ -93,13 +94,21 @@ function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOpti
     const worker = new Worker(new URL('./transcribe.worker.ts', import.meta.url), { type: 'module' });
     const timeout = window.setTimeout(() => { worker.terminate(); reject(new Error('Transcription timed out.')); }, 15 * 60 * 1000);
     const heard = new Set<string>();
+    let modelNoted = false;
+    let clipsDone = 0;
+    diag('Lyrics: ' + clips.length + ' sung phrases to transcribe (' + options.quality + ' model, languages: ' + options.languages.join('+') + ')');
     worker.onmessage = (event: MessageEvent<any>) => {
       const data = event.data;
       if (data.words) { window.clearTimeout(timeout); worker.terminate(); resolve(data.words); }
       else if (data.error) { window.clearTimeout(timeout); worker.terminate(); reject(new Error(data.error)); }
-      else if (data.stage === 'download') onProgress(data.progress * 0.4, 'Downloading the lyrics model (first time only)…');
+      else if (data.stage === 'download') {
+        if (!modelNoted) { modelNoted = true; diag('Downloading lyrics model ' + (data.model ?? '') + ' (first time only)'); }
+        onProgress(data.progress * 0.4, 'Downloading the lyrics model (first time only)… ' + Math.round(data.progress * 100) + '%');
+      }
       else if (data.stage === 'transcribe') {
         if (data.lang) heard.add(String(data.lang).toUpperCase());
+        clipsDone += 1;
+        diag('Lyrics: phrase ' + clipsDone + '/' + clips.length + (data.lang ? ' (' + String(data.lang).toUpperCase() + ')' : ''));
         onProgress(0.4 + data.progress * 0.6, 'Listening line by line' + (heard.size ? ' · heard ' + [...heard].join(' + ') : '') + '…');
       }
     };
@@ -122,6 +131,7 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
     progress('lyrics', 1, words.length ? words.length + ' words' : 'No clear words heard');
   } catch (error) {
     console.warn('Transcription failed', error);
+    diag('Lyrics failed: ' + (error instanceof Error ? error.message : String(error)), 'error');
     analysis.transcript = 'failed';
     progress('lyrics', 1, 'Lyrics unavailable — you can paste them in later');
   }

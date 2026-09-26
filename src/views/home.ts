@@ -1,3 +1,4 @@
+import { diagEntries, diagReset, onDiag, diag } from '../lib/diag';
 import { deleteSong, listSongs, saveSong, type StoredSong } from '../lib/library';
 import * as lalal from '../lib/lalal';
 import { formatTime, keyName } from '../lib/music';
@@ -117,6 +118,10 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <div class="cardHead"><h2 id="progressTitle">Preparing your song…</h2><button id="cancelPrep" class="btn ghost small">Cancel</button></div>
     <ol id="stepList" class="stepList"></ol>
     <div id="prepError" class="errorBox hidden"></div>
+    <details class="diag"><summary>Show details <span id="diagElapsed" class="mono"></span></summary>
+      <ol id="diagLog" class="diagLog"></ol>
+      <button id="diagCopy" class="chip ghost">Copy details</button>
+    </details>
   </section>
 
   <section class="card">
@@ -183,6 +188,29 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   }));
 
   // ------------------------------------------------ preparing
+  // Activity log ("Show details") with timings, to see exactly where preparation is waiting.
+  const diagLog = el(root, '#diagLog');
+  const diagElapsed = el(root, '#diagElapsed');
+  const renderDiag = () => {
+    diagLog.innerHTML = diagEntries().map(entry =>
+      `<li class="d-${entry.tone}"><span class="mono">${entry.at.toFixed(1)}s</span> ${escapeHtml(entry.text)}</li>`).join('');
+    diagLog.scrollTop = diagLog.scrollHeight;
+  };
+  const stopDiag = onDiag(renderDiag);
+  let prepStartedAt = 0;
+  let stepStartedAt = 0;
+  let currentStep: StepId | null = null;
+  const elapsedTimer = window.setInterval(() => {
+    if (!prepStartedAt || progressCard.classList.contains('hidden')) return;
+    const total = (performance.now() - prepStartedAt) / 1000;
+    const inStep = (performance.now() - stepStartedAt) / 1000;
+    diagElapsed.textContent = '· ' + formatTime(total) + ' total' + (currentStep ? ' · this step ' + formatTime(inStep) : '');
+  }, 500);
+  el(root, '#diagCopy').addEventListener('click', () => {
+    const text = diagEntries().map(entry => entry.at.toFixed(1) + 's ' + entry.text).join('\n');
+    void navigator.clipboard?.writeText(text).then(() => toast('Details copied — paste them to Claude.'), () => toast('Couldn’t copy — take a screenshot instead.', 'error'));
+  });
+
   const renderSteps = (states: Partial<Record<StepId, { fraction: number; detail?: string }>>, skipSeparation: boolean) => {
     stepList.innerHTML = STEPS.map(step => {
       const state = states[step.id];
@@ -203,10 +231,20 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     prepError.classList.add('hidden');
     el(root, '#progressTitle').textContent = 'Preparing your song…';
     const states: Partial<Record<StepId, { fraction: number; detail?: string }>> = {};
+    diagReset();
+    prepStartedAt = stepStartedAt = performance.now();
+    currentStep = null;
+    diag('Started: ' + (input.kind === 'link' ? 'link' : input.kind) + (input.kind !== 'link' ? ' (' + ((input.kind === 'file' ? input.file : input.blob).size / 1048576).toFixed(1) + ' MB)' : '') + ' · separation ' + (separate ? 'on' : 'off'));
     renderSteps(states, !separate);
     progressCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     try {
       const prepared = await prepareSong(input, separate, lyricsOptionsFrom(lyricsLang.value, lyricsQuality.value), (step, fraction, detail) => {
+        if (step !== currentStep) {
+          if (currentStep) diag('Finished: ' + currentStep + ' in ' + ((performance.now() - stepStartedAt) / 1000).toFixed(1) + 's', 'ok');
+          currentStep = step;
+          stepStartedAt = performance.now();
+          diag('Step: ' + step);
+        }
         states[step] = { fraction, detail: detail ?? states[step]?.detail };
         if (!disposed) renderSteps(states, !separate);
       }, abort.signal);
@@ -222,6 +260,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     } catch (error) {
       if (disposed) return;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
+      diag('Failed during ' + (currentStep ?? 'start') + ': ' + message, 'error');
       el(root, '#progressTitle').textContent = 'That didn’t work';
       const canFallback = separate && input.kind !== 'link';
       prepError.innerHTML = `<p>${escapeHtml(message)}</p><div class="row">
@@ -473,6 +512,8 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     disposed = true;
     abort?.abort();
     cancelAnimationFrame(meterFrame);
+    window.clearInterval(elapsedTimer);
+    stopDiag();
     if (timerHandle !== null) window.clearInterval(timerHandle);
     closeReview?.();
     if (document.pictureInPictureElement === captureVideo) void document.exitPictureInPicture().catch(() => undefined);
