@@ -389,6 +389,23 @@ input[type='range'] { accent-color: var(--accent); }
 .hideNotes .syl i { display: none; }
 .lineScore { font-weight: 800; font-size: 0.9rem; }
 
+/* Lyrics crawl: rolls upward with the song, tilted back like a movie opening crawl, fading at the edges. */
+.lyricsList { position: relative; }
+.lyricsList.crawl {
+  height: min(52vh, 460px); max-height: none; scroll-behavior: auto;
+  transform: perspective(700px) rotateX(14deg); transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22%, #000 82%, transparent 100%);
+  padding-block: 18vh;
+}
+.lyricsList.crawl .lyricLine { transition: opacity 0.3s, color 0.3s; }
+.lyricsList.crawl .lyricLine.past { opacity: 0.45; }
+.lyricsList.crawl .lyricLine.current .lineText { text-shadow: 0 0 0.5px currentColor; }
+.lyricsList .syl .t { transition: color 0.12s; }
+.lyricsList .syl.sung .t { color: var(--accent); }
+.lyricsList .syl.now .t { color: var(--accent-2); text-shadow: 0 0 10px color-mix(in srgb, var(--accent-2) 55%, transparent); }
+@media (prefers-reduced-motion: reduce) { .lyricsList.crawl { transform: none; } }
+
 .review .scoreRow { display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
 .bigScore { display: grid; place-items: center; width: 118px; height: 118px; border-radius: 50%; background: conic-gradient(var(--accent), var(--accent-2), var(--accent)); color: #fff; }
 .bigScore strong { font-size: 2.6rem; line-height: 1; }

@@ -198,6 +198,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <button id="fixLyrics" class="chip ghost">Fix lyrics</button>
         <button id="redoLyrics" class="chip ghost">Redo lyrics (language)</button>
         <label class="check small"><input id="showNotes" type="checkbox"> Show notes</label>
+        <label class="check small"><input id="followLyrics" type="checkbox"> Scroll with the song</label>
       </div>
       <p id="lyricsHint" class="hint small">${analysis.transcript === 'failed' || analysis.transcript === 'none'
         ? 'Lyrics couldn’t be heard automatically — use “Redo lyrics” or “Fix lyrics”. Notes are still shown.'
@@ -239,9 +240,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   // ---------------------------------------------------------------- state
   const player = new Player(buffers);
   const mic = new LiveMic(player.ctx);
-  // Conveyor text: "clo-" "ser" so split words still read as one word.
-  const allSyllables = () => analysis.lines.flatMap(line => line.words.flatMap(word => word.syllables.map((syllable, index) =>
-    index < word.syllables.length - 1 ? { ...syllable, text: syllable.text + '-' } : syllable)));
+  // Conveyor text: whole words written straight (each carries the note it starts on).
+  const allSyllables = (): Syllable[] => analysis.lines.flatMap(line => line.words.map(word => ({
+    text: word.text, start: word.start, end: word.end,
+    midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null, notes: []
+  })));
   const lane = new PitchLane(el<HTMLCanvasElement>(root, '#lane'), analysis.notes, allSyllables(), analysis.range, analysis.key, breathMarks(analysis.notes));
 
   let selected = new Set<string>();
@@ -434,8 +437,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   // ---------------------------------------------------------------- lyrics sheet
   const sectionFor = (time: number): Section | undefined => analysis.sections.find(s => time >= s.start && time < s.end);
 
+  let crawlLine: HTMLElement | null = null;
   const renderLyrics = () => {
     const list = el(root, '#lyricsList');
+    crawlLine = null;
     let lastSection: string | null = null;
     list.innerHTML = analysis.lines.map(line => {
       const section = sectionFor(line.start);
@@ -446,7 +451,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       const scored = review?.score.lines.find(item => item.line.id === line.id);
       const scoreClass = scored ? (scored.percent >= 70 ? ' good' : scored.percent >= 40 ? ' ok' : ' bad') : '';
       return header + `<button class="lyricLine${outside ? ' outside' : ''}${anchor}${scoreClass}" data-line="${line.id}">
-        <span class="lineTime">${formatTime(line.start)}</span><span class="lineText">${syllablesHtml(line, false)}</span>
+        <span class="lineTime">${formatTime(line.start)}</span><span class="lineText">${syllablesHtml(line, true)}</span>
         ${scored ? `<span class="lineScore">${scored.percent}%</span>` : ''}</button>`;
     }).join('') || '<p class="empty">No sung lines were found.</p>';
 
@@ -494,6 +499,45 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   showNotes.checked = prefs.get('showNotes', false);
   const applyShowNotes = () => el(root, '#lyricsList').classList.toggle('hideNotes', !showNotes.checked);
   showNotes.addEventListener('change', () => { prefs.set('showNotes', showNotes.checked); applyShowNotes(); });
+
+  // Lyrics crawl: while the song plays, the full lyrics roll upward at an even speed (like a movie
+  // opening crawl) and each word lights up as it's sung. Scrolling by hand pauses it for a few seconds.
+  const followLyrics = el<HTMLInputElement>(root, '#followLyrics');
+  followLyrics.checked = prefs.get('followLyrics', true);
+  const lyricsList = el(root, '#lyricsList');
+  const applyFollow = () => lyricsList.classList.toggle('crawl', followLyrics.checked);
+  followLyrics.addEventListener('change', () => { prefs.set('followLyrics', followLyrics.checked); applyFollow(); });
+  applyFollow();
+  let handScrollUntil = 0;
+  const pauseCrawl = () => { handScrollUntil = performance.now() + 4000; };
+  ['wheel', 'touchstart', 'pointerdown', 'keydown'].forEach(type => lyricsList.addEventListener(type, pauseCrawl, { passive: true }));
+  const updateCrawl = (time: number, playing: boolean) => {
+    if (!followLyrics.checked || !(el(root, '#lyricsFold') as HTMLDetailsElement).open) return;
+    const rows = [...lyricsList.querySelectorAll<HTMLElement>('.lyricLine')];
+    if (!rows.length) return;
+    const lines = analysis.lines;
+    let index = lines.findIndex(line => time < line.end);
+    if (index < 0) index = lines.length - 1;
+    const row = rows[index];
+    if (row !== crawlLine) {
+      rows.forEach((node, i) => node.classList.toggle('past', i < index));
+      crawlLine?.querySelectorAll('.syl').forEach(node => node.classList.remove('now'));
+      crawlLine = row;
+    }
+    // Light up the words of the current line as they're sung.
+    row.querySelectorAll<HTMLElement>('.syl').forEach(node => {
+      const start = Number(node.dataset.s), end = Number(node.dataset.e);
+      node.classList.toggle('sung', time >= start);
+      node.classList.toggle('now', time >= start && time < end + 0.05);
+    });
+    if (!playing || performance.now() < handScrollUntil) return;
+    // Glide at an even speed from this line to the next, so nothing jumps.
+    const line = lines[index], next = lines[index + 1], nextRow = rows[index + 1];
+    const from = line.start, to = next ? next.start : line.end;
+    const progress = Math.max(0, Math.min(1, (time - from) / Math.max(0.1, to - from)));
+    const y = row.offsetTop + (nextRow ? (nextRow.offsetTop - row.offsetTop) * progress : 0);
+    lyricsList.scrollTop = y - lyricsList.clientHeight * 0.38;
+  };
   applyShowNotes();
 
   const redoDialog = el<HTMLDialogElement>(root, '#redoDialog');
@@ -1146,6 +1190,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     if (!mic.active) lane.liveMidi = null;
     lane.draw(now);
     updateUpNext(now);
+    updateCrawl(now, playing);
     updateCoach(player.state !== 'stopped' || mic.active ? now : null, sung);
     if (player.state !== 'stopped' && player.timeline.hasTurns && !reviewPlaying) {
       const piece = player.timeline.pieceAt(player.timelineTime());

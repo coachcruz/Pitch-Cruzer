@@ -32,6 +32,8 @@ export class PitchLane {
   /** Simple view: no voice staff, note names only on C rows, no syllable threads. */
   simple = false;
   private gutter = OCTAVE_COL + NOTE_COL;
+  /** Conveyor layout, computed once: each word's fixed position (in song seconds). */
+  private layout: Array<{ at: number; size: number; text: string; start: number; end: number; midi: number | null }> | null = null;
   private view = { t0: 0, t1: 1, low: 45, rowHeight: 10, laneHeight: 100 };
 
   constructor(
@@ -59,7 +61,7 @@ export class PitchLane {
     this.resize();
   }
 
-  setLyrics(syllables: Syllable[]): void { this.syllables = syllables; }
+  setLyrics(syllables: Syllable[]): void { this.syllables = syllables; this.layout = null; }
 
   resize(): void {
     const ratio = window.devicePixelRatio || 1;
@@ -69,7 +71,8 @@ export class PitchLane {
     this.canvas.width = Math.round(this.width * ratio);
     this.canvas.height = Math.round(this.height * ratio);
     this.ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    this.windowSeconds = this.width < 520 ? 4.5 : this.width < 800 ? 6 : 8;
+    // The time scale is re-fitted to the lyrics (see the conveyor in draw()).
+    this.layout = null;
   }
 
   /** The artist's note at a song time (binary search). */
@@ -104,7 +107,7 @@ export class PitchLane {
 
   /** True while in a breathing gap between phrases. */
   breathAt(time: number): boolean {
-    return this.breaths.some(breath => time >= breath.time && time < breath.time + breath.length && breath.length >= 0.35);
+    return this.breaths.some(breath => time >= breath.time && time < breath.time + breath.length && breath.length >= 0.35 && this.betweenWords(breath));
   }
 
   /** Semitones between what you sang and the target (octave forgiven if enabled). */
@@ -112,22 +115,10 @@ export class PitchLane {
     return (this.forgiveOctave ? foldToOctave(midi, target.midi) : midi) - target.midi;
   }
 
-  /** Grow the visible range when your voice goes above/below the song (e.g. subharmonics). */
-  private updateRange(t0: number, now: number): void {
-    let low = this.baseLow, high = this.baseHigh;
-    for (const point of this.trail) {
-      if (point.t < t0 || point.t > now + 0.05) continue;
-      low = Math.min(low, Math.floor(point.midi) - 2);
-      high = Math.max(high, Math.ceil(point.midi) + 2);
-    }
-    if (this.liveMidi !== null) {
-      low = Math.min(low, Math.floor(this.liveMidi) - 2);
-      high = Math.max(high, Math.ceil(this.liveMidi) + 2);
-    }
-    low = Math.max(21, low);
-    high = Math.min(100, high);
-    this.low += (low - this.low) * 0.12;
-    this.high += (high - this.high) * 0.12;
+  /** A breath only counts in a real gap in the lyrics — not in the middle of a held or sliding word. */
+  private betweenWords(breath: BreathMark): boolean {
+    const middle = breath.time + breath.length / 2;
+    return !this.syllables.some(word => word.text !== '♪' && word.start < middle - 0.05 && word.end > middle + 0.05);
   }
 
   draw(now: number): void {
@@ -136,7 +127,9 @@ export class PitchLane {
     const color = (name: string) => style.getPropertyValue(name).trim();
     const t0 = now - this.windowSeconds * 0.25;
     const t1 = t0 + this.windowSeconds;
-    this.updateRange(t0, now);
+    // The staff stays fixed (song range ± 2); a voice outside it is pinned to the edge with an arrow.
+    this.low = this.baseLow;
+    this.high = this.baseHigh;
     // Voice types whose range overlaps what's on screen get a column each in the left gutter.
     const wide = width >= 560;
     const voiceCol = wide ? 13 : 10;
@@ -264,56 +257,94 @@ export class PitchLane {
     // ---- conveyor belt of lyrics
     ctx.fillStyle = color('--conveyor');
     ctx.fillRect(0, 0, width, CONVEYOR);
-    // One row, so lyrics always read left to right. Syllables that must shift right to make room
-    // keep a dotted thread back to the exact note (and time) they are sung on.
-    const rowY = 36;
-    let rowRight = -Infinity;
+    // Whole words, written straight, each placed ONCE at a fixed spot on the belt (never re-packed while
+    // scrolling), so the belt moves rigidly. The belt speed is fitted so each word sits right above its
+    // own notes; its dotted thread points to the note where it's sung.
+    const rowY = 38;
+    const FONT = (size: number) => '700 ' + size + 'px ui-sans-serif, system-ui, sans-serif';
+    if (!this.layout) {
+      // Spread time out until the words fit under their own notes: the belt speed is chosen so (nearly)
+      // every word ends before the next one starts. Only unusually fast words shrink a little, and a
+      // word is nudged right only as a last resort.
+      ctx.font = FONT(24);
+      const words = this.syllables.filter(word => word.text !== '♪');
+      const need: number[] = [];
+      words.forEach((word, i) => {
+        const next = words[i + 1];
+        if (next && next.start - word.start > 0.04) need.push((ctx.measureText(word.text).width + 14) / (next.start - word.start));
+      });
+      need.sort((a, b) => a - b);
+      const want = need.length ? need[Math.min(need.length - 1, Math.floor(need.length * 0.9))] : 0;
+      const usable = width - G;
+      const defaultWindow = width < 520 ? 3.5 : width < 800 ? 4.5 : 6;
+      const minWindow = width < 520 ? 1.8 : 2.4; // never so zoomed in that you can't see what's coming
+      this.windowSeconds = Math.max(minWindow, Math.min(defaultWindow, usable / Math.max(1, want)));
+      const pxPerSec = usable / this.windowSeconds;
+      let freeAt = -Infinity;
+      this.layout = words.map((word, i) => {
+        const next = words[i + 1];
+        const room = next ? (next.start - word.start) * pxPerSec - 12 : Infinity;
+        let size = 24;
+        ctx.font = FONT(size);
+        while (size > 16 && ctx.measureText(word.text).width > room) { size -= 2; ctx.font = FONT(size); }
+        const at = Math.max(word.start, freeAt);
+        freeAt = at + (ctx.measureText(word.text).width + 12) / pxPerSec;
+        return { at, size, text: word.text, start: word.start, end: word.end, midi: word.midi };
+      });
+    }
     ctx.textBaseline = 'middle';
     ctx.save();
     ctx.beginPath();
     ctx.rect(G, 0, width - G, height);
     ctx.clip();
-    for (const syllable of this.syllables) {
-      // Syllables that have fully scrolled past the left edge drop off the belt.
-      if (syllable.text === '♪' || x(syllable.end) < G - 4) continue;
-      if (syllable.start > t1) break;
-      const current = syllable.start <= now && now < syllable.end;
-      const sung = syllable.end <= now;
-      ctx.font = (current ? '800 27px' : '650 24px') + ' ui-sans-serif, system-ui, sans-serif';
-      const textWidth = ctx.measureText(syllable.text).width;
-      // Already-sung syllables stay where they were sung; if one would overlap, drop it rather than
-      // shoving it along (that made words pile up at the left edge when paused).
-      if (sung && x(syllable.start) < rowRight + 5) continue;
-      const left = Math.max(x(syllable.start), rowRight + 5);
-      rowRight = left + textWidth;
-      if (left > width) break;
+    for (const word of this.layout) {
+      if (word.at > t1) break;
+      ctx.font = FONT(word.size);
+      const left = x(word.at);
+      if (left + ctx.measureText(word.text).width < G) continue;
+      const current = word.start <= now && now < word.end;
+      const sung = word.end <= now;
       ctx.fillStyle = current ? color('--accent-2') : sung ? color('--muted') : color('--text');
-      ctx.globalAlpha = sung ? 0.55 : 1;
-      ctx.fillText(syllable.text, left, rowY);
+      ctx.globalAlpha = sung ? 0.5 : 1;
+      ctx.fillText(word.text, left, rowY);
       ctx.globalAlpha = 1;
-      if (syllable.midi !== null && !sung && !this.simple) {
+      if (word.midi !== null && !sung && !this.simple) {
         ctx.strokeStyle = current ? color('--accent-2') : color('--thread');
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
         ctx.beginPath();
         ctx.moveTo(left + 2, rowY + 16);
-        ctx.lineTo(x(syllable.start) + 1, CONVEYOR);
-        ctx.lineTo(x(syllable.start) + 1, y(Math.round(syllable.midi)) - Math.max(6, rowHeight * 0.8) / 2);
+        ctx.lineTo(x(word.start) + 1, CONVEYOR);
+        ctx.lineTo(x(word.start) + 1, y(Math.round(word.midi)) - Math.max(6, rowHeight * 0.8) / 2);
         ctx.stroke();
         ctx.setLineDash([]);
       }
     }
-    // Breath marks (small, under the words).
-    ctx.font = '700 10px ui-sans-serif, system-ui, sans-serif';
+    // Breath marks: centered in the actual gap between the notes (the same gap the words sit around),
+    // with a faint line down through the staff so it's clear which bars it falls between.
+    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
     for (const breath of this.breaths) {
       if (breath.time + breath.length < t0 || breath.time > t1) continue;
-      const bx = x(breath.time + breath.length / 2);
-      if (bx < G + 20) continue;
+      if (!this.betweenWords(breath)) continue;
+      const left = x(breath.time), right = x(breath.time + breath.length);
+      const bx = (left + right) / 2;
+      if (bx < G + 8) continue;
+      const done = breath.time + breath.length < now;
+      ctx.globalAlpha = done ? 0.3 : 1;
+      ctx.strokeStyle = color('--breath');
+      ctx.lineWidth = 1;
+      ctx.setLineDash([1, 4]);
+      ctx.beginPath();
+      ctx.moveTo(bx, CONVEYOR);
+      ctx.lineTo(bx, height);
+      ctx.stroke();
+      ctx.setLineDash([]);
       ctx.fillStyle = color('--breath');
-      ctx.globalAlpha = breath.time + breath.length < now ? 0.35 : 1;
-      ctx.fillText('˅ breathe', bx - 20, CONVEYOR - 7);
+      ctx.fillText(right - left >= 64 ? '˅ breathe' : '˅', bx, CONVEYOR - 8);
       ctx.globalAlpha = 1;
     }
+    ctx.textAlign = 'left';
     ctx.restore();
     ctx.fillStyle = color('--border');
     ctx.fillRect(0, CONVEYOR - 1, width, 1);
@@ -333,7 +364,7 @@ export class PitchLane {
       for (let j = i + 1; j < visible.length && visible[j].t - point.t <= 0.11; j += 1) { sum += visible[j].midi; count += 1; }
       const centerMidi = sum / count;
       const error = target ? Math.abs(this.errorAt(centerMidi, target)) : null;
-      const px = x(point.t), py = y(point.midi);
+      const px = x(point.t), py = Math.min(height - 3, Math.max(laneTop + 3, y(point.midi)));
       ctx.strokeStyle = error === null ? color('--voice') : error <= 0.5 ? color('--good') : error <= 1.2 ? color('--close') : color('--off');
       ctx.beginPath();
       if (previous && point.t - previous.t < 0.15) { ctx.moveTo(previous.px, previous.py); ctx.lineTo(px, py); }
@@ -353,12 +384,14 @@ export class PitchLane {
     ctx.stroke();
     ctx.globalAlpha = 1;
     if (this.liveMidi !== null) {
-      const vy = y(this.liveMidi);
+      const rawY = y(this.liveMidi);
+      const vy = Math.min(height - 10, Math.max(laneTop + 10, rawY));
+      const off = rawY < laneTop + 10 ? ' ▲' : rawY > height - 10 ? ' ▼' : '';
       ctx.fillStyle = color('--voice');
       ctx.beginPath();
       ctx.arc(playX, vy, 6, 0, Math.PI * 2);
       ctx.fill();
-      const label = 'You ' + midiToNote(this.liveMidi);
+      const label = 'You ' + midiToNote(this.liveMidi) + off;
       ctx.font = '800 12px ui-sans-serif, system-ui, sans-serif';
       const w = ctx.measureText(label).width + 12;
       ctx.fillStyle = color('--surface');
