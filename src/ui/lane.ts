@@ -1,10 +1,10 @@
 import type { BreathMark, NoteEvent, Syllable } from '../lib/analysis';
-import { foldToOctave, midiToNote, octaveOf, scalePitchClasses, VOICE_TYPES, type MusicalKey } from '../lib/music';
+import { foldToOctave, midiToNote, scalePitchClasses, VOICE_TYPES, type MusicalKey } from '../lib/music';
 
 export interface TrailPoint { t: number; midi: number }
 
-const CONVEYOR = 72;   // px: lyrics strip across the top (one row + breath marks)
-const OCTAVE_COL = 18;  // px: octave stripe + label on the far left
+const CONVEYOR = 84;   // px: lyrics strip across the top (one big row + breath marks)
+const OCTAVE_COL = 18;  // px: TREBLE / BASS labels on the far left
 const NOTE_COL = 34;    // px: note names
 
 /**
@@ -43,11 +43,16 @@ export class PitchLane {
     private breaths: BreathMark[] = []
   ) {
     this.ctx = canvas.getContext('2d')!;
-    if (range) { this.baseLow = range[0] - 3; this.baseHigh = range[1] + 3; }
-    if (this.baseHigh - this.baseLow < 14) {
+    // The staff spans exactly what the song sings — its lowest to highest note — plus 2 notes of
+    // wiggle room each side. (If you sing outside it, the staff still stretches to show your line.)
+    const sung = notes.map(note => Math.round(note.midi));
+    const songLow = sung.length ? Math.min(...sung) : range?.[0];
+    const songHigh = sung.length ? Math.max(...sung) : range?.[1];
+    if (songLow !== undefined && songHigh !== undefined) { this.baseLow = songLow - 2; this.baseHigh = songHigh + 2; }
+    if (this.baseHigh - this.baseLow < 8) {
       const mid = (this.baseHigh + this.baseLow) / 2;
-      this.baseLow = Math.floor(mid - 7);
-      this.baseHigh = Math.ceil(mid + 7);
+      this.baseLow = Math.floor(mid - 4);
+      this.baseHigh = Math.ceil(mid + 4);
     }
     this.low = this.baseLow;
     this.high = this.baseHigh;
@@ -148,32 +153,48 @@ export class PitchLane {
 
     ctx.clearRect(0, 0, width, height);
 
-    // ---- octave bands
+    // ---- grand staff: the five treble-clef lines (E4 G4 B4 D5 F5) and bass-clef lines (G2 B2 D3 F3 A3),
+    // like sheet music, with middle C (C4) between them. Clearer than octave numbers for most singers.
     ctx.textBaseline = 'middle';
-    const firstOctave = octaveOf(Math.floor(this.low));
-    const lastOctave = octaveOf(Math.ceil(this.high));
-    for (let octave = firstOctave; octave <= lastOctave; octave += 1) {
-      const cMidi = (octave + 1) * 12;
-      const top = Math.max(laneTop, y(cMidi + 11) - rowHeight / 2);
-      const bottom = Math.min(height, y(cMidi) + rowHeight / 2);
-      if (bottom <= top) continue;
-      ctx.fillStyle = octave % 2 === 0 ? color('--band-a') : color('--band-b');
-      ctx.fillRect(0, top, width, bottom - top);
-      // Octave number in a stripe along the far left edge, clear of the note names.
-      ctx.fillStyle = octave % 2 === 0 ? color('--accent') : color('--accent-2');
-      ctx.globalAlpha = 0.55;
-      ctx.fillRect(0, top + 1, 4, bottom - top - 2);
-      ctx.globalAlpha = 1;
-      if (bottom - top > 40) {
-        ctx.save();
-        ctx.translate(13, (top + bottom) / 2);
-        ctx.rotate(-Math.PI / 2);
-        ctx.textAlign = 'center';
-        ctx.fillStyle = color('--muted');
-        ctx.font = '800 9px ui-sans-serif, system-ui, sans-serif';
-        ctx.fillText('OCTAVE ' + octave, 0, 0);
-        ctx.restore();
+    const staves: Array<{ name: string; lines: number[] }> = [
+      { name: 'TREBLE', lines: [64, 67, 71, 74, 77] },
+      { name: 'BASS', lines: [43, 47, 50, 53, 57] }
+    ];
+    for (const staff of staves) {
+      const top = y(staff.lines[4]), bottom = y(staff.lines[0]);
+      if (bottom < laneTop || top > height) continue;
+      ctx.fillStyle = color('--band-a');
+      ctx.fillRect(0, Math.max(laneTop, top), width, Math.min(height, bottom) - Math.max(laneTop, top));
+      ctx.strokeStyle = color('--staff');
+      ctx.lineWidth = 1.5;
+      for (const line of staff.lines) {
+        const ly = y(line);
+        if (ly < laneTop || ly > height) continue;
+        ctx.beginPath();
+        ctx.moveTo(0, ly);
+        ctx.lineTo(width, ly);
+        ctx.stroke();
       }
+      const mid = Math.min(Math.max((top + bottom) / 2, laneTop + 30), height - 30);
+      ctx.save();
+      ctx.translate(9, mid);
+      ctx.rotate(-Math.PI / 2);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = color('--muted');
+      ctx.font = '800 9px ui-sans-serif, system-ui, sans-serif';
+      ctx.fillText(staff.name, 0, 0);
+      ctx.restore();
+    }
+    const cY = y(60);
+    if (cY > laneTop && cY < height) {
+      ctx.strokeStyle = color('--accent');
+      ctx.setLineDash([6, 4]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, cY);
+      ctx.lineTo(width, cY);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
 
     // ---- note rows
@@ -186,11 +207,13 @@ export class PitchLane {
         ctx.fillStyle = color('--lane-row');
         ctx.fillRect(G, rowY - rowHeight / 2, width - G, rowHeight - 1);
       }
-      if (pc === 0) {
-        ctx.fillStyle = color('--border');
-        ctx.fillRect(G, rowY + rowHeight / 2 - 1, width - G, 1);
-      }
-      if ((rowHeight >= 11 && !this.simple) || pc === 0) {
+      const natural = [0, 2, 4, 5, 7, 9, 11].includes(pc);
+      if (midi === 60) {
+        ctx.fillStyle = color('--accent');
+        ctx.font = '800 10px ui-sans-serif, system-ui, sans-serif';
+        ctx.fillText('Mid C', G - NOTE_COL + 1, rowY);
+        ctx.font = '600 10px ui-sans-serif, system-ui, sans-serif';
+      } else if (natural && ((rowHeight >= 9 && !this.simple) || pc === 0)) {
         ctx.fillStyle = pc === 0 ? color('--text') : color('--muted');
         ctx.fillText(midiToNote(midi), G - NOTE_COL + 4, rowY);
       }
@@ -243,7 +266,7 @@ export class PitchLane {
     ctx.fillRect(0, 0, width, CONVEYOR);
     // One row, so lyrics always read left to right. Syllables that must shift right to make room
     // keep a dotted thread back to the exact note (and time) they are sung on.
-    const rowY = 30;
+    const rowY = 36;
     let rowRight = -Infinity;
     ctx.textBaseline = 'middle';
     ctx.save();
@@ -256,7 +279,7 @@ export class PitchLane {
       if (syllable.start > t1) break;
       const current = syllable.start <= now && now < syllable.end;
       const sung = syllable.end <= now;
-      ctx.font = (current ? '800 21px' : '600 19px') + ' ui-sans-serif, system-ui, sans-serif';
+      ctx.font = (current ? '800 27px' : '650 24px') + ' ui-sans-serif, system-ui, sans-serif';
       const textWidth = ctx.measureText(syllable.text).width;
       // Already-sung syllables stay where they were sung; if one would overlap, drop it rather than
       // shoving it along (that made words pile up at the left edge when paused).
@@ -273,22 +296,22 @@ export class PitchLane {
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
         ctx.beginPath();
-        ctx.moveTo(left + 2, rowY + 13);
+        ctx.moveTo(left + 2, rowY + 16);
         ctx.lineTo(x(syllable.start) + 1, CONVEYOR);
         ctx.lineTo(x(syllable.start) + 1, y(Math.round(syllable.midi)) - Math.max(6, rowHeight * 0.8) / 2);
         ctx.stroke();
         ctx.setLineDash([]);
       }
     }
-    // Breath marks.
-    ctx.font = '700 11px ui-sans-serif, system-ui, sans-serif';
+    // Breath marks (small, under the words).
+    ctx.font = '700 10px ui-sans-serif, system-ui, sans-serif';
     for (const breath of this.breaths) {
       if (breath.time + breath.length < t0 || breath.time > t1) continue;
       const bx = x(breath.time + breath.length / 2);
       if (bx < G + 20) continue;
       ctx.fillStyle = color('--breath');
       ctx.globalAlpha = breath.time + breath.length < now ? 0.35 : 1;
-      ctx.fillText('˅ breathe', bx - 22, CONVEYOR - 8);
+      ctx.fillText('˅ breathe', bx - 20, CONVEYOR - 7);
       ctx.globalAlpha = 1;
     }
     ctx.restore();
