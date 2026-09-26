@@ -17,11 +17,11 @@ app.innerHTML = `
 
   <section class="modeChooser">
     <div class="modeButtons" aria-label="Practice mode">
-      <button class="modeButton active" data-app-mode="single"><strong>Note</strong></button>
-      <button class="modeButton" data-app-mode="reference"><strong>Match</strong></button>
+      <button class="modeButton" data-app-mode="single"><strong>Tuner</strong></button>
+      <button class="modeButton active" data-app-mode="reference"><strong>Song</strong></button>
     </div>
     <div class="modeUtilities">
-      <button id="phraseToolToggle" class="phraseToolButton" type="button" aria-expanded="false">Phrase</button>
+      <button id="phraseToolToggle" class="phraseToolButton hidden" type="button" aria-expanded="false" tabindex="-1">Line drill</button>
       <button id="advancedToggle" class="textButton">Tuner tools</button>
     </div>
   </section>
@@ -133,7 +133,7 @@ app.innerHTML = `
 
   <section id="referenceCard" class="referenceCard hidden">
     <div class="sectionHeading">
-      <div><p class="eyebrow">SONG PRACTICE</p><h2>Match</h2></div>
+      <div><p class="eyebrow">SONG PRACTICE</p><h2>Practice a song</h2></div>
       <div class="matchBadges">
         <span id="lalalStatus" class="tinyLabel">LALAL CHECKING</span>
         <span id="referenceCapability" class="tinyLabel">NO SONG</span>
@@ -141,10 +141,12 @@ app.innerHTML = `
     </div>
 
     <div class="sourceLaunchRow" aria-label="Open a song source">
-      <span class="sourceLaunchLabel">OPEN SOURCE</span>
+      <span class="sourceLaunchLabel">FIND / OPEN SONG</span>
       <a class="sourceLink" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">YouTube ↗</a>
+      <a class="sourceLink" href="https://open.spotify.com/" target="_blank" rel="noopener noreferrer">Spotify ↗</a>
+      <a class="sourceLink" href="https://music.apple.com/" target="_blank" rel="noopener noreferrer">Apple Music ↗</a>
       <a class="sourceLink" href="https://suno.com/" target="_blank" rel="noopener noreferrer">Suno ↗</a>
-      <span class="sourceLaunchHint">Open the song in another tab, then come back here.</span>
+      <span class="sourceLaunchHint">Use any source. Play it in another browser tab, then record that tab here—or upload a file you already have.</span>
     </div>
 
     <div class="captureBar">
@@ -158,10 +160,10 @@ app.innerHTML = `
     </div>
 
     <div class="captureInstruction">
-      Chrome will open a picker. Choose the actual YouTube/Suno tab and turn on <strong>Share tab audio</strong>.
+      Chrome opens a tab picker. Choose the tab playing the song and turn on <strong>Share tab audio</strong>.
     </div>
 
-    <div id="referenceStatus" class="referenceStatus">Upload a song, or record audio from another browser tab. Pitch Cruzer prepares it automatically.</div>
+    <div id="referenceStatus" class="referenceStatus">Add a song once. Pitch Cruzer separates the singer from the music and prepares it for practice.</div>
 
     <div id="analysisProgress" class="analysisProgress hidden">
       <div class="progressTrack"><div id="analysisProgressFill" class="progressFill"></div></div>
@@ -203,10 +205,11 @@ app.innerHTML = `
         <div class="stemRow">
           <span>Artist</span>
           <div class="artistPresets">
-            <button type="button" data-artist-level="100" class="stemPreset active">100</button>
-            <button type="button" data-artist-level="50" class="stemPreset">50</button>
-            <button type="button" data-artist-level="20" class="stemPreset">20</button>
-            <button type="button" data-artist-level="0" class="stemPreset">Mute</button>
+            <button type="button" data-artist-level="100" class="stemPreset active">100%</button>
+            <button type="button" data-artist-level="75" class="stemPreset">75%</button>
+            <button type="button" data-artist-level="50" class="stemPreset">50%</button>
+            <button type="button" data-artist-level="25" class="stemPreset">25%</button>
+            <button type="button" data-artist-level="0" class="stemPreset">Off</button>
           </div>
         </div>
         <label>Backing vocals <span id="backingVocalLevelValue">100%</span>
@@ -413,7 +416,7 @@ let selectedPhraseIndex = 0;
 type AppMode = 'single' | 'reference';
 
 const requestedMode = new URLSearchParams(window.location.search).get('mode');
-let appMode: AppMode = requestedMode === 'reference' ? 'reference' : 'single';
+let appMode: AppMode = requestedMode === 'single' ? 'single' : 'reference';
 let phraseToolOpen = false;
 let advancedControls = false;
 let cadencePlaying = false;
@@ -1765,8 +1768,8 @@ function applyModeVisibility(): void {
   });
 
   const modeNames: Record<AppMode, string> = {
-    single: phraseMode ? 'Phrase practice' : 'Single note',
-    reference: 'Match recording'
+    single: phraseMode ? 'Line drill' : 'Tuner',
+    reference: 'Song practice'
   };
   topModeStatusEl.textContent = modeNames[appMode];
   phraseToolToggleButton.classList.toggle('active', phraseToolOpen);
