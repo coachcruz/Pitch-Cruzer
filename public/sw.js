@@ -1,35 +1,28 @@
-const CACHE = 'pitch-cruzer-v2';
-const APP_SHELL = ['./', './manifest.webmanifest', './icon.svg'];
+// Network-first cache for the app shell only, so the app opens offline but updates never get stuck.
+const CACHE = 'pitch-cruzer-v3';
 
-self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)));
-  self.skipWaiting();
-});
+self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches
-      .keys()
-      .then(keys =>
-        Promise.all(
-          keys.filter(key => key !== CACHE).map(key => caches.delete(key))
-        )
-      )
+    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
+  const request = event.request;
+  const url = new URL(request.url);
+  if (request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return;
   event.respondWith(
-    fetch(event.request)
+    fetch(request)
       .then(response => {
-        const copy = response.clone();
-        caches.open(CACHE).then(cache => cache.put(event.request, copy));
+        if (response.ok && !url.pathname.endsWith('.wasm')) {
+          const copy = response.clone();
+          caches.open(CACHE).then(cache => cache.put(request, copy));
+        }
         return response;
       })
-      .catch(() =>
-        caches.match(event.request).then(cached => cached || caches.match('./'))
-      )
+      .catch(() => caches.match(request).then(cached => cached || caches.match('./')))
   );
 });
