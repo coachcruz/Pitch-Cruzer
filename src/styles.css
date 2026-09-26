@@ -116,7 +116,7 @@ footer { order: 5; }
 
 .modeButtons {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 8px;
 }
 
@@ -3446,5 +3446,199 @@ footer {
 
   .cadencePanel > summary {
     align-items: flex-start;
+  }
+}
+
+
+/* Compact Phrase utility */
+.modeUtilities {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.phraseToolButton {
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  color: #9ba6b4;
+  background: #0d1014;
+  cursor: pointer;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+}
+
+.phraseToolButton:hover,
+.phraseToolButton.active {
+  color: #dffff8;
+  border-color: rgba(34, 230, 194, 0.5);
+  background: rgba(34, 230, 194, 0.1);
+}
+
+.phraseMini {
+  position: fixed;
+  z-index: 70;
+  top: 64px;
+  right: 12px;
+  width: min(360px, calc(100vw - 24px));
+  max-height: calc(100dvh - 76px);
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 14px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.46);
+}
+
+.phraseMini .phraseWorkspaceHeader {
+  margin-bottom: 8px;
+}
+
+.phraseMini .phraseWorkspaceHeader .eyebrow {
+  margin-bottom: 2px;
+  font-size: 8px;
+}
+
+.phraseMini .phraseWorkspaceHeader h2 {
+  font-size: 15px;
+}
+
+.phraseMini .phraseBuildState {
+  max-width: 52%;
+  font-size: 9px;
+}
+
+.phraseMini .phraseInputs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+}
+
+.phraseMini .phraseInputs label {
+  min-width: 0;
+  font-size: 9px;
+}
+
+.phraseMini .phraseInputs textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 9px;
+  resize: vertical;
+  font-size: 11px;
+}
+
+.phraseMini .phraseWarning {
+  margin-top: 6px;
+  padding: 6px 8px;
+  font-size: 9px;
+}
+
+.phraseMini .phraseUnits {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.phraseMini .phraseUnit {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.phraseMini .phraseUnitTarget {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  color: #edf2f7;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  text-align: left;
+}
+
+.phraseMini .phraseUnitTarget:hover,
+.phraseMini .currentPhraseUnit .phraseUnitTarget,
+.phraseMini .phraseUnitTarget.playing {
+  border-color: rgba(34, 230, 194, 0.58);
+  background: rgba(34, 230, 194, 0.1);
+}
+
+.phraseMini .phraseUnitTarget:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
+.phraseMini .phraseUnitWord {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.phraseMini .phraseUnitNote {
+  flex: 0 0 auto;
+  color: #a7f8e8;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.phraseMini .phraseActionRow {
+  margin-top: 8px;
+}
+
+.phraseMini .phraseActionRow .primaryButton {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  font-size: 10px;
+}
+
+.phraseMini .phraseSupport {
+  display: none !important;
+}
+
+@media (min-width: 1000px) {
+  .mode-reference .phraseToolButton {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-size: 7px;
+  }
+}
+
+@media (max-width: 759px) {
+  .modeChooser {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .modeUtilities {
+    justify-content: flex-start;
+  }
+
+  .phraseMini {
+    top: 106px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 114px);
   }
 }
