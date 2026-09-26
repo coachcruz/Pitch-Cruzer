@@ -10,6 +10,7 @@ export interface Syllable { text: string; start: number; end: number; midi: numb
 export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string }
 export interface LyricLine { id: string; start: number; end: number; words: Word[] }
 
+/** 'part' only appears in songs saved by older versions (they're relabeled when opened). */
 export type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'instrumental' | 'outro' | 'part';
 export interface Section { id: string; kind: SectionKind; label: string; start: number; end: number }
 
@@ -473,7 +474,7 @@ export function relabel(sections: Section[]): Section[] {
 
 /** Finds intro / verse / pre-chorus / chorus / bridge / outro from lyric lines, gaps and repetition. */
 export function buildSections(lines: LyricLine[], notes: NoteEvent[], duration: number, hasLyrics: boolean): Section[] {
-  if (!lines.length) return [{ id: sectionId(), kind: 'part', label: 'Full song', start: 0, end: duration }];
+  if (!lines.length) return [{ id: sectionId(), kind: 'verse', label: 'Whole song', start: 0, end: duration }];
 
   let blocks: Block[] = [];
   let current: LyricLine[] = [];
@@ -528,11 +529,19 @@ export function buildSections(lines: LyricLine[], notes: NoteEvent[], duration: 
     const score = members.length + (pairs ? simTotal / pairs : 0) * 2 + pitch / 6;
     if (score > chorusScore) { chorusScore = score; chorus = members; }
   });
+  // No clearly repeated section (short clip, or lyrics not written yet): the higher, more intense
+  // blocks are the choruses — the usual pop shape — so sections still get real names, never "Part 3".
+  if (!chorus.length && blocks.length > 1) {
+    const pitches = blocks.map(block => blockPitch(block, notes));
+    const middle = median(pitches);
+    chorus = blocks.map((_, i) => i).filter(i => i > 0 && pitches[i] > middle + 0.4);
+    if (!chorus.length) chorus = blocks.map((_, i) => i).filter(i => i % 2 === 1);
+  }
   const chorusSet = new Set(chorus);
   const chorusDuration = chorus.length ? median(chorus.map(i => blocks[i].end - blocks[i].start)) : 0;
 
   const kinds: SectionKind[] = blocks.map((block, i) => {
-    if (!chorus.length) return 'part';
+    if (!chorus.length) return 'verse';
     if (chorusSet.has(i)) return 'chorus';
     const choruses = chorus.filter(c => c < i).length;
     if (chorusSet.has(i + 1) && i > 0 && !chorusSet.has(i - 1) && block.end - block.start < chorusDuration * 0.75) return 'pre';

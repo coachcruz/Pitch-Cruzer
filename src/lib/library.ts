@@ -1,4 +1,5 @@
 import type { SongAnalysis } from './analysis';
+import type { Range } from './player';
 
 /** Songs and takes are saved on this device (IndexedDB) so a song only has to be separated once. */
 export interface StoredSong {
@@ -19,7 +20,7 @@ export interface StoredTake {
   label: string;
   voice: Blob;
   sampleRate: number;
-  segments: Array<{ start: number; end: number; turn?: boolean }>;
+  segments: Range[];
   offsetSeconds: number;
 }
 

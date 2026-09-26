@@ -235,6 +235,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     stepList.innerHTML = STEPS.map(step => {
       const state = states[step.id];
       const skipped = skipSeparation && ['upload', 'separate', 'download'].includes(step.id);
+      if (step.background) return `<li class="step later"><span class="dot"></span><div><strong>${escapeHtml(step.label)}</strong><small>Happens while you practice — the song opens as soon as the notes are found</small></div></li>`;
       const status = skipped ? 'skipped' : !state ? 'waiting' : state.fraction >= 1 ? 'done' : 'active';
       const pct = state ? Math.round(state.fraction * 100) : 0;
       return `<li class="step ${status}"><span class="dot"></span><div><strong>${escapeHtml(step.label)}</strong>
@@ -279,11 +280,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       // Open the song as soon as the notes are ready; the lyrics finish in the background and appear
       // on the practice screen when done.
       const song = prepared.song;
+      const keep = keepSong.checked;
       const job = prepared.lyricsJob().catch(error => console.warn('Background lyrics failed', error)).then(async () => {
         song.analysis.lyricsPending = false;
         session.lyricsJobs.delete(song.id);
-        if (session.saved && session.song?.id === song.id) await saveSong(song).catch(() => undefined);
-        else if (keepSong.checked) await saveSong(song).catch(() => undefined);
+        // Save the finished lyrics if the song is kept (chosen here, or saved later from practice).
+        if (keep || (session.saved && session.song?.id === song.id)) await saveSong(song).catch(() => undefined);
         window.dispatchEvent(new CustomEvent(LYRICS_READY, { detail: song.id }));
       });
       session.lyricsJobs.set(song.id, job);

@@ -33,13 +33,14 @@ export async function findLyricsOnline(query: string, duration?: number): Promis
 }
 
 export type StepId = 'upload' | 'separate' | 'download' | 'pitch' | 'lyrics' | 'sections';
-export const STEPS: Array<{ id: StepId; label: string }> = [
+/** Preparation steps. `background` steps run after the song opens (while you practice). */
+export const STEPS: Array<{ id: StepId; label: string; background?: boolean }> = [
   { id: 'upload', label: 'Sending the song' },
   { id: 'separate', label: 'Separating the singer from the music (LALAL.AI)' },
   { id: 'download', label: 'Loading vocal + music tracks' },
   { id: 'pitch', label: 'Finding every note the singer hits' },
-  { id: 'lyrics', label: 'Writing out the lyrics' },
-  { id: 'sections', label: 'Finding intro, verses, choruses…' }
+  { id: 'lyrics', label: 'Writing out the lyrics', background: true },
+  { id: 'sections', label: 'Finding intro, verses, choruses…', background: true }
 ];
 
 export type Progress = (step: StepId, fraction: number, detail?: string) => void;
@@ -207,6 +208,7 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
     analysis.transcript = 'failed';
     progress('lyrics', 1, 'Lyrics unavailable — you can paste them in later');
   }
+  analysis.lyricsPending = false;
   if (!words.length && hadLyrics) {
     analysis.transcript = 'edited';
     return false;
@@ -246,7 +248,6 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
       analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
       diag('Lyrics: using ' + (source.pasted?.trim() ? 'your pasted lyrics' : 'lyrics found online') + ', timed to the singer', 'ok');
     }
-    analysis.lyricsPending = false;
   };
   return { analysis, lyricsJob };
 }

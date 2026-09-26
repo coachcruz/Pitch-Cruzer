@@ -139,7 +139,7 @@ export function coachingTip(score: TakeScore): string {
 export async function mixdown(
   buffers: SongBuffers,
   timeline: Timeline,
-  levels: { lead: number; backing: number; music: number; voice: number },
+  levels: { lead: number; music: number; voice: number },
   voice: AudioBuffer,
   voiceOffset: number
 ): Promise<Blob> {
@@ -148,7 +148,7 @@ export async function mixdown(
   const offline = new OfflineAudioContext(2, length, sampleRate);
   const gain = (value: number) => { const node = offline.createGain(); node.gain.value = value; node.connect(offline.destination); return node; };
   const stems: Array<[AudioBuffer | null, GainNode]> = [
-    [buffers.lead, gain(levels.lead)], [buffers.backing, gain(levels.backing)], [buffers.instrumental, gain(levels.music)]
+    [buffers.lead, gain(levels.lead)], [buffers.backing, gain(levels.music)], [buffers.instrumental, gain(levels.music)]
   ];
   for (const piece of timeline.pieces) {
     for (const [buffer, node] of stems) {
