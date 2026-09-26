@@ -1,5 +1,5 @@
 import { LiveMic } from '../lib/mic';
-import { midiToFrequency, midiToNote, NOTE_NAMES } from '../lib/music';
+import { midiToFrequency, midiToNote, NOTE_NAMES, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { el, prefs, toast } from '../ui/dom';
 
 /** A simple, friendly tuner: sing a note and see it, or pick a target and match it. */
@@ -18,6 +18,7 @@ export function renderTuner(root: HTMLElement): () => void {
       <button id="tTone" class="btn">Play target</button>
     </div>
     <div class="rangeBox"><span>Your range so far</span><strong id="tRange">—</strong><button id="tReset" class="btn ghost small">Reset</button></div>
+    <p id="tVoice" class="hint center">Sing your lowest and highest comfortable notes to see your voice type.</p>
   </section>`;
 
   const ctx = new AudioContext();
@@ -38,6 +39,7 @@ export function renderTuner(root: HTMLElement): () => void {
   let frame = 0;
   const note = el(root, '#tNote'), hz = el(root, '#tHz'), needle = el(root, '#tNeedle'), hint = el(root, '#tHint'), rangeOut = el(root, '#tRange');
   const micButton = el<HTMLButtonElement>(root, '#tMic');
+  const voiceOut = el(root, '#tVoice');
 
   const loop = () => {
     frame = requestAnimationFrame(loop);
@@ -59,6 +61,8 @@ export function renderTuner(root: HTMLElement): () => void {
       low = low === null ? stable[0] : Math.min(low, stable[0]);
       high = high === null ? stable[0] : Math.max(high, stable[0]);
       rangeOut.textContent = midiToNote(low) + ' – ' + midiToNote(high) + (high - low >= 12 ? ' (' + ((high - low) / 12).toFixed(1) + ' octaves)' : '');
+      // Only suggest a voice type once there's enough range to say something meaningful.
+      voiceOut.textContent = high - low >= 7 ? 'Sits in: ' + voiceTypeNames(voiceTypesFor(low, high)) : 'Sing your lowest and highest comfortable notes to see your voice type.';
     }
   };
 
@@ -85,7 +89,7 @@ export function renderTuner(root: HTMLElement): () => void {
     osc.start();
     osc.stop(ctx.currentTime + 1.25);
   });
-  el(root, '#tReset').addEventListener('click', () => { low = high = null; rangeOut.textContent = '—'; });
+  el(root, '#tReset').addEventListener('click', () => { low = high = null; rangeOut.textContent = '—'; voiceOut.textContent = 'Sing your lowest and highest comfortable notes to see your voice type.'; });
   loop();
 
   return () => {

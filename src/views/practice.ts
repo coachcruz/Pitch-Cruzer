@@ -2,7 +2,7 @@ import { applyTypedLyrics, breathMarks, buildLines, NOTES_VERSION, relabel, SECT
 import { decodeAudio, downloadBlob, encodeWav } from '../lib/audio';
 import { getSong, listTakes, saveSong, saveTake, deleteTake, type StoredSong, type StoredTake } from '../lib/library';
 import { LiveMic } from '../lib/mic';
-import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation } from '../lib/music';
+import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { Player, Timeline, type Range } from '../lib/player';
 import { decodeStems, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
@@ -91,7 +91,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <h1 id="songTitle">${escapeHtml(song.title)}</h1>
         <p class="meta">${[
           analysis.key ? 'Key ' + keyName(analysis.key) : null,
-          range ? 'Vocal range ' + midiToNote(range[0]) + '–' + midiToNote(range[1]) : null,
+          range ? 'Vocal range ' + midiToNote(range[0]) + '–' + midiToNote(range[1]) + ' (fits ' + voiceTypeNames(voiceTypesFor(range[0], range[1])) + ')' : null,
           formatTime(analysis.duration),
           analysis.separated ? null : 'Full mix (singer not separated)'
         ].filter(Boolean).map(value => escapeHtml(String(value))).join(' · ')}</p>
@@ -167,6 +167,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <label class="check"><input id="forgiveOctave" type="checkbox"> Forgive octave <small>(score the right note in any octave — your line still shows your real octave)</small></label>
           <label class="check"><input id="speakers" type="checkbox"> I’m on speakers, not headphones <small>(reduces echo)</small></label>
           <label class="check"><input id="countIn" type="checkbox"> Count me in before recording</label>
+          <label class="check"><input id="showVoices" type="checkbox"> Show voice types <small>(bass, baritone, tenor… beside the octaves)</small></label>
         </div>
       </div>
     </section>
@@ -515,6 +516,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     lane.forgiveOctave = forgiveOctave.checked;
     rescore();
   });
+  const showVoices = el<HTMLInputElement>(root, '#showVoices');
+  showVoices.checked = prefs.get('showVoices', window.innerWidth >= 700);
+  lane.showVoiceTypes = showVoices.checked;
+  showVoices.addEventListener('change', () => { prefs.set('showVoices', showVoices.checked); lane.showVoiceTypes = showVoices.checked; });
   const mixToggle = el<HTMLButtonElement>(root, '#mixToggle');
   mixToggle.addEventListener('click', () => {
     const open = el(root, '#mixPanel').classList.toggle('hidden') === false;

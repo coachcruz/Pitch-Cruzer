@@ -81,3 +81,29 @@ export function formatTime(seconds: number): string {
   const value = Math.max(0, Math.round(seconds));
   return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
 }
+
+/**
+ * Typical classical / choral voice ranges (MIDI). Ranges overlap — a note can sit in several.
+ * "Sub-bass" marks the subharmonic / oktavist territory below a normal bass.
+ */
+export interface VoiceType { id: string; name: string; short: string; low: number; high: number; color: string }
+export const VOICE_TYPES: VoiceType[] = [
+  { id: 'sub', name: 'Sub-bass (subharmonic)', short: 'Sub', low: 24, high: 40, color: '#64748b' },
+  { id: 'bass', name: 'Bass', short: 'Bass', low: 40, high: 64, color: '#3b82f6' },
+  { id: 'baritone', name: 'Baritone', short: 'Bar', low: 45, high: 69, color: '#06b6d4' },
+  { id: 'tenor', name: 'Tenor', short: 'Ten', low: 48, high: 72, color: '#10b981' },
+  { id: 'alto', name: 'Alto', short: 'Alto', low: 53, high: 77, color: '#eab308' },
+  { id: 'mezzo', name: 'Mezzo-soprano', short: 'Mez', low: 57, high: 81, color: '#f97316' },
+  { id: 'soprano', name: 'Soprano', short: 'Sop', low: 60, high: 84, color: '#ec4899' }
+];
+
+/** Voice types a range fits inside; if none contain it fully, the one(s) overlapping it most. */
+export function voiceTypesFor(low: number, high: number): VoiceType[] {
+  const inside = VOICE_TYPES.filter(type => low >= type.low && high <= type.high);
+  if (inside.length) return inside;
+  const overlap = (type: VoiceType) => Math.max(0, Math.min(high, type.high) - Math.max(low, type.low));
+  const best = Math.max(...VOICE_TYPES.map(overlap));
+  return best > 0 ? VOICE_TYPES.filter(type => overlap(type) >= best - 1) : [];
+}
+
+export const voiceTypeNames = (types: VoiceType[]) => types.map(type => type.name).join(' · ');

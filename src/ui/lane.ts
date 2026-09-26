@@ -1,10 +1,11 @@
 import type { BreathMark, NoteEvent, Syllable } from '../lib/analysis';
-import { foldToOctave, midiToNote, octaveOf, scalePitchClasses, type MusicalKey } from '../lib/music';
+import { foldToOctave, midiToNote, octaveOf, scalePitchClasses, VOICE_TYPES, type MusicalKey } from '../lib/music';
 
 export interface TrailPoint { t: number; midi: number }
 
 const CONVEYOR = 72;   // px: lyrics strip across the top (one row + breath marks)
-const GUTTER = 56;     // px: note / octave labels on the left
+const OCTAVE_COL = 18;  // px: octave stripe + label on the far left
+const NOTE_COL = 34;    // px: note names
 
 /**
  * The practice stage, drawn on one canvas:
@@ -26,6 +27,9 @@ export class PitchLane {
   forgiveOctave = false;
   windowSeconds = 8;
   liveMidi: number | null = null;
+  /** Voice-type staff (bass, baritone, tenor…) beside the octave labels. */
+  showVoiceTypes = true;
+  private gutter = OCTAVE_COL + NOTE_COL;
   private view = { t0: 0, t1: 1, low: 45, rowHeight: 10, laneHeight: 100 };
 
   constructor(
@@ -77,8 +81,9 @@ export class PitchLane {
   /** The artist's note bar under a point on the canvas (CSS pixels), if any — for tap-to-hear. */
   noteAtPoint(px: number, py: number): NoteEvent | null {
     const { t0, t1, low, rowHeight, laneHeight } = this.view;
-    if (py < CONVEYOR || px < GUTTER) return null;
-    const time = t0 + ((px - GUTTER) / (this.width - GUTTER)) * (t1 - t0);
+    const G = this.gutter;
+    if (py < CONVEYOR || px < G) return null;
+    const time = t0 + ((px - G) / (this.width - G)) * (t1 - t0);
     const midi = low - 0.5 + (CONVEYOR + laneHeight - py) / rowHeight;
     let best: NoteEvent | null = null;
     let bestDistance = 1.6;
@@ -124,8 +129,14 @@ export class PitchLane {
     const color = (name: string) => style.getPropertyValue(name).trim();
     const t0 = now - this.windowSeconds * 0.25;
     const t1 = t0 + this.windowSeconds;
-    const x = (t: number) => GUTTER + ((t - t0) / (t1 - t0)) * (width - GUTTER);
     this.updateRange(t0, now);
+    // Voice types whose range overlaps what's on screen get a column each in the left gutter.
+    const wide = width >= 560;
+    const voiceCol = wide ? 13 : 10;
+    const voices = this.showVoiceTypes ? VOICE_TYPES.filter(type => type.high >= this.low && type.low <= this.high) : [];
+    const G = OCTAVE_COL + voices.length * voiceCol + NOTE_COL;
+    this.gutter = G;
+    const x = (t: number) => G + ((t - t0) / (t1 - t0)) * (width - G);
     const laneTop = CONVEYOR;
     const laneHeight = height - CONVEYOR;
     const span = this.high - this.low + 1;
@@ -171,17 +182,42 @@ export class PitchLane {
       const rowY = y(midi);
       if (scale?.has(pc)) {
         ctx.fillStyle = color('--lane-row');
-        ctx.fillRect(GUTTER, rowY - rowHeight / 2, width - GUTTER, rowHeight - 1);
+        ctx.fillRect(G, rowY - rowHeight / 2, width - G, rowHeight - 1);
       }
       if (pc === 0) {
         ctx.fillStyle = color('--border');
-        ctx.fillRect(GUTTER, rowY + rowHeight / 2 - 1, width - GUTTER, 1);
+        ctx.fillRect(G, rowY + rowHeight / 2 - 1, width - G, 1);
       }
       if (rowHeight >= 11 || pc === 0) {
         ctx.fillStyle = pc === 0 ? color('--text') : color('--muted');
-        ctx.fillText(midiToNote(midi), 22, rowY);
+        ctx.fillText(midiToNote(midi), G - NOTE_COL + 4, rowY);
       }
     }
+
+    // ---- voice-type staff: one bar per voice type spanning its typical range
+    voices.forEach((type, index) => {
+      const colX = OCTAVE_COL + index * voiceCol;
+      const top = Math.max(laneTop, y(type.high) - rowHeight / 2);
+      const bottom = Math.min(height, y(type.low) + rowHeight / 2);
+      if (bottom <= top) return;
+      ctx.fillStyle = type.color;
+      ctx.globalAlpha = 0.85;
+      roundRect(ctx, colX + 1, top + 1, 3, bottom - top - 2, 1.5);
+      ctx.globalAlpha = 1;
+      if (bottom - top > 34) {
+        ctx.save();
+        ctx.translate(colX + 9, (top + bottom) / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = type.color;
+        ctx.font = '800 ' + (wide ? 9 : 8) + 'px ui-sans-serif, system-ui, sans-serif';
+        const label = wide && bottom - top > 70 ? type.name.replace(' (subharmonic)', '').toUpperCase() : type.short.toUpperCase();
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      }
+    });
+    ctx.textBaseline = 'middle';
 
     // ---- artist's notes
     const active = this.targetAt(now);
@@ -210,11 +246,11 @@ export class PitchLane {
     ctx.textBaseline = 'middle';
     ctx.save();
     ctx.beginPath();
-    ctx.rect(GUTTER, 0, width - GUTTER, height);
+    ctx.rect(G, 0, width - G, height);
     ctx.clip();
     for (const syllable of this.syllables) {
       // Syllables that have fully scrolled past the left edge drop off the belt.
-      if (syllable.text === '♪' || x(syllable.end) < GUTTER - 4) continue;
+      if (syllable.text === '♪' || x(syllable.end) < G - 4) continue;
       if (syllable.start > t1) break;
       const current = syllable.start <= now && now < syllable.end;
       const sung = syllable.end <= now;
@@ -244,7 +280,7 @@ export class PitchLane {
     for (const breath of this.breaths) {
       if (breath.time + breath.length < t0 || breath.time > t1) continue;
       const bx = x(breath.time + breath.length / 2);
-      if (bx < GUTTER + 20) continue;
+      if (bx < G + 20) continue;
       ctx.fillStyle = color('--breath');
       ctx.globalAlpha = breath.time + breath.length < now ? 0.35 : 1;
       ctx.fillText('˅ breathe', bx - 22, CONVEYOR - 8);
