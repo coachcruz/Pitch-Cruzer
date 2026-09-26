@@ -1111,6 +1111,204 @@ function analyzeSongPitchProfile(buffer: AudioBuffer): {
   return { bounds, key };
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+async function resampleReferenceForWhisper(buffer: AudioBuffer): Promise<Float32Array> {
+  const targetRate = 16000;
+  if (buffer.sampleRate === targetRate && buffer.numberOfChannels === 1) {
+    return buffer.getChannelData(0).slice();
+  }
+
+  const frameCount = Math.max(1, Math.ceil(buffer.duration * targetRate));
+  const offline = new OfflineAudioContext(1, frameCount, targetRate);
+  const sourceNode = offline.createBufferSource();
+  sourceNode.buffer = buffer;
+  sourceNode.connect(offline.destination);
+  sourceNode.start();
+  const rendered = await offline.startRendering();
+  return rendered.getChannelData(0).slice();
+}
+
+function notesForWord(buffer: AudioBuffer, start: number, end: number): {
+  midi: number | null;
+  noteSequence: string[];
+  direction: 'up' | 'down' | 'level';
+} {
+  const duration = Math.max(0.06, end - start);
+  const frames = pitchFrames(buffer, start, duration, 0.10, songPitchBounds ?? OPEN_VOCAL_BOUNDS);
+  const voiced = frames.filter((value): value is number => value !== null);
+  if (!voiced.length) return { midi: null, noteSequence: [], direction: 'level' };
+
+  const center = median(voiced);
+  const first = voiced.slice(0, Math.max(1, Math.ceil(voiced.length / 3)));
+  const last = voiced.slice(Math.max(0, Math.floor(voiced.length * 2 / 3)));
+  const delta = median(last) - median(first);
+  const direction: 'up' | 'down' | 'level' = delta > 0.55 ? 'up' : delta < -0.55 ? 'down' : 'level';
+
+  return {
+    midi: center,
+    noteSequence: collapseReferencePitches(frames).slice(0, 5),
+    direction
+  };
+}
+
+async function buildReferenceTranscript(buffer: AudioBuffer): Promise<ReferenceWord[]> {
+  transcriptStatusEl.textContent = 'TRANSCRIBING';
+  setAnalysisProgress(83, 'Transcribing isolated lead vocal…');
+
+  const audio = await resampleReferenceForWhisper(buffer);
+  if (!whisperTranscriber) {
+    transcriptStatusEl.textContent = 'LOADING TRANSCRIBER';
+    const transformers = await import('@huggingface/transformers');
+    whisperTranscriber = await transformers.pipeline(
+      'automatic-speech-recognition',
+      'Xenova/whisper-tiny'
+    );
+  }
+
+  transcriptStatusEl.textContent = 'ALIGNING WORDS';
+  const result: any = await whisperTranscriber(audio, {
+    return_timestamps: 'word',
+    chunk_length_s: 30,
+    stride_length_s: 5,
+    task: 'transcribe'
+  });
+
+  const chunks = Array.isArray(result?.chunks) ? result.chunks : [];
+  const words: ReferenceWord[] = [];
+
+  for (const chunk of chunks) {
+    const text = String(chunk?.text ?? '').trim();
+    const timestamp = Array.isArray(chunk?.timestamp) ? chunk.timestamp : [];
+    const start = Number(timestamp[0]);
+    const rawEnd = timestamp[1] == null ? start + 0.35 : Number(timestamp[1]);
+    const end = Math.min(buffer.duration, Math.max(start + 0.05, rawEnd));
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || start < 0) continue;
+
+    const pitch = notesForWord(buffer, start, end);
+    words.push({
+      text,
+      start,
+      end,
+      midi: pitch.midi,
+      note: pitch.midi === null ? null : midiToNote(pitch.midi),
+      noteSequence: pitch.noteSequence,
+      direction: pitch.direction
+    });
+
+    if (words.length % 24 === 0) {
+      setAnalysisProgress(84, 'Mapping words to notes and octaves…');
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+    }
+  }
+
+  transcriptStatusEl.textContent = words.length ? 'READY' : 'NO WORDS FOUND';
+  return words;
+}
+
+function wordDirectionGlyph(direction: ReferenceWord['direction']): string {
+  if (direction === 'up') return '↗';
+  if (direction === 'down') return '↘';
+  return '→';
+}
+
+function visibleReferenceWords(): ReferenceWord[] {
+  const sections = selectedSections();
+  if (!sections.length) return referenceWords;
+  return referenceWords.filter(word =>
+    sections.some(section => word.end >= section.start && word.start <= section.end)
+  );
+}
+
+function renderReferenceTimeline(): void {
+  const words = visibleReferenceWords();
+  referenceTimelineEl.classList.toggle('referenceTimelineEmpty', words.length === 0);
+
+  if (!words.length) {
+    referenceTimelineEl.textContent = referenceWords.length
+      ? 'Select a section to see its lyrics and notes.'
+      : 'Transcript and note alignment will appear here after the song is prepared.';
+    return;
+  }
+
+  referenceTimelineEl.innerHTML = words.map((word, index) => {
+    const notes = word.noteSequence.length
+      ? word.noteSequence.join(' · ')
+      : (word.note ?? '—');
+    return '<button type="button" class="referenceWord" data-word-start="' + word.start.toFixed(3) +
+      '" data-word-end="' + word.end.toFixed(3) + '" data-word-index="' + index + '">' +
+      '<span class="referenceWordText">' + escapeHtml(word.text) + '</span>' +
+      '<span class="referenceWordPitch">' + escapeHtml(notes) + ' ' + wordDirectionGlyph(word.direction) + '</span>' +
+      '</button>';
+  }).join('');
+}
+
+function setActiveReferenceWord(sourceTime: number | null): void {
+  const buttons = Array.from(referenceTimelineEl.querySelectorAll<HTMLButtonElement>('.referenceWord'));
+  let matched: HTMLButtonElement | null = null;
+  let matchedWord: ReferenceWord | null = null;
+
+  if (sourceTime !== null) {
+    matched = buttons.find(button => {
+      const start = Number(button.dataset.wordStart ?? NaN);
+      const end = Number(button.dataset.wordEnd ?? NaN);
+      return Number.isFinite(start) && Number.isFinite(end) && sourceTime >= start && sourceTime <= end;
+    }) ?? null;
+
+    if (matched) {
+      const start = Number(matched.dataset.wordStart ?? NaN);
+      matchedWord = referenceWords.find(word => Math.abs(word.start - start) < 0.002) ?? null;
+    }
+  }
+
+  buttons.forEach(button => button.classList.toggle('active', button === matched));
+  activeReferenceNote = matchedWord?.note ?? null;
+
+  if (matched) {
+    matched.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  }
+  updateListeningContext();
+}
+
+function startReferenceTimelinePlayback(context: AudioContext, startsAt: number): void {
+  if (referenceTimelineFrame !== null) cancelAnimationFrame(referenceTimelineFrame);
+  practicePlaybackStartedAt = startsAt;
+
+  const tick = () => {
+    if (!practiceContext || practiceContext !== context) {
+      setActiveReferenceWord(null);
+      referenceTimelineFrame = null;
+      return;
+    }
+
+    const elapsed = context.currentTime - practicePlaybackStartedAt;
+    let cursor = 0;
+    let sourceTime: number | null = null;
+
+    if (elapsed >= 0) {
+      for (const segment of practiceSegments) {
+        if (elapsed >= cursor && elapsed <= cursor + segment.duration) {
+          sourceTime = segment.sourceStart + (elapsed - cursor);
+          break;
+        }
+        cursor += segment.duration;
+      }
+    }
+
+    setActiveReferenceWord(sourceTime);
+    referenceTimelineFrame = requestAnimationFrame(tick);
+  };
+
+  referenceTimelineFrame = requestAnimationFrame(tick);
+}
+
 function syncSelectedNotes(): void {
   const sections = selectedSections();
   derivedReferenceNotes = sections.flatMap(section => section.notes).slice(0, 72);
@@ -1145,6 +1343,7 @@ function renderSongSections(): void {
 
       renderSongSections();
       syncSelectedNotes();
+      renderReferenceTimeline();
     });
   });
 }
@@ -1156,6 +1355,7 @@ function selectKinds(kinds: SectionKind[]): void {
   });
   renderSongSections();
   syncSelectedNotes();
+  renderReferenceTimeline();
 }
 
 async function prepareSong(blob: Blob, filename: string): Promise<void> {
@@ -1171,6 +1371,10 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
   instrumentalBuffer = null;
   songPitchBounds = null;
   detectedSongKey = null;
+  referenceWords = [];
+  activeReferenceNote = null;
+  transcriptStatusEl.textContent = 'WAITING FOR SONG';
+  renderReferenceTimeline();
   pitchRangeMode = 'song';
   updatePitchRangeUi();
 
@@ -1207,6 +1411,14 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
     detectedSongKey = songProfile.key;
     updatePitchRangeUi();
 
+    try {
+      referenceWords = await buildReferenceTranscript(leadVocalBuffer);
+    } catch (transcriptError) {
+      referenceWords = [];
+      transcriptStatusEl.textContent = 'TRANSCRIPT UNAVAILABLE';
+      console.warn('Reference transcription failed', transcriptError);
+    }
+
     songSections = await buildSongSections(leadVocalBuffer);
     if (!songSections.length) throw new Error('No usable song sections were detected.');
 
@@ -1218,6 +1430,7 @@ async function prepareSong(blob: Blob, filename: string): Promise<void> {
 
     renderSongSections();
     syncSelectedNotes();
+    renderReferenceTimeline();
     songWorkspaceEl.classList.remove('hidden');
     setAnalysisProgress(100, 'Song ready.');
     window.setTimeout(clearAnalysisProgress, 600);
@@ -1422,6 +1635,11 @@ function stopPracticePlayback(stopRecorder = true): void {
     window.clearTimeout(practiceStopTimer);
     practiceStopTimer = null;
   }
+  if (referenceTimelineFrame !== null) {
+    cancelAnimationFrame(referenceTimelineFrame);
+    referenceTimelineFrame = null;
+  }
+  setActiveReferenceWord(null);
   if (stopRecorder && takeRecorder?.state === 'recording') takeRecorder.stop();
   takeMicStream?.getTracks().forEach(track => track.stop());
   takeMicStream = null;
@@ -1496,6 +1714,7 @@ async function startSelection(recordUser: boolean): Promise<void> {
     practiceSegments = [];
     let cursor = context.currentTime + leadIn;
     let relativeCursor = 0;
+    const playbackStartsAt = cursor;
 
     if (recordUser && takeRecorder) takeRecorder.start(250);
 
@@ -1512,6 +1731,7 @@ async function startSelection(recordUser: boolean): Promise<void> {
     }
 
     takeTotalDuration = relativeCursor;
+    startReferenceTimelinePlayback(context, playbackStartsAt);
     derivedReferenceNotes = practiceSegments.flatMap(segment => {
       const section = songSections.find(item => Math.abs(item.start - segment.sourceStart) < 0.01);
       return section?.notes ?? [];
@@ -1716,8 +1936,8 @@ function getActiveTarget(): string {
     return phraseNotes[Math.min(sequenceIndex, phraseNotes.length - 1)];
   }
 
-  if (appMode === 'reference' && derivedReferenceNotes.length > 0) {
-    return derivedReferenceNotes[0];
+  if (appMode === 'reference' && (activeReferenceNote || derivedReferenceNotes.length > 0)) {
+    return activeReferenceNote ?? derivedReferenceNotes[0];
   }
 
   return targetNoteEl.value + targetOctaveEl.value;
