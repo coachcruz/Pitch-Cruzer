@@ -19,7 +19,7 @@ export interface StoredTake {
   label: string;
   voice: Blob;
   sampleRate: number;
-  segments: Array<{ start: number; end: number }>;
+  segments: Array<{ start: number; end: number; turn?: boolean }>;
   offsetSeconds: number;
 }
 

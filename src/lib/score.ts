@@ -44,9 +44,12 @@ export function scoreTake(
   const trail: Array<{ t: number; midi: number }> = [];
   let lineIndex = 0;
 
+  const turnsOnly = timeline.hasTurns;
   for (let t = 0; t < timeline.duration; t += hop) {
     const source = timeline.sourceTimeAt(t);
     if (source === null) continue;
+    // Echo practice: only the singer's turns count (the artist's demo parts are for listening).
+    if (turnsOnly && !timeline.pieceAt(t)?.turn) continue;
     const index = Math.round((t - voiceOffset) / voice.hopSeconds);
     const sung = index >= 0 && index < voice.midi.length ? voice.midi[index] : NaN;
     if (!Number.isNaN(sung)) trail.push({ t: source, midi: sung });

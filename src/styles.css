@@ -296,6 +296,16 @@ input[type='range'] { accent-color: var(--accent); }
 .stageRow { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 12px; }
 .laneWrap { position: relative; border-radius: 12px; overflow: hidden; background: var(--lane-bg); border: 1px solid var(--border); }
 #lane { display: block; width: 100%; height: clamp(320px, 52vh, 520px); cursor: pointer; }
+.lineFlash {
+  position: absolute; right: 14px; top: 84px; display: grid; justify-items: end; pointer-events: none;
+  padding: 8px 14px; border-radius: 12px; background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: var(--shadow); opacity: 0; transform: translateY(6px) scale(0.96);
+}
+.lineFlash strong { font-size: 1.25rem; }
+.lineFlash span { font-size: 0.78rem; color: var(--muted); }
+.lineFlash.show { animation: lineFlash 1.6s ease forwards; }
+@keyframes lineFlash { 0% { opacity: 0; transform: translateY(6px) scale(0.96); } 12% { opacity: 1; transform: none; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.bestLine { margin: 12px 0 0; padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--good) 12%, var(--surface-2)); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .countdown { position: absolute; inset: 0; display: grid; place-items: center; font-size: 5rem; font-weight: 900; color: var(--text); background: color-mix(in srgb, var(--lane-bg) 60%, transparent); }
 
 .upNext { background: var(--surface-2); border-radius: 12px; padding: 12px; overflow: hidden; }

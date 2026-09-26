@@ -29,6 +29,8 @@ export class PitchLane {
   liveMidi: number | null = null;
   /** Voice-type staff (bass, baritone, tenor…) beside the octave labels. */
   showVoiceTypes = true;
+  /** Simple view: no voice staff, note names only on C rows, no syllable threads. */
+  simple = false;
   private gutter = OCTAVE_COL + NOTE_COL;
   private view = { t0: 0, t1: 1, low: 45, rowHeight: 10, laneHeight: 100 };
 
@@ -133,7 +135,7 @@ export class PitchLane {
     // Voice types whose range overlaps what's on screen get a column each in the left gutter.
     const wide = width >= 560;
     const voiceCol = wide ? 13 : 10;
-    const voices = this.showVoiceTypes ? VOICE_TYPES.filter(type => type.high >= this.low && type.low <= this.high) : [];
+    const voices = this.showVoiceTypes && !this.simple ? VOICE_TYPES.filter(type => type.high >= this.low && type.low <= this.high) : [];
     const G = OCTAVE_COL + voices.length * voiceCol + NOTE_COL;
     this.gutter = G;
     const x = (t: number) => G + ((t - t0) / (t1 - t0)) * (width - G);
@@ -188,7 +190,7 @@ export class PitchLane {
         ctx.fillStyle = color('--border');
         ctx.fillRect(G, rowY + rowHeight / 2 - 1, width - G, 1);
       }
-      if (rowHeight >= 11 || pc === 0) {
+      if ((rowHeight >= 11 && !this.simple) || pc === 0) {
         ctx.fillStyle = pc === 0 ? color('--text') : color('--muted');
         ctx.fillText(midiToNote(midi), G - NOTE_COL + 4, rowY);
       }
@@ -263,7 +265,7 @@ export class PitchLane {
       ctx.globalAlpha = sung ? 0.55 : 1;
       ctx.fillText(syllable.text, left, rowY);
       ctx.globalAlpha = 1;
-      if (syllable.midi !== null && !sung) {
+      if (syllable.midi !== null && !sung && !this.simple) {
         ctx.strokeStyle = current ? color('--accent-2') : color('--thread');
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);

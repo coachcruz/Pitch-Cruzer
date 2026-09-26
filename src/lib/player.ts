@@ -1,7 +1,8 @@
 import type { SongBuffers } from './prepare';
 
-export interface Range { start: number; end: number }
-export interface TimelinePiece { timelineStart: number; sourceStart: number; duration: number }
+/** A stretch of the song. `turn: true` = Echo practice: the singer's turn, played silently. */
+export interface Range { start: number; end: number; turn?: boolean }
+export interface TimelinePiece { timelineStart: number; sourceStart: number; duration: number; turn: boolean }
 
 export type StemName = 'lead' | 'backing' | 'music' | 'voice';
 
@@ -15,7 +16,7 @@ export class Timeline {
     for (let r = 0; r < Math.max(1, repeats); r += 1) {
       for (const range of ranges) {
         const duration = Math.max(0, range.end - range.start);
-        if (duration > 0.05) this.pieces.push({ timelineStart: cursor, sourceStart: range.start, duration });
+        if (duration > 0.05) this.pieces.push({ timelineStart: cursor, sourceStart: range.start, duration, turn: Boolean(range.turn) });
         cursor += duration;
       }
     }
@@ -28,6 +29,13 @@ export class Timeline {
     }
     return null;
   }
+
+  pieceAt(t: number): TimelinePiece | null {
+    return this.pieces.find(piece => t >= piece.timelineStart && t < piece.timelineStart + piece.duration) ?? null;
+  }
+
+  /** Echo practice timelines have silent "your turn" pieces; only those are scored. */
+  get hasTurns(): boolean { return this.pieces.some(piece => piece.turn); }
 
   timelineFor(sourceTime: number): number | null {
     for (const piece of this.pieces) {
@@ -85,6 +93,7 @@ export class Player {
       const skip = Math.max(0, from - piece.timelineStart);
       const when = this.originAt + piece.timelineStart + skip;
       const duration = piece.duration - skip;
+      if (piece.turn) continue; // Echo practice: silence while the singer sings it back
       for (const [buffer, gain] of stems) this.schedule(buffer, gain, when, piece.sourceStart + skip, duration);
     }
     if (options.voice) {
