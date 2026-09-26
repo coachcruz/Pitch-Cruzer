@@ -92,56 +92,54 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <h1 id="songTitle">${escapeHtml(song.title)}</h1>
         <p class="meta">${[
           analysis.key ? 'Key ' + keyName(analysis.key) : null,
-          range ? 'Vocal range ' + midiToNote(range[0]) + '–' + midiToNote(range[1]) + ' (fits ' + voiceTypeNames(voiceTypesFor(range[0], range[1])) + ')' : null,
+          range ? 'Range ' + midiToNote(range[0]) + '–' + midiToNote(range[1]) + ' (' + voiceTypeNames(voiceTypesFor(range[0], range[1])) + ')' : null,
           formatTime(analysis.duration),
           analysis.separated ? null : 'Full mix (singer not separated)'
         ].filter(Boolean).map(value => escapeHtml(String(value))).join(' · ')}</p>
       </div>
-      <div class="headActions">
-        <button id="renameSong" class="btn ghost small">Rename</button>
-        <button id="saveSong" class="btn small ${session.saved ? 'hidden' : ''}">Save to my songs</button>
+      <div class="menuWrap">
+        <button id="moreBtn" class="iconBtn" aria-label="More options" aria-haspopup="menu" aria-expanded="false">⋯</button>
+        <div id="moreMenu" class="popMenu hidden" role="menu">
+          <button id="saveSong" class="menuItem ${session.saved ? 'hidden' : ''}" role="menuitem">Save to my songs</button>
+          <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
+          <button id="renameSong" class="menuItem" role="menuitem">Rename song</button>
+          <button id="menuFixLyrics" class="menuItem" role="menuitem">Fix lyrics</button>
+          <button id="menuRedoLyrics" class="menuItem" role="menuitem">Redo lyrics (language)</button>
+          <label class="menuItem check small"><input id="showUpNext" type="checkbox"> Show “Up next” panel</label>
+        </div>
       </div>
     </header>
 
     <section class="card focus">
-      <div class="pickBar">
-        <div id="songMap" class="songMap" role="group" aria-label="Song sections — pick one or more"></div>
-        <div class="quick">
-          <button class="chip" data-quick="all">Whole song</button>
-          <button class="chip" data-quick="verse">Verses</button>
-          <button class="chip" data-quick="chorus">Choruses</button>
-          <button class="chip" data-quick="none">Clear</button>
-          <button class="chip ghost" id="editSections" aria-pressed="false">Rename sections</button>
-          <label class="inline">Repeat <select id="repeats"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
-          <label class="inline" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet">Style <select id="practiceStyle"><option value="along">Sing along</option><option value="echo">Echo — listen, then sing it back</option></select></label>
-          <label class="inline hidden" id="echoModelWrap" title="Copying your own voice is easier than copying someone else's">Guide <select id="echoModel"><option value="artist">Artist sings first</option><option value="me">My best take sings first</option></select></label>
-          <span id="selectionLabel" class="selectionLabel"></span>
+      <div class="toolbar">
+        <div class="transport">
+          <button id="play" class="tbtn primary" title="Play / pause (Space)">▶ <span>Play</span></button>
+          <button id="stop" class="tbtn" disabled>■ <span>Stop</span></button>
+          <button id="record" class="tbtn record">● <span>Record</span></button>
+          <button id="mic" class="tbtn" aria-pressed="false">🎤 <span>Mic</span></button>
+          <button id="mixToggle" class="tbtn" aria-expanded="false">🎚 <span>Mix</span></button>
         </div>
-      </div>
-
-      <div class="stageRow">
-        <div class="laneWrap"><canvas id="lane" aria-label="Lyrics scroll across the top; the artist’s notes are bars below, shaded by octave; your voice is the blue line"></canvas>
-          <div id="countdown" class="countdown hidden"></div>
-          <div id="lineFlash" class="lineFlash" aria-live="polite"></div></div>
-        <aside class="upNext" aria-label="Up next">
-          <h3>Up next</h3>
-          <ol id="upNext"></ol>
-        </aside>
-      </div>
-
-      <div class="coach" id="coach" aria-live="off">
-        <div><span class="label">Sing</span><strong id="coachTarget">—</strong><small id="coachTargetOct"></small></div>
-        <div><span class="label">You</span><strong id="coachYou">—</strong><small id="coachYouOct"></small></div>
-        <div class="coachHint" id="coachHint">Press play, then turn on your mic to see your voice on the lane.</div>
-      </div>
-      <div class="progress" id="progress" title="Jump to a spot"><span id="progressFill"></span></div>
-      <div class="transport">
-        <button id="play" class="btn primary big">▶ Play</button>
-        <button id="stop" class="btn big" disabled>■ Stop</button>
-        <button id="record" class="btn record big">● Record me</button>
-        <button id="mic" class="btn big" aria-pressed="false">🎤 Mic off</button>
-        <button id="mixToggle" class="btn big ghost" aria-expanded="false">🎚 Mix</button>
+        <div class="menuWrap">
+          <button id="sectionsBtn" class="dropBtn" aria-haspopup="true" aria-expanded="false" title="Choose what to practice"><span id="selectionLabel">Whole song</span> ▾</button>
+          <div id="sectionsMenu" class="popMenu wide hidden">
+            <div class="menuQuick">
+              <button data-quick="all">Whole song</button><button data-quick="verse">All verses</button><button data-quick="chorus">All choruses</button><button data-quick="none">Clear</button>
+            </div>
+            <div id="songMap" class="secList" role="group" aria-label="Sections — pick one or more"></div>
+            <div class="menuFoot">
+              <button id="editSections" class="linkBtn" aria-pressed="false">Rename sections</button>
+              <button id="menuPickLines" class="linkBtn">Pick lines from the lyrics…</button>
+            </div>
+          </div>
+        </div>
+        <select id="repeats" class="miniSelect" title="Repeat" aria-label="Repeat"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select>
+        <select id="practiceStyle" class="miniSelect" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet" aria-label="Practice style"><option value="along">Sing along</option><option value="echo">Echo</option></select>
+        <span id="echoModelWrap" class="hidden"><select id="echoModel" class="miniSelect" title="Who sings the line first in Echo" aria-label="Echo guide"><option value="artist">Artist first</option><option value="me">My best take first</option></select></span>
         <span id="clock" class="mono clock">0:00 / 0:00</span>
+      </div>
+
+      <div class="progress" id="progress" title="The whole song — tap to jump there">
+        <div id="progressSections" class="progSecs"></div><span id="progressFill" class="playhead"></span>
       </div>
 
       <div id="mixPanel" class="mixPanel hidden">
@@ -175,9 +173,23 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
           <label class="check"><input id="showVoices" type="checkbox"> Show voice types <small>(bass, baritone, tenor… beside the octaves)</small></label>
         </div>
       </div>
-    </section>
 
-    <section id="review" class="card review hidden" aria-live="polite"></section>
+      <div class="stageRow" id="stageRow">
+        <div class="laneWrap"><canvas id="lane" aria-label="Lyrics scroll across the top; the singer’s notes sit on a treble and bass staff below; your voice is the blue line"></canvas>
+          <div id="countdown" class="countdown hidden"></div>
+          <div id="lineFlash" class="lineFlash" aria-live="polite"></div></div>
+        <aside class="upNext hidden" id="upNextPanel" aria-label="Up next">
+          <h3>Up next</h3>
+          <ol id="upNext"></ol>
+        </aside>
+      </div>
+
+      <div class="coach" id="coach" aria-live="off">
+        <div><span class="label">Sing</span><strong id="coachTarget">—</strong><small id="coachTargetOct"></small></div>
+        <div><span class="label">You</span><strong id="coachYou">—</strong><small id="coachYouOct"></small></div>
+        <div class="coachHint" id="coachHint">Press ▶ Play, then 🎤 Mic to see your voice on the staff.</div>
+      </div>
+    </section>
 
     <details class="card fold" id="lyricsFold">
       <summary><h2>Full lyrics &amp; notes</h2><span class="hint small">study the whole song, pick lines, fix or redo lyrics</span></summary>
@@ -193,10 +205,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       <div id="lyricsList" class="lyricsList"></div>
     </details>
 
-    <details class="card fold" id="takesFold">
-      <summary><h2>Takes &amp; scores</h2><span class="hint small">pass the mic around — highest score wins</span></summary>
-      <div id="takesList"><p class="empty">Record yourself and save your takes here.</p></div>
-    </details>
+    <dialog id="reviewDialog" class="dialog wide" aria-label="Your take">
+      <section id="review" class="review hidden" aria-live="polite"></section>
+      <div class="takesBlock">
+        <h3>Takes &amp; scores</h3>
+        <div id="takesList"><p class="empty">Save a take to start your leaderboard — pass the mic around!</p></div>
+      </div>
+      <div class="row end"><button id="reviewDialogClose" class="btn ghost">Close</button></div>
+    </dialog>
 
     <dialog id="redoDialog" class="dialog">
       <form method="dialog">
@@ -295,15 +311,18 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
 
   const renderSections = () => {
     const map = el(root, '#songMap');
+    const isOn = (section: Section) => selected.has(section.id) || Boolean(custom && custom.start < section.end && custom.end > section.start);
     map.innerHTML = analysis.sections.map(section => {
-      const width = ((section.end - section.start) / analysis.duration) * 100;
-      const on = selected.has(section.id) || (custom && custom.start < section.end && custom.end > section.start);
+      const on = isOn(section);
       const editor = editingSections
         ? `<select data-kind="${section.id}" aria-label="Section type">${KIND_ORDER.map(kind => `<option value="${kind}" ${kind === section.kind ? 'selected' : ''}>${SECTION_NAMES[kind]}</option>`).join('')}</select>`
         : '';
-      return `<div class="seg kind-${section.kind} ${on ? 'on' : ''}" style="flex-grow:${Math.max(width, 3).toFixed(2)}">
-        <button data-section="${section.id}" aria-pressed="${on ? 'true' : 'false'}"><strong>${escapeHtml(section.label)}</strong><small>${formatTime(section.start)}</small></button>${editor}</div>`;
+      return `<div class="secRow kind-${section.kind} ${on ? 'on' : ''}">
+        <button data-section="${section.id}" aria-pressed="${on ? 'true' : 'false'}"><span class="tick">${on ? '✓' : ''}</span><span class="dot"></span><strong>${escapeHtml(section.label)}</strong><small>${formatTime(section.start)}–${formatTime(section.end)}</small></button>${editor}</div>`;
     }).join('');
+    // The whole song as a thin strip: every section in its color, the chosen ones bright.
+    el(root, '#progressSections').innerHTML = analysis.sections.map(section =>
+      `<span class="kind-${section.kind} ${isOn(section) || (!selected.size && !custom) ? 'on' : ''}" style="flex-grow:${(section.end - section.start).toFixed(2)}" title="${escapeHtml(section.label)}"></span>`).join('');
     map.querySelectorAll<HTMLButtonElement>('[data-section]').forEach(button => button.addEventListener('click', () => {
       const id = button.dataset.section!;
       custom = null;
@@ -320,13 +339,50 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       renderLyrics();
     }));
 
-    const ranges = selectedRanges();
-    const total = ranges.reduce((sum, r) => sum + r.end - r.start, 0);
+    const chosen = analysis.sections.filter(section => selected.has(section.id));
     const names = custom ? custom.label
-      : selected.size ? analysis.sections.filter(s => selected.has(s.id)).map(s => s.label).join(' + ')
+      : chosen.length > 2 ? chosen[0].label + ' + ' + (chosen.length - 1) + ' more'
+      : chosen.length ? chosen.map(section => section.label).join(' + ')
       : 'Whole song';
-    el(root, '#selectionLabel').innerHTML = `Practicing: <b>${escapeHtml(names)}</b> · ${formatTime(total)}${repeats() > 1 ? ' × ' + (repeats() === 99 ? '∞' : repeats()) : ''}${styleEl.value === 'echo' ? ' · <b>Echo</b>' : ''}`;
+    el(root, '#selectionLabel').textContent = names;
   };
+
+  // ---------------------------------------------------------------- pop-up menus (⋯ and Sections ▾)
+  const menus: Array<[HTMLButtonElement, HTMLElement]> = [
+    [el<HTMLButtonElement>(root, '#moreBtn'), el(root, '#moreMenu')],
+    [el<HTMLButtonElement>(root, '#sectionsBtn'), el(root, '#sectionsMenu')]
+  ];
+  const closeMenus = (except?: HTMLElement) => menus.forEach(([button, menu]) => {
+    if (menu === except) return;
+    menu.classList.add('hidden');
+    button.setAttribute('aria-expanded', 'false');
+  });
+  menus.forEach(([button, menu]) => button.addEventListener('click', event => {
+    event.stopPropagation();
+    const open = menu.classList.contains('hidden');
+    closeMenus(menu);
+    menu.classList.toggle('hidden', !open);
+    button.setAttribute('aria-expanded', String(open));
+  }));
+  const onDocClick = (event: MouseEvent) => {
+    if (!(event.target as HTMLElement).closest('.menuWrap')) closeMenus();
+  };
+  const onEsc = (event: KeyboardEvent) => { if (event.key === 'Escape') closeMenus(); };
+  document.addEventListener('click', onDocClick);
+  document.addEventListener('keydown', onEsc);
+  const openLyricsFold = () => { (el(root, '#lyricsFold') as HTMLDetailsElement).open = true; el(root, '#lyricsFold').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  el(root, '#menuFixLyrics').addEventListener('click', () => { closeMenus(); el<HTMLButtonElement>(root, '#fixLyrics').click(); });
+  el(root, '#menuRedoLyrics').addEventListener('click', () => { closeMenus(); el<HTMLButtonElement>(root, '#redoLyrics').click(); });
+  el(root, '#menuPickLines').addEventListener('click', () => { closeMenus(); openLyricsFold(); if (!pickingLines) el<HTMLButtonElement>(root, '#pickLines').click(); });
+  const showUpNext = el<HTMLInputElement>(root, '#showUpNext');
+  showUpNext.checked = prefs.get('showUpNext', false);
+  const applyUpNext = () => {
+    el(root, '#upNextPanel').classList.toggle('hidden', !showUpNext.checked);
+    el(root, '#stageRow').classList.toggle('withUpNext', showUpNext.checked);
+    requestAnimationFrame(() => lane.resize());
+  };
+  showUpNext.addEventListener('change', () => { prefs.set('showUpNext', showUpNext.checked); applyUpNext(); });
+  applyUpNext();
 
   const selectionChanged = () => {
     if (player.state !== 'stopped' && !recording) stopAll();
@@ -574,7 +630,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
   // ---------------------------------------------------------------- mic
   const micButton = el<HTMLButtonElement>(root, '#mic');
   const renderMicButton = () => {
-    micButton.textContent = mic.active ? '🎤 Mic on' : '🎤 Mic off';
+    micButton.innerHTML = mic.active ? '🎤 <span>Mic on</span>' : '🎤 <span>Mic</span>';
     micButton.setAttribute('aria-pressed', String(mic.active));
     micButton.classList.toggle('on', mic.active);
   };
@@ -603,11 +659,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
 
   const renderTransport = () => {
     const active = player.state !== 'stopped';
-    playButton.textContent = player.state === 'playing' ? '❚❚ Pause' : player.state === 'paused' ? '▶ Resume' : '▶ Play';
+    playButton.innerHTML = player.state === 'playing' ? '❚❚ <span>Pause</span>' : player.state === 'paused' ? '▶ <span>Resume</span>' : '▶ <span>Play</span>';
     playButton.disabled = recording;
     stopButton.disabled = !active;
     recordButton.disabled = active && !recording;
-    recordButton.textContent = recording ? '■ Finish take' : '● Record me';
+    recordButton.innerHTML = recording ? '■ <span>Stop &amp; review</span>' : '● <span>Record</span>';
     recordButton.classList.toggle('live', recording);
   };
 
@@ -707,6 +763,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     recording = true;
     review = null;
     el(root, '#review').classList.add('hidden');
+    reviewDialog.close();
     await startPlayback(true);
     toast(speakers.checked ? 'Recording — sing along!' : 'Recording — sing along! (Headphones give the cleanest take.)');
   });
@@ -716,9 +773,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     renderTransport();
     const result = mic.stopRecording();
     if (!result || result.samples.length < result.sampleRate * 0.5) { toast('No audio was recorded from the mic.', 'error'); return; }
+    // The review opens the moment you finish — score, save or discard, listen back, leaderboard.
     const reviewEl = el(root, '#review');
     reviewEl.classList.remove('hidden');
     reviewEl.innerHTML = '<p>Scoring your take…</p>';
+    openReviewDialog();
     // What you sang at clock time T answers music you heard at T − output latency − input latency.
     const latency = (player.ctx.outputLatency || 0) + (player.ctx.baseLatency || 0) + 0.02;
     const offset = result.startTime - recordingOrigin - latency;
@@ -727,13 +786,24 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const ranges = playbackRanges();
     const reps = repeats();
     await buildReview(voice, offset, ranges, reps, labelForSelection());
-    reviewEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
 
   const labelForSelection = () => custom ? custom.label
     : selected.size ? analysis.sections.filter(s => selected.has(s.id)).map(s => s.label).join(' + ') : 'Whole song';
 
-  // ---------------------------------------------------------------- review
+  // ---------------------------------------------------------------- review (a window that opens when you finish)
+  const reviewDialog = el<HTMLDialogElement>(root, '#reviewDialog');
+  const openReviewDialog = () => {
+    closeMenus();
+    if (!reviewDialog.open) reviewDialog.showModal();
+    void renderTakes();
+  };
+  reviewDialog.addEventListener('close', () => { if (reviewPlaying) stopAll(); });
+  el(root, '#reviewDialogClose').addEventListener('click', () => reviewDialog.close());
+  el(root, '#openTakes').addEventListener('click', () => {
+    if (!review) el(root, '#review').classList.add('hidden');
+    openReviewDialog();
+  });
   let voiceTrack: Awaited<ReturnType<typeof pitchTrackFor>> | null = null;
 
   const buildReview = async (voice: AudioBuffer, offset: number, ranges: Range[], reps: number, label: string, saved?: StoredTake) => {
@@ -807,11 +877,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       window.setTimeout(() => { if (reviewPlaying) stopAll(); }, stopAt);
     });
     el(reviewEl, '#reviewClose').addEventListener('click', () => {
+      if (!review?.savedId && !confirm('Discard this take without saving it?')) return;
       if (reviewPlaying) stopAll();
       review = null;
       reviewEl.classList.add('hidden');
       lane.trail = liveTrail;
       renderLyrics();
+      reviewDialog.close();
     });
     el(reviewEl, '#reviewPlay').addEventListener('click', async () => {
       if (!review) return;
@@ -917,7 +989,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
       const voice = await decodeAudio(await take.voice.arrayBuffer());
       el(root, '#review').classList.remove('hidden');
       await buildReview(voice, take.offsetSeconds, take.segments, 1, take.label, take);
-      el(root, '#review').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el(root, '#reviewDialog').scrollTop = 0;
     }));
     list.querySelectorAll<HTMLButtonElement>('[data-delete-take]').forEach(button => button.addEventListener('click', async () => {
       if (!confirm('Delete this take?')) return;
@@ -935,15 +1007,26 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(playbackRanges(), repeats() === 99 ? 1 : repeats()).duration;
     const t = Math.max(0, Math.min(total, player.timelineTime()));
     clock.textContent = formatTime(t) + ' / ' + formatTime(total);
-    progressFill.style.width = (total ? (100 * t) / total : 0).toFixed(2) + '%';
+    progressFill.style.left = ((100 * idleTime) / analysis.duration).toFixed(2) + '%';
   };
+  // The strip is the whole song: tap inside what you're practicing to jump there, or tap another
+  // section to switch to it.
   progress.addEventListener('click', event => {
     if (recording) return;
     const rect = progress.getBoundingClientRect();
-    const fraction = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
-    const total = player.state !== 'stopped' ? player.totalDuration : new Timeline(playbackRanges(), repeats()).duration;
-    if (reviewPlaying && review) void startPlayback(false, fraction * total, { buffer: review.voice, offset: review.offset });
-    else void startPlayback(false, fraction * total);
+    const time = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * analysis.duration;
+    if (reviewPlaying && review) {
+      const from = review.timeline.timelineFor(time);
+      if (from !== null) void startPlayback(false, from, { buffer: review.voice, offset: review.offset });
+      return;
+    }
+    if (!inSelection(time)) {
+      const section = sectionFor(time);
+      custom = null;
+      selected = new Set(section ? [section.id] : []);
+      selectionChanged();
+    }
+    void startPlayback(false, new Timeline(playbackRanges(), repeats()).timelineFor(time) ?? 0);
   });
 
   // ---------------------------------------------------------------- up next + coach (every frame)
@@ -994,7 +1077,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     const inBreath = time !== null && !target && lane.breathAt(time);
     if (target) {
       coachTarget.textContent = midiToNote(target.midi);
-      coachTargetOct.textContent = 'octave ' + octaveOf(target.midi);
+      coachTargetOct.textContent = middleC(target.midi);
     } else if (time !== null) {
       const next = analysis.notes.find(note => note.start > time);
       coachTarget.textContent = next && next.start - time < 4 ? midiToNote(next.midi) : '—';
@@ -1012,7 +1095,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     }
     coachYou.textContent = midiToNote(sung);
     const vibText = vibratoLabel(liveVib.reading());
-    coachYouOct.textContent = 'octave ' + octaveOf(sung) + (vibText ? ' · ' + vibText.replace('〰 vibrato ', '〰 ') : '');
+    coachYouOct.textContent = middleC(sung) + (vibText ? ' · ' + vibText.replace('〰 vibrato ', '〰 ') : '');
     if (!target) { coachYou.className = ''; coachHint.textContent = inBreath ? '🌬 Breathe now' : 'You’re singing ' + midiToNote(sung) + '.'; return; }
     const error = lane.errorAt(sung, target);
     const cents = Math.round(error * 100);
@@ -1185,6 +1268,15 @@ function bestLineHtml(score: TakeScore): string {
   if (!best || best.percent < 35) return '';
   const text = best.line.words.map(word => word.text).join(' ');
   return `<p class="bestLine">⭐ Your best line: <b>“${escapeHtml(text)}”</b> — ${best.percent}% <button id="playBest" class="chip">▶ Hear yourself</button></p>`;
+}
+
+/** Plain-words position of a note: relative to middle C (C4), plus which staff it sits on. */
+function middleC(midi: number): string {
+  const rounded = Math.round(midi);
+  if (rounded === 60) return 'middle C';
+  const octaves = Math.abs(rounded - 60) / 12;
+  const where = rounded > 60 ? 'above' : 'below';
+  return (octaves >= 1 ? Math.floor(octaves) + ' oct ' : '') + where + ' middle C · ' + (rounded >= 60 ? 'treble' : 'bass');
 }
 
 function safeName(value: string): string {
