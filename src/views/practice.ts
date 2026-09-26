@@ -198,7 +198,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
         <h2>Redo the lyrics</h2>
         <p class="hint">Listens to the singer again, phrase by phrase. For bilingual songs pick both languages — each line gets its own language.</p>
         <label class="inline">Language <select id="redoLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
-        <label class="inline">Accuracy <select id="redoQuality"><option value="best">Best (≈250 MB download, first time only)</option><option value="fast">Faster (≈80 MB)</option></select></label>
+        <label class="inline">Accuracy <select id="redoQuality"><option value="fast">Faster (≈80 MB, recommended)</option><option value="best">Best (≈250 MB, several times slower)</option></select></label>
         <p id="redoStatus" class="hint small"></p>
         <div class="row end"><button class="btn ghost" value="cancel" id="redoCancel">Cancel</button><button id="redoStart" class="btn primary" type="button">Redo lyrics</button></div>
       </form>
@@ -414,7 +414,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     redoLang.value = current
       ? (LANGUAGE_CHOICES.find(choice => choice.value === current.languages.join(','))?.value ?? 'auto')
       : prefs.get('lyricsLang', 'auto');
-    redoQuality.value = current?.quality ?? prefs.get('lyricsQuality', 'best');
+    redoQuality.value = current?.quality ?? prefs.get('lyricsQuality2', 'fast');
     redoStatus.textContent = '';
     redoDialog.showModal();
   });
@@ -426,7 +426,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers, naviga
     el<HTMLButtonElement>(root, '#redoCancel').disabled = true;
     if (player.state !== 'stopped') stopAll();
     prefs.set('lyricsLang', redoLang.value);
-    prefs.set('lyricsQuality', redoQuality.value);
+    prefs.set('lyricsQuality2', redoQuality.value);
     try {
       const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');

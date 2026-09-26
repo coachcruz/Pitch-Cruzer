@@ -109,7 +109,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         <label class="inline">Lyrics language
           <select id="lyricsLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
         <label class="inline">Lyrics accuracy
-          <select id="lyricsQuality"><option value="best">Best (≈250 MB download, first time only)</option><option value="fast">Faster (≈80 MB)</option></select></label>
+          <select id="lyricsQuality"><option value="fast">Faster (≈80 MB, recommended)</option><option value="best">Best (≈250 MB, several times slower)</option></select></label>
       </div>
     </div>
   </section>
@@ -137,9 +137,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const lyricsLang = el<HTMLSelectElement>(root, '#lyricsLang');
   const lyricsQuality = el<HTMLSelectElement>(root, '#lyricsQuality');
   lyricsLang.value = prefs.get('lyricsLang', 'auto');
-  lyricsQuality.value = prefs.get('lyricsQuality', 'best');
+  lyricsQuality.value = prefs.get('lyricsQuality2', 'fast');
   lyricsLang.addEventListener('change', () => prefs.set('lyricsLang', lyricsLang.value));
-  lyricsQuality.addEventListener('change', () => prefs.set('lyricsQuality', lyricsQuality.value));
+  lyricsQuality.addEventListener('change', () => prefs.set('lyricsQuality2', lyricsQuality.value));
 
   const addCard = el(root, '.addSong');
   const progressCard = el(root, '#progressCard');
