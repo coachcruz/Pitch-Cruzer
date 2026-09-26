@@ -1972,13 +1972,12 @@ function renderPhraseCoach(): void {
     ].filter(Boolean).join(' ');
 
     return '<div class="' + classes + '" data-phrase-index="' + index + '">' +
-      '<button type="button" class="phraseUnitTarget" data-select-index="' + index + '" aria-label="Select ' + word + ', target ' + note + '">' +
-        '<span class="phraseUnitWord">' + word + '</span>' +
-        '<span class="phraseUnitNote">' + note + '</span>' +
-      '</button>' +
-      '<button type="button" class="unitToneButton" data-tone-index="' + index + '"' +
+      '<button type="button" class="phraseUnitTarget" data-select-index="' + index + '"' +
         (canPlay ? '' : ' disabled') +
-        ' aria-label="Hear ' + note + ' for ' + word + '">▶ Hear ' + note + '</button>' +
+        ' aria-label="Select ' + word + ' and hear target ' + note + '">' +
+        '<span class="phraseUnitWord">' + word + '</span>' +
+        '<span class="phraseUnitNote">▶ ' + note + '</span>' +
+      '</button>' +
     '</div>';
   }).join('');
 
@@ -1993,20 +1992,11 @@ function renderPhraseCoach(): void {
   phraseNowEl.classList.add('hidden');
 
   phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.phraseUnitTarget').forEach(button => {
-    button.addEventListener('click', () => {
-      selectedPhraseIndex = Number(button.dataset.selectIndex ?? 0);
-      renderPhraseCoach();
-      updateListeningContext();
-    });
-  });
-
-  phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.unitToneButton').forEach(button => {
     button.addEventListener('click', event => {
       event.preventDefault();
-      event.stopPropagation();
       if (button.disabled) return;
 
-      const index = Number(button.dataset.toneIndex ?? -1);
+      const index = Number(button.dataset.selectIndex ?? -1);
       const note = phraseNotes[index];
       if (index < 0 || !note || noteToMidi(note) === null) return;
 
@@ -2015,31 +2005,29 @@ function renderPhraseCoach(): void {
       updateListeningContext();
 
       const liveButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
-        '.unitToneButton[data-tone-index="' + index + '"]'
+        '.phraseUnitTarget[data-select-index="' + index + '"]'
       );
       liveButton?.classList.add('playing');
-      if (liveButton) liveButton.textContent = 'Playing ' + note + '…';
       phraseBuildStateEl.textContent = 'Playing ' + note + ' · ' + (phraseWords[index] ?? 'unit');
 
       void playNoteTone(note, 800)
         .then(() => {
           window.setTimeout(() => {
-            const liveButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
-              '.unitToneButton[data-tone-index="' + index + '"]'
+            const currentButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
+              '.phraseUnitTarget[data-select-index="' + index + '"]'
             );
-            if (liveButton) {
-              liveButton.classList.remove('playing');
-              liveButton.textContent = '▶ Hear ' + note;
-            }
+            currentButton?.classList.remove('playing');
             if (phraseWords.length === phraseNotes.length && phraseWords.length > 0) {
               phraseBuildStateEl.textContent = phraseWords.length + ' units ready';
             }
           }, 820);
         })
         .catch(() => {
-          button.classList.remove('playing');
-          button.textContent = '▶ Hear ' + note;
-          phraseBuildStateEl.textContent = 'Audio blocked · tap Hear again';
+          const currentButton = phraseUnitsEl.querySelector<HTMLButtonElement>(
+            '.phraseUnitTarget[data-select-index="' + index + '"]'
+          );
+          currentButton?.classList.remove('playing');
+          phraseBuildStateEl.textContent = 'Audio blocked · tap the unit again';
         });
     });
   });
@@ -2652,7 +2640,7 @@ if (new URLSearchParams(window.location.search).get('debug') === 'phrase-buttons
   syncPhraseFromInputs();
 
   window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-    const buttons = Array.from(phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.unitToneButton'));
+    const buttons = Array.from(phraseUnitsEl.querySelectorAll<HTMLButtonElement>('.phraseUnitTarget'));
     const results = buttons.map(button => {
       const rect = button.getBoundingClientRect();
       const centerX = rect.left + rect.width / 2;
@@ -2668,7 +2656,7 @@ if (new URLSearchParams(window.location.search).get('debug') === 'phrase-buttons
         pointerEvents: getComputedStyle(button).pointerEvents,
         targetable,
         topElement: topElement instanceof HTMLElement ? topElement.className : String(topElement),
-        handlerFired: after.startsWith('Playing ')
+        handlerFired: phraseBuildStateEl.textContent.startsWith('Playing ')
       };
     });
 
