@@ -23,7 +23,7 @@ export function renderTuner(root: HTMLElement): () => void {
   const ctx = new AudioContext();
   const mic = new LiveMic(ctx);
   const target = el<HTMLSelectElement>(root, '#tTarget');
-  for (let midi = 36; midi <= 84; midi += 1) {
+  for (let midi = 23; midi <= 84; midi += 1) {
     const option = document.createElement('option');
     option.value = String(midi);
     option.textContent = midiToNote(midi) + (NOTE_NAMES[midi % 12] === 'C' ? '  (C)' : '');

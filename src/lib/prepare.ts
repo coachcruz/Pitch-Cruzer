@@ -1,4 +1,4 @@
-import { buildLines, buildSections, keyAndRange, segmentNotes, type PitchTrack, type SongAnalysis } from './analysis';
+import { buildLines, buildSections, keyAndRange, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import * as lalal from './lalal';
 import type { StoredSong } from './library';
@@ -27,7 +27,8 @@ export interface SongBuffers { lead: AudioBuffer; backing: AudioBuffer | null; i
 
 const PITCH_RATE = 11025;
 
-export function pitchTrackFor(buffer: AudioBuffer, onProgress?: (fraction: number) => void): Promise<PitchTrack> {
+/** `soloVoice`: a single isolated voice (enables subharmonic detection); false for a full mix. */
+export function pitchTrackFor(buffer: AudioBuffer, onProgress?: (fraction: number) => void, soloVoice = true): Promise<PitchTrack> {
   return resampleMono(buffer, PITCH_RATE).then(samples => new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./pitch.worker.ts', import.meta.url), { type: 'module' });
     worker.onmessage = (event: MessageEvent<{ progress?: number; result?: PitchJobResult }>) => {
@@ -35,54 +36,119 @@ export function pitchTrackFor(buffer: AudioBuffer, onProgress?: (fraction: numbe
       else if (typeof event.data.progress === 'number') onProgress?.(event.data.progress);
     };
     worker.onerror = event => { worker.terminate(); reject(new Error(event.message || 'Pitch analysis failed.')); };
-    worker.postMessage({ samples, sampleRate: PITCH_RATE, hopSeconds: 0.02 }, [samples.buffer]);
+    worker.postMessage({ samples, sampleRate: PITCH_RATE, hopSeconds: 0.02, soloVoice }, [samples.buffer]);
   }));
 }
 
-function transcribe(buffer: AudioBuffer, onProgress: (fraction: number, detail: string) => void): Promise<TimedWord[]> {
+/** Most common song languages; "auto" chooses among these per phrase. */
+export const AUTO_LANGUAGES = ['en', 'es', 'pt', 'fr', 'it', 'de', 'nl', 'sv', 'pl', 'ru', 'tr', 'ar', 'hi', 'ja', 'ko', 'zh', 'tl', 'id', 'vi'];
+
+export const LANGUAGE_CHOICES: Array<{ value: string; label: string }> = [
+  { value: 'auto', label: 'Detect for each line (any language)' },
+  { value: 'en,es', label: 'English + Spanish' },
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'en,pt', label: 'English + Portuguese' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'en,fr', label: 'English + French' },
+  { value: 'fr', label: 'French' },
+  { value: 'it', label: 'Italian' },
+  { value: 'de', label: 'German' },
+  { value: 'en,ko', label: 'English + Korean' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'zh', label: 'Chinese' },
+  { value: 'en,tl', label: 'English + Tagalog' }
+];
+
+export function lyricsOptionsFrom(language: string, quality: string): LyricsOptions {
+  return {
+    languages: language === 'auto' || !language ? AUTO_LANGUAGES : language.split(','),
+    quality: quality === 'fast' ? 'fast' : 'best'
+  };
+}
+
+/** Cuts the vocal into clips of one or a few phrases so the language can change line by line. */
+function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number; end: number }> {
+  const clips: Array<{ start: number; end: number }> = [];
+  for (const note of notes) {
+    const last = clips[clips.length - 1];
+    if (last && note.start - last.end < 1.2 && note.end - last.start <= 10) last.end = Math.max(last.end, note.end);
+    else clips.push({ start: note.start, end: note.end });
+  }
+  const padded = clips
+    .filter(clip => clip.end - clip.start >= 0.4)
+    .map(clip => ({ start: Math.max(0, clip.start - 0.3), end: Math.min(duration, clip.end + 0.4) }));
+  if (padded.length) return padded;
+  const windows = [];
+  for (let start = 0; start < duration; start += 25) windows.push({ start, end: Math.min(duration, start + 25) });
+  return windows;
+}
+
+function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<TimedWord[]> {
   return resampleMono(buffer, 16000).then(audio => new Promise((resolve, reject) => {
+    const clips = vocalClips(notes, buffer.duration).map(clip => ({
+      audio: audio.slice(Math.floor(clip.start * 16000), Math.ceil(clip.end * 16000)),
+      offset: clip.start
+    }));
     const worker = new Worker(new URL('./transcribe.worker.ts', import.meta.url), { type: 'module' });
-    const timeout = window.setTimeout(() => { worker.terminate(); reject(new Error('Transcription timed out.')); }, 8 * 60 * 1000);
+    const timeout = window.setTimeout(() => { worker.terminate(); reject(new Error('Transcription timed out.')); }, 15 * 60 * 1000);
+    const heard = new Set<string>();
     worker.onmessage = (event: MessageEvent<any>) => {
       const data = event.data;
       if (data.words) { window.clearTimeout(timeout); worker.terminate(); resolve(data.words); }
       else if (data.error) { window.clearTimeout(timeout); worker.terminate(); reject(new Error(data.error)); }
-      else if (data.stage === 'download') onProgress(data.progress * 0.5, 'Downloading the lyrics model (first time only)…');
-      else if (data.stage === 'transcribe') onProgress(0.6, 'Listening to the vocal…');
+      else if (data.stage === 'download') onProgress(data.progress * 0.4, 'Downloading the lyrics model (first time only)…');
+      else if (data.stage === 'transcribe') {
+        if (data.lang) heard.add(String(data.lang).toUpperCase());
+        onProgress(0.4 + data.progress * 0.6, 'Listening line by line' + (heard.size ? ' · heard ' + [...heard].join(' + ') : '') + '…');
+      }
     };
     worker.onerror = event => { window.clearTimeout(timeout); worker.terminate(); reject(new Error(event.message || 'Transcription failed.')); };
-    worker.postMessage({ audio }, [audio.buffer]);
+    worker.postMessage({ clips, languages: options.languages, quality: options.quality }, clips.map(clip => clip.audio.buffer));
   }));
 }
 
-export async function analyzeLead(lead: AudioBuffer, separated: boolean, progress: Progress): Promise<SongAnalysis> {
-  progress('pitch', 0);
-  const track = await pitchTrackFor(lead, fraction => progress('pitch', fraction));
-  const notes = segmentNotes(track);
-  const { key, range } = keyAndRange(notes);
-  progress('pitch', 1, notes.length + ' notes found');
-
+/**
+ * (Re)writes the lyrics of a song and rebuilds its lines and sections.
+ * Returns false (and leaves existing lyrics untouched) if a redo could not hear anything.
+ */
+export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress): Promise<boolean> {
   let words: TimedWord[] = [];
-  let transcript: SongAnalysis['transcript'] = 'none';
+  const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
   progress('lyrics', 0);
   try {
-    words = await transcribe(lead, (fraction, detail) => progress('lyrics', fraction, detail));
-    transcript = words.length ? 'ok' : 'none';
+    words = await transcribe(lead, analysis.notes, options, (fraction, detail) => progress('lyrics', fraction, detail));
+    analysis.transcript = words.length ? 'ok' : 'none';
     progress('lyrics', 1, words.length ? words.length + ' words' : 'No clear words heard');
   } catch (error) {
     console.warn('Transcription failed', error);
-    transcript = 'failed';
+    analysis.transcript = 'failed';
     progress('lyrics', 1, 'Lyrics unavailable — you can paste them in later');
   }
-
+  if (!words.length && hadLyrics) {
+    analysis.transcript = 'edited';
+    return false;
+  }
+  analysis.lyricsOptions = options;
   progress('sections', 0.2);
-  const lines = buildLines(words, notes);
-  const sections = buildSections(lines, notes, lead.duration, words.length > 0);
-  progress('sections', 1, sections.length + ' sections');
-  return { duration: lead.duration, key, range, notes, lines, sections, transcript, separated };
+  analysis.lines = buildLines(words, analysis.notes);
+  analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, words.length > 0);
+  progress('sections', 1, analysis.sections.length + ' sections');
+  return words.length > 0;
 }
 
-export async function prepareSong(input: SongInput, useSeparation: boolean, progress: Progress, signal?: AbortSignal): Promise<PreparedSong> {
+export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress): Promise<SongAnalysis> {
+  progress('pitch', 0);
+  const track = await pitchTrackFor(lead, fraction => progress('pitch', fraction), separated);
+  const notes = segmentNotes(track);
+  const { key, range } = keyAndRange(notes);
+  progress('pitch', 1, notes.length + ' notes found');
+  const analysis: SongAnalysis = { duration: lead.duration, key, range, notes, lines: [], sections: [], transcript: 'none', separated };
+  await transcribeLyrics(lead, analysis, lyrics, progress);
+  return analysis;
+}
+
+export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal): Promise<PreparedSong> {
   const title = input.kind === 'link' ? titleFromLink(input.url) : input.name.replace(/\.[a-z0-9]{2,5}$/i, '');
   let stems: StoredSong['stems'];
 
@@ -123,7 +189,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, prog
     backing: stems.backing ? await decodeAudio(await stems.backing.arrayBuffer()) : null,
     instrumental: stems.instrumental ? await decodeAudio(await stems.instrumental.arrayBuffer()) : null
   };
-  const analysis = await analyzeLead(buffers.lead, useSeparation, progress);
+  const analysis = await analyzeLead(buffers.lead, useSeparation, lyrics, progress);
   const song: StoredSong = {
     id: crypto.randomUUID(),
     title: title || 'Untitled song',

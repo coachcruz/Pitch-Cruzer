@@ -7,7 +7,7 @@ export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSecon
 export interface NoteEvent { start: number; end: number; midi: number }
 
 export interface Syllable { text: string; start: number; end: number; midi: number | null; notes: number[] }
-export interface Word { text: string; start: number; end: number; syllables: Syllable[] }
+export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string }
 export interface LyricLine { id: string; start: number; end: number; words: Word[] }
 
 export type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'instrumental' | 'outro' | 'part';
@@ -22,6 +22,21 @@ export interface SongAnalysis {
   sections: Section[];
   transcript: 'ok' | 'none' | 'failed' | 'edited';
   separated: boolean;
+  lyricsOptions?: LyricsOptions;
+}
+
+export interface LyricsOptions { languages: string[]; quality: 'fast' | 'best' }
+
+/** Where to breathe: silences between sung notes long enough to take a breath. */
+export interface BreathMark { time: number; length: number }
+
+export function breathMarks(notes: NoteEvent[], minGap = 0.3): BreathMark[] {
+  const marks: BreathMark[] = [];
+  for (let i = 1; i < notes.length; i += 1) {
+    const gap = notes[i].start - notes[i - 1].end;
+    if (gap >= minGap && gap < 6) marks.push({ time: notes[i - 1].end, length: gap });
+  }
+  return marks;
 }
 
 export const SECTION_NAMES: Record<SectionKind, string> = {
@@ -136,11 +151,17 @@ export function keyAndRange(notes: NoteEvent[]): { key: MusicalKey | null; range
 
 // ---------------------------------------------------------------- syllables + lines
 
-/** Rough English syllabification: vowel groups, with silent-e and -ed/-es endings merged back. */
+const VOWELS = 'aeiouyáéíóúüàèìòùâêîôûãõäëïöåæøœ';
+const SYLLABLE = new RegExp(`[^${VOWELS}]*[${VOWELS}]+(?:[^${VOWELS}]*$|[^${VOWELS}](?=[^${VOWELS}]))?`, 'giu');
+
+/**
+ * Rough syllabification for English/Spanish/other Latin-script lyrics: vowel groups, with English
+ * silent-e and -ed/-es endings merged back. Other scripts are kept as one unit.
+ */
 export function syllabify(word: string): string[] {
-  const clean = word.replace(/[^A-Za-z']/g, '');
-  if (clean.length <= 3) return [clean || word];
-  const parts = clean.match(/[^aeiouy]*[aeiouy]+(?:[^aeiouy]*$|[^aeiouy](?=[^aeiouy]))?/gi);
+  const clean = word.replace(/[^\p{L}\p{M}']/gu, '');
+  if ([...clean].length <= 3) return [clean || word];
+  const parts = clean.match(SYLLABLE);
   if (!parts || parts.length < 2 || parts.join('') !== clean) return [clean];
   const last = parts[parts.length - 1];
   const previous = parts[parts.length - 2];
@@ -175,7 +196,7 @@ function distinctRounded(notes: NoteEvent[]): number[] {
   return out.slice(0, 6);
 }
 
-export function buildWord(text: string, start: number, end: number, notes: NoteEvent[]): Word {
+export function buildWord(text: string, start: number, end: number, notes: NoteEvent[], lang?: string): Word {
   const parts = syllabify(text);
   const inside = overlapping(notes, start, end);
   const syllables: Syllable[] = [];
@@ -202,7 +223,7 @@ export function buildWord(text: string, start: number, end: number, notes: NoteE
       cursor = e;
     });
   }
-  return { text, start, end, syllables };
+  return { text, start, end, syllables, lang };
 }
 
 let lineCounter = 0;
@@ -253,11 +274,11 @@ function linesFromNotes(notes: NoteEvent[]): LyricLine[] {
 
 export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] {
   if (!timed.length) return linesFromNotes(notes);
-  const words = timed.map(word => buildWord(word.text, word.start, word.end, notes));
+  const words = timed.map(word => buildWord(word.text, word.start, word.end, notes, word.lang));
   return groupLines(words);
 }
 
-const normalizeWord = (value: string) => value.toLowerCase().replace(/[^a-z0-9']/g, '');
+const normalizeWord = (value: string) => value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}']/gu, '');
 
 /**
  * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to the

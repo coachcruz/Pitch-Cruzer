@@ -4,7 +4,7 @@ A sing-along practice app for shy singers, learners and groups of friends.
 
 1. **Add a song**: upload a file, paste a link (Suno / direct audio links download automatically), or record the song from another browser tab (YouTube, Spotify, Apple Music…).
 2. **Pitch Cruzer prepares it once**: LALAL.AI separates the lead vocal, backing vocals and music; the app then finds every note the singer hits, writes out the lyrics (Whisper, in the browser), and splits the song into intro / verse / pre-chorus / chorus / bridge / outro.
-3. **Practice**: pick one or more sections (or any range of lyric lines), loop them, turn the original singer up, down or off, and sing along with karaoke lyrics that show the note and octave for every syllable. A scrolling note lane shows the artist's notes and your live voice.
+3. **Practice** on one focused stage: lyrics roll by on a conveyor belt with each syllable threaded to its note, the artist's notes sit on a pitch lane shaded by octave, and your voice is drawn at the octave you're really singing in — down to subharmonic bass (≈B0, 31 Hz). A slim "Up next" panel shows the coming lines and where to breathe. Pick one or more sections (or any range of lyric lines), loop them, and turn the original singer up, down or off.
 4. **Record yourself**: get a score, per-line feedback and a coaching tip, listen back, download the mix, and save takes to a local leaderboard.
 
 Songs and takes are stored on the device (IndexedDB), so a song only uses LALAL.AI minutes once.
@@ -33,6 +33,8 @@ Without it the app still works using the full mix ("Continue without separating"
 | Mic pitch + sample-accurate recording | `src/lib/mic.ts`, `public/recorder-worklet.js` |
 | Scoring + mixdown | `src/lib/score.ts` |
 | Screens | `src/views/home.ts`, `src/views/practice.ts`, `src/views/tuner.ts` |
+
+Lyrics: Whisper runs per sung phrase and detects the language of each one (limited to the languages you pick), so bilingual songs keep both languages. "Redo lyrics" re-runs it on a saved song without re-separating.
 
 Notes: streaming services (YouTube, Spotify, Apple Music) don't allow downloads, so those songs are captured by recording the tab while it plays (Chrome/Edge desktop).
 Uploads are sent in 4 MB chunks because Netlify functions reject request bodies over ~6 MB.

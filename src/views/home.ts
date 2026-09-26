@@ -1,7 +1,7 @@
 import { deleteSong, listSongs, saveSong, type StoredSong } from '../lib/library';
 import * as lalal from '../lib/lalal';
 import { formatTime, keyName } from '../lib/music';
-import { classifyLink, prepareSong, STEPS, type SongInput, type StepId } from '../lib/prepare';
+import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type SongInput, type StepId } from '../lib/prepare';
 import { TabRecorder } from '../lib/tabcapture';
 import { session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
@@ -74,6 +74,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <div class="options">
       <label class="check"><input id="useSeparation" type="checkbox" checked> Separate the singer from the music <small>(LALAL.AI — needed to turn the artist down)</small></label>
       <label class="check"><input id="keepSong" type="checkbox"> Keep this song on this device <small>(so you never have to prepare it again)</small></label>
+      <div class="optionRow">
+        <label class="inline">Lyrics language
+          <select id="lyricsLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
+        <label class="inline">Lyrics accuracy
+          <select id="lyricsQuality"><option value="best">Best (≈250 MB download, first time only)</option><option value="fast">Faster (≈80 MB)</option></select></label>
+      </div>
     </div>
   </section>
 
@@ -93,6 +99,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const keepSong = el<HTMLInputElement>(root, '#keepSong');
   keepSong.checked = prefs.get('keepSong', true);
   keepSong.addEventListener('change', () => prefs.set('keepSong', keepSong.checked));
+  const lyricsLang = el<HTMLSelectElement>(root, '#lyricsLang');
+  const lyricsQuality = el<HTMLSelectElement>(root, '#lyricsQuality');
+  lyricsLang.value = prefs.get('lyricsLang', 'auto');
+  lyricsQuality.value = prefs.get('lyricsQuality', 'best');
+  lyricsLang.addEventListener('change', () => prefs.set('lyricsLang', lyricsLang.value));
+  lyricsQuality.addEventListener('change', () => prefs.set('lyricsQuality', lyricsQuality.value));
 
   const addCard = el(root, '.addSong');
   const progressCard = el(root, '#progressCard');
@@ -163,7 +175,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     renderSteps(states, !separate);
     progressCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     try {
-      const prepared = await prepareSong(input, separate, (step, fraction, detail) => {
+      const prepared = await prepareSong(input, separate, lyricsOptionsFrom(lyricsLang.value, lyricsQuality.value), (step, fraction, detail) => {
         states[step] = { fraction, detail: detail ?? states[step]?.detail };
         if (!disposed) renderSteps(states, !separate);
       }, abort.signal);

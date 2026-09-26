@@ -9,7 +9,8 @@ export function yin(
   sampleRate: number,
   minHz = 60,
   maxHz = 1100,
-  threshold = 0.15
+  threshold = 0.15,
+  subharmonics = true
 ): YinResult | null {
   const maxLag = Math.min(Math.floor(sampleRate / minHz), Math.floor(frame.length / 2));
   const minLag = Math.max(2, Math.floor(sampleRate / maxHz));
@@ -44,6 +45,16 @@ export function yin(
     }
   }
   if (lag < 0) return null;
+
+  // Only meaningful for a single voice: in a full mix, chords also repeat every few cycles.
+  // Subharmonic (period-doubled) voices: alternate cycles differ, so the waveform only truly
+  // repeats every two cycles. If that doubled period is far cleaner, the heard pitch is an octave lower.
+  const doubled = lag * 2;
+  if (subharmonics && sampleRate / lag < 300 && doubled + 2 <= maxLag && cmnd[lag] > 0.05) {
+    let best = doubled;
+    for (let tau = doubled - 2; tau <= doubled + 2; tau += 1) if (cmnd[tau] < cmnd[best]) best = tau;
+    if (cmnd[best] < cmnd[lag] * 0.4) lag = best;
+  }
 
   let refined = lag;
   if (lag > 1 && lag < maxLag) {

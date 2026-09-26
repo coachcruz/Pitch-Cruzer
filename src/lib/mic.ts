@@ -1,4 +1,4 @@
-import { frequencyToMidi } from './music';
+import { frequencyToMidi, MAX_HZ, MIN_HZ } from './music';
 import { yin } from './yin';
 
 /**
@@ -14,7 +14,7 @@ export class LiveMic {
   private chunks: Float32Array[] = [];
   private firstFrame: number | null = null;
   private recent: number[] = [];
-  private buffer = new Float32Array(2048);
+  private buffer = new Float32Array(4096);
   echoCancel = false;
 
   constructor(private ctx: AudioContext) {}
@@ -32,7 +32,7 @@ export class LiveMic {
     if (this.ctx.state !== 'running') await this.ctx.resume();
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 2048;
+    this.analyser.fftSize = 4096; // long enough for ~30 Hz subharmonics
     this.source.connect(this.analyser);
     this.monitor = this.ctx.createGain();
     this.monitor.gain.value = 0;
@@ -92,7 +92,7 @@ export class LiveMic {
     }
     const level = Math.min(1, Math.sqrt(energy / decimated.length) * 8);
     if (level < 0.04) { this.recent = []; return { midi: null, level }; }
-    const result = yin(decimated, this.ctx.sampleRate / factor, 65, 1100, 0.18);
+    const result = yin(decimated, this.ctx.sampleRate / factor, MIN_HZ, MAX_HZ, 0.18);
     if (!result || result.confidence < 0.7) { this.recent = []; return { midi: null, level }; }
     let midi = frequencyToMidi(result.frequency);
     const last = this.recent[this.recent.length - 1];

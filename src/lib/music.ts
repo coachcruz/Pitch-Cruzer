@@ -63,6 +63,20 @@ export function estimateKey(histogram: number[]): MusicalKey | null {
   return best;
 }
 
+/** Lowest/highest pitch the app listens for: B0 (≈31 Hz, subharmonic bass) up to C6 (≈1 kHz). */
+export const MIN_HZ = 30;
+export const MAX_HZ = 1100;
+
+export const octaveOf = (midi: number) => Math.floor(Math.round(midi) / 12) - 1;
+
+/** Plain-words relation between what you sang and the target, including octave. */
+export function octaveRelation(sung: number, target: number): string {
+  const octaves = Math.round((sung - target) / 12);
+  if (octaves === 0) return 'same octave';
+  const n = Math.abs(octaves);
+  return (n === 1 ? '1 octave ' : n + ' octaves ') + (octaves < 0 ? 'below' : 'above');
+}
+
 export function formatTime(seconds: number): string {
   const value = Math.max(0, Math.round(seconds));
   return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
