@@ -29,6 +29,12 @@ describe('browser retry (fetchWithRetry)', () => {
     expect(waits).toEqual([1, 2]);
   });
 
+  it('can leave server errors alone and retry only a 429', async () => {
+    const { calls, request } = server(answer(502));
+    expect((await fetchWithRetry(request, { retryServerErrors: false, sleep: async () => undefined })).status).toBe(502);
+    expect(calls.count).toBe(1);
+  });
+
   it('does not retry other answers, or a wait longer than allowed', async () => {
     const ok = server(answer(404));
     expect((await fetchWithRetry(ok.request, { sleep: async () => undefined })).status).toBe(404);
