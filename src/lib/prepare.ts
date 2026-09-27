@@ -1,7 +1,7 @@
 import { alignSyncedLyrics, applyTypedLyrics, buildLines, parseSyncedLyrics, type SyncedLine, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
-import { compressForUpload, isVideo } from './mp3';
+import { compressForUpload } from './mp3';
 import * as lalal from './lalal';
 import { diag } from './diag';
 import type { StoredSong } from './library';
@@ -425,7 +425,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     if (input.kind === 'link') throw new lalal.LalalError('Links need the LALAL.AI connection. Upload a file instead.');
     const file = input.kind === 'file' ? input.file : input.blob;
     // A video is kept as just its sound (a phone screen recording is mostly picture).
-    stems = { lead: isVideo(file, input.name) ? (await compressForUpload(file, input.name)).file : file };
+    stems = { lead: (await compressForUpload(file, input.name)).file };
     ['upload', 'separate', 'download'].forEach(step => progress(step as StepId, 1, 'Skipped'));
   }
 

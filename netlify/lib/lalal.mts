@@ -24,7 +24,8 @@ export async function relay(response: Response): Promise<Response> {
 }
 
 export function safeFilename(name: string | null | undefined, fallback: string): string {
-  const cleaned = (name || fallback).replace(/[\r\n"\\/]/g, '_').trim().slice(0, 180);
+  // Plain ASCII only: it goes into an HTTP header (a curly quote or dash in a video title breaks it).
+  const cleaned = (name || fallback).normalize('NFKD').replace(/[^\x20-\x7e]/g, '').replace(/["\\/]/g, '_').trim().slice(0, 180);
   return cleaned || fallback;
 }
 

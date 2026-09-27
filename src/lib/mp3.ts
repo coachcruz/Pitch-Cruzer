@@ -38,23 +38,34 @@ export function isVideo(file: Blob, name: string): boolean {
   return /^video\//.test(file.type) || /\.(mp4|m4v|mov|mkv|webm|avi|3gp)$/i.test(name);
 }
 
+/** Formats LALAL.AI takes as they are; anything else is converted to MP3 first. */
+const LALAL_FORMATS = /\.(mp3|wav|wave|flac|m4a|aac|ogg|aiff?)$/i;
+
+/** Plain-words reason a file can't be used, or null if it can. */
+export class UnplayableFile extends Error {}
+
 /**
- * What gets uploaded for separation: videos are reduced to just their sound, and big uncompressed
- * audio is compressed — both as MP3. Anything else is returned unchanged.
+ * Checks that a file really is playable sound, and returns what gets uploaded for separation:
+ * videos are reduced to just their sound, big uncompressed audio and unusual formats become MP3.
+ * Throws UnplayableFile (with a plain-words reason) if the browser can't play it at all.
  */
 export async function compressForUpload(file: Blob, name: string): Promise<{ file: Blob; name: string }> {
   const uncompressed = /\.(wav|wave|aiff?|flac)$/i.test(name) || /wav|aiff|flac/i.test(file.type);
   const video = isVideo(file, name);
-  if (!video && (!uncompressed || file.size < 4 * 1024 * 1024)) return { file, name };
+  const convert = video || !LALAL_FORMATS.test(name) || (uncompressed && file.size >= 4 * 1024 * 1024);
+  let buffer: AudioBuffer;
   try {
-    const began = performance.now();
-    const buffer = await decodeAudio(await file.arrayBuffer(), true);
-    const channels = Array.from({ length: Math.min(2, buffer.numberOfChannels) }, (_, c) => buffer.getChannelData(c));
-    const mp3 = await encodeMp3(channels, buffer.sampleRate, channels.length === 2 ? 192 : 160);
-    diag((video ? 'Took the sound out of the video: ' : 'Compressed ') + (file.size / 1048576).toFixed(1) + ' MB → ' + (mp3.size / 1048576).toFixed(1) + ' MB MP3 in ' + ((performance.now() - began) / 1000).toFixed(1) + 's', 'ok');
-    return { file: mp3, name: name.replace(/\.[a-z0-9]+$/i, '') + '.mp3' };
-  } catch (error) {
-    diag('Compression skipped (' + (error instanceof Error ? error.message : 'unknown') + ') — sending the original', 'warn');
-    return { file, name };
+    buffer = await decodeAudio(await file.arrayBuffer(), convert);
+  } catch {
+    throw new UnplayableFile('“' + name + '” (' + (file.size / 1048576).toFixed(1) + ' MB) isn’t playable sound. '
+      + (file.size < 1024 * 1024 ? 'It’s too small to be a song — songs “downloaded” in Spotify or Apple Music are locked to those apps and can’t be used, and a file still in iCloud needs downloading first. ' : '')
+      + 'Use an MP3, M4A, WAV or a screen-recording video instead.');
   }
+  if (buffer.duration < 5) throw new UnplayableFile('“' + name + '” is only ' + buffer.duration.toFixed(1) + ' seconds long — that isn’t a whole song.');
+  if (!convert) return { file, name };
+  const began = performance.now();
+  const channels = Array.from({ length: Math.min(2, buffer.numberOfChannels) }, (_, c) => buffer.getChannelData(c));
+  const mp3 = await encodeMp3(channels, buffer.sampleRate, channels.length === 2 ? 192 : 160);
+  diag((video ? 'Took the sound out of the video: ' : 'Converted to MP3: ') + (file.size / 1048576).toFixed(1) + ' MB → ' + (mp3.size / 1048576).toFixed(1) + ' MB in ' + ((performance.now() - began) / 1000).toFixed(1) + 's', 'ok');
+  return { file: mp3, name: name.replace(/\.[a-z0-9]+$/i, '') + '.mp3' };
 }
