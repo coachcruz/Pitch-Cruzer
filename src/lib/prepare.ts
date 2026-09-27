@@ -310,7 +310,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
   if (useSeparation) {
     progress('upload', 0);
     let sourceId: string;
-    if (input.kind === 'link') sourceId = await lalal.importLink(input.url);
+    if (input.kind === 'link') sourceId = await importLinkOrFetchHere(input.url, progress);
     else {
       progress('upload', 0, 'Compressing…');
       const packed = await compressForUpload(input.kind === 'file' ? input.file : input.blob, input.name);
@@ -358,6 +358,30 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     stems
   };
   return { song, buffers, lyricsJob };
+}
+
+/**
+ * Imports a link on the server. Some hosts (Suno) refuse downloads from servers but not from your
+ * browser — then the browser downloads the song itself and uploads it like a file.
+ */
+async function importLinkOrFetchHere(url: string, progress: Progress): Promise<string> {
+  try {
+    return await lalal.importLink(url);
+  } catch (error) {
+    const urls = error instanceof lalal.LalalError && error.code === 'source_blocked' && Array.isArray(error.details.audioUrls)
+      ? (error.details.audioUrls as string[]) : [];
+    if (!urls.length) throw error;
+    diag('The server was blocked from downloading the song — downloading it in this browser instead', 'warn');
+    for (const audioUrl of urls) {
+      const response = await fetch(audioUrl, { signal: AbortSignal.timeout(60000) }).catch(() => null);
+      if (!response?.ok) { diag('Browser download ' + (response ? 'HTTP ' + response.status : 'blocked') + ': ' + audioUrl, 'warn'); continue; }
+      const blob = await response.blob();
+      if (blob.size < 1024) continue;
+      diag('Downloaded the song in this browser (' + (blob.size / 1048576).toFixed(1) + ' MB)', 'ok');
+      return lalal.uploadFile(blob, 'linked-song.mp3', f => progress('upload', f, (blob.size / 1048576).toFixed(1) + ' MB'));
+    }
+    throw new lalal.LalalError((error as Error).message + ' Your browser couldn’t download it either — on Suno use ⋯ → Download → MP3 Audio, then 📁 Upload a file.');
+  }
 }
 
 export async function decodeStems(song: StoredSong): Promise<SongBuffers> {
