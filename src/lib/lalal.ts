@@ -4,7 +4,8 @@ import { diag } from './diag';
 const CHUNK_BYTES = 3 * 1024 * 1024;
 
 export class LalalError extends Error {
-  constructor(message: string, public code?: string) { super(message); }
+  /** `details`: extra fields from the server's error (e.g. where blocked audio can be fetched instead). */
+  constructor(message: string, public code?: string, public details: Record<string, unknown> = {}) { super(message); }
 }
 
 async function requestJson<T>(url: string, init: RequestInit, timeoutSeconds = 90): Promise<T> {
@@ -31,7 +32,7 @@ async function requestJson<T>(url: string, init: RequestInit, timeoutSeconds = 9
       throw new LalalError('The server functions are not running. Deploy to Netlify or use `netlify dev`.', 'no_server');
     }
     const detail = typeof data?.detail === 'string' ? data.detail : Array.isArray(data?.detail) ? data.detail[0]?.msg : null;
-    throw new LalalError(data?.error || detail || 'Request failed (' + response.status + ')', data?.code);
+    throw new LalalError(data?.error || detail || 'Request failed (' + response.status + ')', data?.code, typeof data === 'object' && data ? data : {});
   }
   return data as T;
 }
