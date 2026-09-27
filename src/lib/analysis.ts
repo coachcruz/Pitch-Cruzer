@@ -7,7 +7,12 @@ export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSecon
 export interface NoteEvent { start: number; end: number; midi: number }
 
 export interface Syllable { text: string; start: number; end: number; midi: number | null; notes: number[] }
-export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string }
+/**
+ * `aside`: text inside [square brackets] — a direction like [Chorus] or [guitar solo], not sung. It's
+ * shown differently, has no syllables or notes, and is left out of timing, the staff and scoring.
+ * `tag`: the aside is a section tag ([Verse 2], [Chorus]…) — it names the section instead of being shown.
+ */
+export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string; aside?: boolean; tag?: boolean }
 export interface LyricLine { id: string; start: number; end: number; words: Word[] }
 
 /** 'part' only appears in songs saved by older versions (they're relabeled when opened). */
@@ -445,25 +450,111 @@ export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<[num
 }
 
 /**
+ * Splits typed lyrics into words, line by line, marking everything from a "[" to the next "]" as an
+ * aside (not sung) — even when the brackets span several words or lines.
+ */
+export interface LyricToken { text: string; aside: boolean; tag: boolean }
+
+export function lyricTokens(lines: string[]): LyricToken[][] {
+  let inside = false;
+  let span = -1;
+  const spans: Array<{ text: string; tokens: LyricToken[] }> = [];
+  const result = lines.map(line => {
+    const tokens: LyricToken[] = [];
+    for (const text of line.split(/\s+/).filter(Boolean)) {
+      const open = text.lastIndexOf('['), close = text.lastIndexOf(']');
+      const continuing = inside;
+      if (!inside && open >= 0) { span = spans.length; spans.push({ text: '', tokens: [] }); }
+      const aside = inside || open >= 0;
+      if (open >= 0) inside = true;
+      if (close > open) inside = false;
+      if (aside) spans[span].text += ' ' + text;
+      // A bracketed stretch on one line stays one piece: "[spoken: oh yeah]".
+      const last = tokens[tokens.length - 1];
+      if (continuing && last?.aside) last.text += ' ' + text;
+      else {
+        const token = { text, aside, tag: false };
+        tokens.push(token);
+        if (aside) spans[span].tokens.push(token);
+      }
+    }
+    return tokens;
+  });
+  // A whole bracket (even over several lines) that names a section is a tag: "[Guitar solo … ]".
+  for (const item of spans) if (sectionTag(item.text.trim()) !== null) item.tokens.forEach(token => { token.tag = true; });
+  return result;
+}
+
+/** Section tags written into lyrics — [Intro], [Verse 2], [Pre-Chorus], [Chorus], [Bridge]… */
+const SECTION_TAGS: Array<[RegExp, SectionKind]> = [
+  [/^pre[- ]?chorus|^build/i, 'pre'],
+  [/^(chorus|hook|refrain)/i, 'chorus'],
+  [/^verse/i, 'verse'],
+  [/^bridge/i, 'bridge'],
+  [/^intro/i, 'intro'],
+  [/^(outro|ending|end)\b/i, 'outro'],
+  [/^(instrumental|interlude|break|(guitar |piano |sax |drum )?solo)/i, 'instrumental']
+];
+export function sectionTag(text: string): SectionKind | null {
+  const inner = text.replace(/^\[|\]$/g, '').replace(/:.*$/, '').trim();
+  for (const [pattern, kind] of SECTION_TAGS) if (pattern.test(inner)) return kind;
+  return null;
+}
+/** A line that is nothing but a section tag (it names the section instead of being shown). */
+export const isTagLine = (line: LyricLine) => line.words.length > 0 && line.words.every(word => word.tag);
+
+/** An aside word: shown in place at `time` (or naming the section, for a tag), never sung. */
+function asideWord(token: LyricToken, time: number): Word {
+  return { text: token.text, start: time, end: time, syllables: [], aside: true, tag: token.tag || undefined };
+}
+
+/** Places asides between the sung words around them (at the start of the next sung word). */
+function withAsides(tokens: LyricToken[], sung: Word[], fallback: number): Word[] {
+  const words: Word[] = [];
+  let next = 0;
+  tokens.forEach(token => {
+    if (!token.aside) { words.push(sung[next]); next += 1; return; }
+    const time = sung[next]?.start ?? sung[next - 1]?.end ?? fallback;
+    words.push(asideWord(token, time));
+  });
+  return words;
+}
+
+/**
  * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to the
- * automatic transcript (edit-distance alignment) to keep timing; unmatched words are interpolated.
+ * automatic transcript (edit-distance alignment) to keep timing, or to the melody when there is no
+ * transcript; unmatched words are interpolated. [Bracketed] text is kept as asides, untimed.
  */
 export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLine[] {
-  const typedLines = text.split(/\n+/).map(line => line.trim()).filter(Boolean);
+  const tokenLines = lyricTokens(text.split(/\n+/).map(line => line.trim()).filter(Boolean));
+  const allTokens = tokenLines.flat();
+  // Sung words, with the index of each typed line's first sung word (asides don't count).
   const typed: string[] = [];
   const hardBreaks = new Set<number>();
-  for (const line of typedLines) {
+  for (const line of tokenLines) {
+    const sungWords = line.filter(token => !token.aside).map(token => token.text);
+    if (!sungWords.length) continue;
     hardBreaks.add(typed.length);
-    typed.push(...line.split(/\s+/).filter(Boolean));
+    typed.push(...sungWords);
   }
-  if (!typed.length) return analysis.lines;
+  if (!allTokens.length) return analysis.lines;
+  const filled = typed.length ? timeTypedWords(analysis, typed, hardBreaks) : [];
+  const sung = typed.map((word, index) => buildWord(word, filled[index][0], Math.max(filled[index][1], filled[index][0] + 0.08), analysis.notes));
+  const words = withAsides(allTokens, sung, 0);
+  // Every typed line (including a line that is only an aside) stays its own line.
+  const lineBreaks = new Set<number>();
+  let count = 0;
+  tokenLines.forEach(line => { if (line.length) lineBreaks.add(count); count += line.length; });
+  return groupLines(words, lineBreaks);
+}
 
+/** [start, end] for each sung typed word (see applyTypedLyrics). */
+function timeTypedWords(analysis: SongAnalysis, typed: string[], hardBreaks: Set<number>): Array<[number, number]> {
   // Timing comes only from what was really heard (never from earlier typed lyrics, which may be
   // placed wrong); songs saved before `heard` existed use their automatic transcript if they have one.
   const old: Array<{ text: string; start: number; end: number }> = analysis.heard
-    ?? (analysis.transcript === 'ok' ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪') : []);
+    ?? (analysis.transcript === 'ok' ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪' && !word.aside) : []);
   const times: Array<[number, number] | null> = new Array(typed.length).fill(null);
-
   if (old.length) {
     const n = typed.length, m = old.length;
     const cost: number[][] = Array.from({ length: n + 1 }, (_, i) => Array.from({ length: m + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
@@ -501,8 +592,7 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     filled.push([prevEnd, prevEnd + slot * 0.9]);
   }
 
-  const words = typed.map((text, index) => buildWord(text, filled[index][0], Math.max(filled[index][1], filled[index][0] + 0.08), analysis.notes));
-  return groupLines(words, hardBreaks);
+  return filled;
 }
 
 /** One line of timed lyrics (from LRCLIB's "[mm:ss.xx] text" format). */
@@ -526,7 +616,10 @@ export function parseSyncedLyrics(lrc: string): SyncedLine[] {
  */
 export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]): { lines: LyricLine[]; offset: number; fit: number } | null {
   const notes = analysis.notes;
-  const sung = synced.filter(line => line.text && !/^[♪\s]*$/.test(line.text));
+  const withText = synced.filter(line => line.text && !/^[♪\s]*$/.test(line.text));
+  const tokenLines = lyricTokens(withText.map(line => line.text));
+  // Lines with something to sing (a line that's only a [direction] doesn't mark a sung phrase).
+  const sung = withText.filter((_, i) => tokenLines[i].some(token => !token.aside));
   if (sung.length < 3 || notes.length < 8) return null;
   // Where the singer starts a phrase: the first note after a gap.
   const onsets = notes.filter((note, i) => i === 0 || note.start - notes[i - 1].end >= 0.25).map(note => note.start);
@@ -545,14 +638,16 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
 
   const words: Word[] = [];
   const hardBreaks = new Set<number>();
-  sung.forEach((line, index) => {
+  withText.forEach((line, index) => {
     const start = line.time + offset;
-    const nextStart = index + 1 < sung.length ? sung[index + 1].time + offset : Math.min(analysis.duration, start + 12);
+    const later = withText.slice(index + 1).find((_, k) => tokenLines[index + 1 + k].some(token => !token.aside));
+    const nextStart = later ? later.time + offset : Math.min(analysis.duration, start + 12);
     const inLine = notes.filter(note => note.start >= start - 0.25 && note.start < nextStart - 0.1);
-    const texts = line.text.split(/\s+/).filter(Boolean);
+    const tokens = tokenLines[index];
+    const texts = tokens.filter(token => !token.aside).map(token => token.text);
     const end = inLine.length ? inLine[inLine.length - 1].end : Math.min(nextStart, start + texts.length * 0.45);
     hardBreaks.add(words.length);
-    texts.forEach((text, k) => {
+    const sungWords = texts.map((text, k): Word => {
       let from: number, to: number;
       if (inLine.length >= texts.length) {
         const a = Math.floor((k * inLine.length) / texts.length);
@@ -562,8 +657,9 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
         const span = Math.max(0.2, end - start);
         from = start + (span * k) / texts.length; to = start + (span * (k + 1)) / texts.length;
       }
-      words.push(buildWord(text, Math.max(0, from), Math.max(to, from + 0.08), notes));
+      return buildWord(text, Math.max(0, from), Math.max(to, from + 0.08), notes);
     });
+    words.push(...withAsides(tokens, sungWords, Math.max(0, start)));
   });
   return { lines: groupLines(words, hardBreaks), offset, fit };
 }
@@ -599,6 +695,7 @@ function splitLongBlock(block: Block): Block[] {
 function blockWords(block: Block): Set<string> {
   const words = new Set<string>();
   block.units.forEach(line => line.words.forEach(word => {
+    if (word.aside) return;
     const value = normalizeWord(word.text);
     if (value.length >= 2) words.add(value);
   }));
@@ -641,7 +738,50 @@ export function relabel(sections: Section[]): Section[] {
 }
 
 /** Finds intro / verse / pre-chorus / chorus / bridge / outro from lyric lines, gaps and repetition. */
+/**
+ * Sections straight from the section tags in the lyrics. A tag like [Chorus] starts its section just
+ * before the next sung line. An instrumental tag ([Guitar solo], [Interlude]) is the gap itself: it
+ * runs from the end of the singing before it, and the singing after it (with no new tag) continues
+ * the section it interrupted. Returns null when the lyrics have fewer than two tags.
+ */
+function sectionsFromTags(lines: LyricLine[], duration: number): Section[] | null {
+  const starts: Array<{ kind: SectionKind; time: number }> = [];
+  let pending: SectionKind | null = null;
+  let current: SectionKind | null = null;
+  let lastSungEnd = 0;
+  let tags = 0;
+  for (const line of lines) {
+    const tag = line.words.map(word => (word.tag ? sectionTag(word.text) : null)).find(kind => kind !== null) ?? null;
+    if (tag) {
+      tags += 1;
+      if (tag === 'instrumental' && lastSungEnd > 0) {
+        starts.push({ kind: 'instrumental', time: lastSungEnd + 0.3 });
+        pending = current;             // the next singing resumes the interrupted section
+      } else pending = tag;
+    }
+    const sung = line.words.filter(word => !word.aside);
+    if (!sung.length) continue;
+    if (pending) {
+      // Start a moment before the first sung word, but never before the previous singing ends.
+      starts.push({ kind: pending, time: Math.max(lastSungEnd + 0.3, sung[0].start - 1.5) });
+      current = pending;
+      pending = null;
+    }
+    lastSungEnd = sung[sung.length - 1].end;
+  }
+  if (tags < 2 || !starts.length) return null;
+  if (starts[0].time > 4) starts.unshift({ kind: 'intro', time: 0 });
+  else starts[0].time = 0;
+  const sections = starts.map((start, i) => ({
+    id: sectionId(), kind: start.kind, label: '', start: start.time, end: i + 1 < starts.length ? starts[i + 1].time : duration
+  })).filter(section => section.end - section.start > 0.5);
+  return relabel(sections);
+}
+
 export function buildSections(lines: LyricLine[], notes: NoteEvent[], duration: number, hasLyrics: boolean): Section[] {
+  // Lyrics that name their own sections ([Verse 1], [Chorus]…) are the best guide there is.
+  const tagged = sectionsFromTags(lines, duration);
+  if (tagged) return tagged;
   if (!lines.length) return [{ id: sectionId(), kind: 'verse', label: 'Whole song', start: 0, end: duration }];
 
   let blocks: Block[] = [];

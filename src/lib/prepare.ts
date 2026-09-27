@@ -304,7 +304,7 @@ export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): P
   analysis.range = range;
   analysis.lines = analysis.lines.map(line => ({
     ...line,
-    words: line.words.map(word => word.text === '♪' ? word : buildWord(word.text, word.start, word.end, notes, word.lang))
+    words: line.words.map(word => word.text === '♪' || word.aside ? word : buildWord(word.text, word.start, word.end, notes, word.lang))
   }));
   analysis.notesVersion = NOTES_VERSION;
 }

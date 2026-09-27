@@ -363,6 +363,11 @@ input[type='range'] { accent-color: var(--accent); }
 .hideNotes .syl .hy { display: none; }
 .hideNotes .syl i { display: none; }
 .lineScore { font-weight: 800; font-size: 0.9rem; }
+/* [Bracketed] text is a direction, not lyrics: small, italic, on a soft background, never lit as sung. */
+.word.aside { align-self: center; padding: 0 0.4em; border-radius: 6px; font-size: 0.55em; font-style: italic; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+.lyricLine.asideLine { cursor: default; padding-block: 2px; }
+/* A line that's only a section tag ([Chorus]) — the section heading already says it. */
+.lyricLine.tagLine { display: none; }
 .lyricsList .syl .t { transition: color 0.12s; }
 .lyricsList .syl.sung .t { color: var(--accent); }
 .lyricsList .syl.now .t { color: var(--accent-2); text-shadow: 0 0 12px color-mix(in srgb, var(--accent-2) 55%, transparent); }

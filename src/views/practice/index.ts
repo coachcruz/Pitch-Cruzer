@@ -75,7 +75,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const liveVib = new LiveVibrato();
   // The staff's lyrics belt: whole words, each with the note it starts on ("♪" placeholders left off).
   const laneWords = (): LaneWord[] => analysis.lines.flatMap(line => line.words)
-    .filter(word => word.text !== '♪')
+    .filter(word => word.text !== '♪' && !word.aside)
     .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
   const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, breathMarks(analysis.notes));
 

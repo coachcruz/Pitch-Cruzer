@@ -1,4 +1,4 @@
-import type { LyricLine, SongAnalysis } from '../../lib/analysis';
+import { isTagLine, type LyricLine, type SongAnalysis } from '../../lib/analysis';
 import { escapeHtml } from '../../ui/dom';
 import { syllablesHtml } from './text';
 
@@ -49,12 +49,13 @@ export class Karaoke {
       const header = section && section.id !== lastSection ? `<div class="lyricsSection">${escapeHtml(section.label)}</div>` : '';
       lastSection = section?.id ?? lastSection;
       const score = state.scores?.get(line.id);
-      const who = state.singer?.(line);
+      const who = line.words.every(word => word.aside) ? undefined : state.singer?.(line);
       const classes = ['lyricLine',
         state.inSelection(line.start + 0.01) ? '' : 'outside',
         state.anchor?.id === line.id ? 'anchor' : '',
         score === undefined ? '' : score >= 70 ? 'good' : score >= 40 ? 'ok' : 'bad',
-        who === 'partner' ? 'partner' : ''].filter(Boolean).join(' ');
+        who === 'partner' ? 'partner' : '',
+        isTagLine(line) ? 'tagLine' : line.words.every(word => word.aside) ? 'asideLine' : ''].filter(Boolean).join(' ');
       return header + `<div class="${classes}" data-line="${line.id}" role="button" tabindex="0">
         <span class="lineText">${syllablesHtml(line)}</span>
         ${who ? `<button class="who" title="Tap to switch who sings this line">${who === 'me' ? 'You' : 'Them'}</button>` : ''}
