@@ -30,6 +30,8 @@ export interface SongAnalysis {
   lyricsPending?: boolean;
   separated: boolean;
   lyricsOptions?: LyricsOptions;
+  /** What speech recognition actually heard, with timing — typed/fixed lyrics borrow their timing from it. */
+  heard?: TimedWord[];
 }
 
 export interface LyricsOptions { languages: string[]; quality: 'fast' | 'best' }
@@ -430,7 +432,10 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
   }
   if (!typed.length) return analysis.lines;
 
-  const old = analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪');
+  // Timing comes only from what was really heard (never from earlier typed lyrics, which may be
+  // placed wrong); songs saved before `heard` existed use their automatic transcript if they have one.
+  const old: Array<{ text: string; start: number; end: number }> = analysis.heard
+    ?? (analysis.transcript === 'ok' ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪') : []);
   const times: Array<[number, number] | null> = new Array(typed.length).fill(null);
 
   if (old.length) {
