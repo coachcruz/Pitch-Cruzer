@@ -215,13 +215,26 @@ function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: L
  * (Re)writes the lyrics of a song and rebuilds its lines and sections.
  * Returns false (and leaves existing lyrics untouched) if a redo could not hear anything.
  */
+/**
+ * Heard words in time order, once each: listening windows overlap a little, so a word at the edge of
+ * two windows can come back twice.
+ */
+function inOrder(words: TimedWord[]): TimedWord[] {
+  const sorted = [...words].sort((a, b) => a.start - b.start);
+  const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+  return sorted.filter((word, i) => {
+    const before = sorted[i - 1];
+    return !before || clean(before.text) !== clean(word.text) || word.start - before.start > 0.3;
+  });
+}
+
 export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress, title?: string): Promise<boolean> {
   let words: TimedWord[] = [];
   const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
   progress('lyrics', 0);
   try {
     const result = await transcribe(lead, analysis.notes, options, title, (fraction, detail) => progress('lyrics', fraction, detail));
-    words = result.words;
+    words = inOrder(result.words);
     analysis.transcript = words.length ? 'ok' : 'none';
     progress('lyrics', 1, words.length ? words.length + ' words' + (result.partial ? ' (partial — use Redo lyrics or Fix lyrics for the rest)' : '') : 'No clear words heard');
   } catch (error) {
@@ -270,6 +283,7 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
       if (aligned) {
         analysis.lines = aligned.lines;
         analysis.transcript = 'edited';
+        analysis.typed = found.text;
         analysis.lyricsPending = false;
         analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
         diag('Lyrics: timed lyrics from ' + found.label + ' (shifted ' + aligned.offset.toFixed(1) + 's, fit ' + Math.round(aligned.fit * 100) + '%)', 'ok');
@@ -284,6 +298,7 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
     if (words) {
       analysis.lines = applyTypedLyrics(analysis, words);
       analysis.transcript = 'edited';
+      analysis.typed = words;
       analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
       diag('Lyrics: using ' + (source.pasted?.trim() ? 'your pasted lyrics' : 'lyrics found online') + ', timed to the singer', 'ok');
     }
