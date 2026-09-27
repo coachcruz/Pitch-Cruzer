@@ -2,6 +2,7 @@ import { diagEntries, diagReset, onDiag, diag } from '../lib/diag';
 import { deleteSong, exportSong, importSong, keepStoragePersistent, listSongs, saveSong, type StoredSong } from '../lib/library';
 import * as lalal from '../lib/lalal';
 import { downloadBlob } from '../lib/audio';
+import { isVideo } from '../lib/mp3';
 import { formatTime, keyName } from '../lib/music';
 import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type LyricsSource, type SongInput, type StepId } from '../lib/prepare';
 import { PageRecorder, shareErrorMessage } from '../lib/pageRecorder';
@@ -102,7 +103,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     const pasted = pasteLyrics.value.trim();
     if (pasted) return { pasted };
     const fromName = input.kind === 'link' ? '' : input.name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ');
-    const lookup = songTitle || (/^recorded song/i.test(fromName) ? '' : fromName);
+    // Screen recordings and camera files are named by date, not by song.
+    const meaningless = /^(recorded song|rpreplay|screen ?recording|screenrecording|img|vid|mov|trim|video|audio|recording|untitled)\b|^[\d\s:-]+$/i.test(fromName);
+    const lookup = songTitle || (meaningless ? '' : fromName);
     return lookup ? { lookup } : {};
   };
 
@@ -250,7 +253,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const fileInput = el<HTMLInputElement>(root, '#fileInput');
   const takeFile = (file: File | undefined) => {
     if (!file) return;
-    if (file.size > 200 * 1024 * 1024) { toast('That file is over 200 MB.', 'error'); return; }
+    // Videos can be bigger: only their sound is kept (and sent), which is small.
+    const limit = isVideo(file, file.name) ? 1024 : 200;
+    if (file.size > limit * 1024 * 1024) { toast('That file is over ' + (limit === 1024 ? '1 GB' : '200 MB') + '.', 'error'); return; }
     if (!songTitle) songTitle = searchInput.value.trim() && !/^https?:/i.test(searchInput.value.trim()) ? searchInput.value.trim() : '';
     void start({ kind: 'file', file, name: file.name });
   };

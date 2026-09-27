@@ -1,8 +1,9 @@
 let sharedDecodeContext: AudioContext | null = null;
 
-export async function decodeAudio(bytes: ArrayBuffer): Promise<AudioBuffer> {
+/** `consume`: the bytes aren't needed afterwards, so skip the safety copy (matters for big videos on phones). */
+export async function decodeAudio(bytes: ArrayBuffer, consume = false): Promise<AudioBuffer> {
   sharedDecodeContext ??= new AudioContext();
-  return sharedDecodeContext.decodeAudioData(bytes.slice(0));
+  return sharedDecodeContext.decodeAudioData(consume ? bytes : bytes.slice(0));
 }
 
 /** Mono, resampled copy of a buffer (used for pitch analysis and transcription). */

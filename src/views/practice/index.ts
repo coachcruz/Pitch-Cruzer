@@ -7,7 +7,7 @@ import { exportSong, getSong, listTakes, saveSong, type StoredSong, type StoredT
 import { LiveMic } from '../../lib/mic';
 import { formatTime, midiToFrequency, midiToNote, octaveOf } from '../../lib/music';
 import { Player, Timeline, type Range } from '../../lib/player';
-import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, recheckNotes, transcribeLyrics, type SongBuffers } from '../../lib/prepare';
+import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, recheckNotes, recognizeLyrics, transcribeLyrics, type SongBuffers } from '../../lib/prepare';
 import { serverTranscriptionAvailable } from '../../lib/serverTranscribe';
 import { LiveVibrato } from '../../lib/vibrato';
 import { LYRICS_READY, session } from '../../session';
@@ -416,9 +416,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     prefs.set('lyricsQuality2', redoQuality.value);
     try {
       const keep = $<HTMLInputElement>('#redoKeep').checked ? typedLyrics() : '';
-      const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
+      const progress = (step: string, fraction: number, detail?: string) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
-      });
+      };
+      const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), progress);
       if (!heard) { redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.'; return; }
       if (keep) {
         // Your words stay; only their timing comes from what was just heard.
@@ -426,7 +427,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
         analysis.transcript = 'edited';
         analysis.typed = keep;
         analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
-      } else analysis.typed = undefined;
+      } else {
+        analysis.typed = undefined;
+        await recognizeLyrics(analysis, progress, song.title);   // a known song gets its real lyrics
+      }
       lyricsChanged();
       void persist();
       toast('Lyrics redone.');
