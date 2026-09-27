@@ -812,11 +812,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const now = source ?? idleTime;
 
     let sung: number | null = null;
+    lane.voice = null;
     if (mic.active) {
       const reading = mic.read();
       liveVib.push(performance.now() / 1000, reading.midi);
       // Encouragement judges the center of any vibrato; the staff still draws the real wave.
       sung = reading.midi === null ? null : liveVib.center();
+      lane.voice = reviewPlaying ? null : sung;   // listening back to a take: the take's own line shows
       if (playing && source !== null && !reviewPlaying) {
         if (source < lastSource - 0.3) liveTrail.length = 0;
         lastSource = source;
