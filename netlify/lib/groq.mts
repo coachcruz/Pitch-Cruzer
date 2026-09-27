@@ -25,6 +25,8 @@ function durationMs(value: string | null): number | null {
   return Math.ceil(((h * 60 + m) * 60 + s) * 1000 + ms);
 }
 
+const MIN_WAIT_MS = 250;
+
 export const isRateLimited = (status: number) => status === 429 || status === 503;
 
 /**
@@ -36,7 +38,8 @@ export async function groqFetch(request: () => Promise<Response>, budgetMs = 600
   for (;;) {
     const response = await request().catch(() => null);
     if (!response || !isRateLimited(response.status)) return response;
-    const wait = retryDelayMs(response.headers) ?? 1000;
+    // A "wait 0 s" answer still waits a little, so a lasting limit uses up the budget instead of looping.
+    const wait = Math.max(MIN_WAIT_MS, retryDelayMs(response.headers) ?? 1000);
     if (waited + wait > budgetMs) return response;
     await response.body?.cancel().catch(() => undefined);
     await new Promise(resolve => setTimeout(resolve, wait));

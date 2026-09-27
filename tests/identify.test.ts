@@ -38,6 +38,15 @@ describe('/api/identify', () => {
     expect(asked.slice(3)).toEqual(['new-chat-70b', 'other-chat-32b']);
   });
 
+  it('passes on a rate limit even when the models after it are gone', async () => {
+    const asked = groq(['new-chat-70b'], model => (model === 'llama-3.3-70b-versatile'
+      ? new Response('{}', { status: 429, headers: { 'retry-after': '30' } }) : gone()));
+    const response = await identify(request());
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('30');
+    expect(asked).toEqual(['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant']);
+  });
+
   it('says what Groq answered when nothing works', async () => {
     groq([], () => gone());
     const response = await identify(request());

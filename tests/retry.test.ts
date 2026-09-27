@@ -59,6 +59,12 @@ describe('server retry (Groq)', () => {
     expect(calls.count).toBe(2);
   });
 
+  it('gives up on a lasting limit even when Groq says to wait 0 s', async () => {
+    const { calls, request } = server(answer(429, { 'retry-after': '0' }));
+    expect((await groqFetch(request, 1000))?.status).toBe(429);
+    expect(calls.count).toBeLessThanOrEqual(5);
+  });
+
   it('passes a long limit on to the browser as a 429 with the wait', async () => {
     const { calls, request } = server(answer(429, { 'retry-after': '30' }));
     const response = await groqFetch(request, 1000);

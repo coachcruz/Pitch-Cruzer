@@ -62,7 +62,8 @@ export default async (req: Request) => {
   };
   if (!(await tryModels(MODELS)) && !limited) await tryModels(await currentModels(key));
   const final = response as Response | null;
-  if (final && isRateLimited(final.status) && limited) return rateLimited(limited);
+  // A model that was only busy beats one that's gone: the browser waits and asks again.
+  if (limited && !final?.ok) return rateLimited(limited);
   if (!final) return json({ error: 'The recognition service could not be reached.', tried }, 502);
   if (!final.ok) {
     if (!detail) detail = (await final.text().catch(() => '')).slice(0, 300);
