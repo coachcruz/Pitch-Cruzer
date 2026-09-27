@@ -7,7 +7,7 @@ import { env, json } from '../lib/http.mts';
  * audio. Needs GROQ_API_KEY; without it the app falls back to the in-browser model.
  *
  * GET  → { available }             (is the server model set up?)
- * POST → audio/mpeg body (≤ 4 MB), ?lang=xx (optional) &prompt=… (optional, e.g. the song title)
+ * POST → audio/mpeg body (≤ 4 MB), ?lang=xx (optional) &prompt=… (optional: the song title, plus its lyrics when known)
  *      ← { language, words: [{ text, start, end }], segments: [{ start, end, noSpeech, logProb }] }
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -39,7 +39,7 @@ export default async (req: Request) => {
   form.append('temperature', '0');
   const lang = params.get('lang');
   if (lang && /^[a-z]{2}$/.test(lang)) form.append('language', lang);
-  const prompt = params.get('prompt')?.slice(0, 400);
+  const prompt = params.get('prompt')?.slice(0, 600);
   if (prompt) form.append('prompt', prompt);
 
   const response = await fetch(GROQ_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form }).catch(() => null);

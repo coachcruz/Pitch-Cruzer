@@ -228,12 +228,23 @@ function inOrder(words: TimedWord[]): TimedWord[] {
   });
 }
 
-export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress, title?: string): Promise<boolean> {
+/**
+ * The hint the server model reads before listening: the song title, then the lyrics when we already
+ * have them — so it spells names and odd words the way they're written instead of guessing.
+ */
+function listeningHint(title?: string, lyrics?: string): string | undefined {
+  const words = (lyrics ?? '').replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  const hint = [title?.trim(), words].filter(Boolean).join('. ');
+  return hint ? hint.slice(0, 600) : undefined;
+}
+
+export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress, title?: string, knownLyrics?: string): Promise<boolean> {
   let words: TimedWord[] = [];
+  const hint = listeningHint(title, knownLyrics);
   const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
   progress('lyrics', 0);
   try {
-    const result = await transcribe(lead, analysis.notes, options, title, (fraction, detail) => progress('lyrics', fraction, detail));
+    const result = await transcribe(lead, analysis.notes, options, hint, (fraction, detail) => progress('lyrics', fraction, detail));
     words = inOrder(result.words);
     analysis.transcript = words.length ? 'ok' : 'none';
     progress('lyrics', 1, words.length ? words.length + ' words' + (result.partial ? ' (partial — use Redo lyrics or Fix lyrics for the rest)' : '') : 'No clear words heard');
@@ -294,7 +305,7 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
     }
     const words = pasted || found?.text || '';
     // Speech recognition gives timing (and the words, if we have none of our own).
-    await transcribeLyrics(lead, analysis, lyrics, progress, title);
+    await transcribeLyrics(lead, analysis, lyrics, progress, title, words);
     if (words) {
       analysis.lines = applyTypedLyrics(analysis, words);
       analysis.transcript = 'edited';

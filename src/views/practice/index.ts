@@ -418,7 +418,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       const keep = $<HTMLInputElement>('#redoKeep').checked ? typedLyrics() : '';
       const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
-      }, song.title);
+      }, song.title, keep || undefined);
       if (!heard) { redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.'; return; }
       if (keep) {
         // Your words stay; only their timing comes from what was just heard.
