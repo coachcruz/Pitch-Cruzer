@@ -325,6 +325,98 @@ export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] 
 const normalizeWord = (value: string) => value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}']/gu, '');
 
 /**
+ * Times lyrics from the melody alone (no transcript): each syllable is sung on a note, and lines start
+ * after breaths. Lines are matched to the sung phrases (runs of notes between breaths) by dynamic
+ * programming — a line takes one or more phrases (or two short lines share one) so that its syllable
+ * count fits the phrase's note count; stray phrases (ad-libs, humming) can be skipped. Within a line,
+ * syllables are laid on its notes in order (a syllable held over several notes is fine).
+ * Returns [start, end] for every word, in order.
+ */
+export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<[number, number]> {
+  const phrases: NoteEvent[][] = [];
+  for (const note of notes) {
+    const last = phrases[phrases.length - 1];
+    if (last && note.start - last[last.length - 1].end < 0.3) last.push(note);
+    else phrases.push([note]);
+  }
+  const syllables = lines.map(words => words.map(word => Math.max(1, syllabify(word).length)));
+  const lineSyllables = syllables.map(counts => counts.reduce((a, b) => a + b, 0));
+  const noteCount = (from: number, to: number) => phrases.slice(from, to).reduce((sum, phrase) => sum + phrase.length, 0);
+  // How badly `s` syllables fit `n` notes: extra notes (held/melismatic syllables) are cheaper than
+  // too few (several syllables on one note).
+  // A sung line rarely runs through a long silence: joining phrases across one costs extra.
+  const silenceInside = (from: number, to: number) => {
+    let penalty = 0;
+    for (let x = from + 1; x < to; x += 1) penalty += 0.4 * Math.max(0, phrases[x][0].start - phrases[x - 1][phrases[x - 1].length - 1].end - 0.6);
+    return penalty;
+  };
+  const misfit = (s: number, n: number) => { const r = Math.log((n + 0.5) / (s + 0.5)); return r > 0 ? 0.6 * r : -r; };
+
+  const L = lines.length, P = phrases.length;
+  const cost: number[][] = Array.from({ length: L + 1 }, () => new Array(P + 1).fill(Infinity));
+  const step: Array<Array<{ i: number; j: number; kind: 'line' | 'pair' | 'skip' } | null>> = Array.from({ length: L + 1 }, () => new Array(P + 1).fill(null));
+  cost[0][0] = 0;
+  for (let i = 0; i <= L; i += 1) {
+    for (let j = 0; j <= P; j += 1) {
+      const here = cost[i][j];
+      if (!Number.isFinite(here)) continue;
+      const relax = (ni: number, nj: number, value: number, kind: 'line' | 'pair' | 'skip') => {
+        if (value < cost[ni][nj]) { cost[ni][nj] = value; step[ni][nj] = { i, j, kind }; }
+      };
+      if (j < P) relax(i, j + 1, here + 0.25 + 0.6 * Math.min(1, phrases[j].length / 6), 'skip');
+      if (i < L) {
+        for (let k = 1; k <= 4 && j + k <= P; k += 1) relax(i + 1, j + k, here + misfit(lineSyllables[i], noteCount(j, j + k)) + 0.12 * (k - 1) + silenceInside(j, j + k), 'line');
+        if (i + 1 < L && j < P) relax(i + 2, j + 1, here + misfit(lineSyllables[i] + lineSyllables[i + 1], noteCount(j, j + 1)) + 0.35, 'pair');
+      }
+    }
+  }
+  // Walk back: which phrases each line got.
+  const assigned: Array<{ lines: number[]; phrases: [number, number] }> = [];
+  let i = L, j = P;
+  if (!Number.isFinite(cost[L][P])) return lines.flat().map(() => [0, 0.3]);
+  while (i > 0 || j > 0) {
+    const back = step[i][j]!;
+    if (back.kind === 'line') assigned.unshift({ lines: [back.i], phrases: [back.j, j] });
+    if (back.kind === 'pair') assigned.unshift({ lines: [back.i, back.i + 1], phrases: [back.j, j] });
+    i = back.i; j = back.j;
+  }
+
+  const times: Array<[number, number]> = [];
+  for (const group of assigned) {
+    const groupNotes = phrases.slice(group.phrases[0], group.phrases[1]).flat();
+    const counts = group.lines.flatMap(index => syllables[index]);
+    const total = counts.reduce((a, b) => a + b, 0);
+    // Syllable k of the group → [start, end] on the notes.
+    const sylTime = (k: number): [number, number] => {
+      const n = groupNotes.length;
+      if (n >= total) {
+        const a = Math.floor((k * n) / total), b = Math.max(a, Math.floor(((k + 1) * n) / total) - 1);
+        return [groupNotes[a].start, groupNotes[b].end];
+      }
+      // More syllables than notes: share the sung time out evenly, note by note.
+      const spans = groupNotes.map(note => note.end - note.start);
+      const sung = spans.reduce((a, b) => a + b, 0);
+      const at = (fraction: number) => {
+        let left = fraction * sung;
+        for (let x = 0; x < groupNotes.length; x += 1) {
+          if (left <= spans[x] || x === groupNotes.length - 1) return groupNotes[x].start + Math.min(left, spans[x]);
+          left -= spans[x];
+        }
+        return groupNotes[groupNotes.length - 1].end;
+      };
+      return [at(k / total), at((k + 1) / total)];
+    };
+    let k = 0;
+    for (const count of counts) {
+      const first = sylTime(k), last = sylTime(k + count - 1);
+      times.push([first[0], Math.max(last[1], first[0] + 0.08)]);
+      k += count;
+    }
+  }
+  return times;
+}
+
+/**
  * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to the
  * automatic transcript (edit-distance alignment) to keep timing; unmatched words are interpolated.
  */
@@ -360,28 +452,10 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
       else j -= 1;
     }
   } else if (analysis.notes.length) {
-    // No automatic transcript: give each typed line a run of sung phrases, in order, then spread
-    // that line's words over the notes in its phrases.
-    const notes = analysis.notes;
-    const phrases: NoteEvent[][] = [];
-    for (const note of notes) {
-      const last = phrases[phrases.length - 1];
-      if (last && note.start - last[last.length - 1].end < 0.45) last.push(note);
-      else phrases.push([note]);
-    }
-    const lineStarts = [...hardBreaks].sort((a, b) => a - b);
-    lineStarts.forEach((wordStart, lineIndex) => {
-      const wordEnd = lineIndex + 1 < lineStarts.length ? lineStarts[lineIndex + 1] : typed.length;
-      const from = Math.floor((lineIndex * phrases.length) / lineStarts.length);
-      const to = Math.max(from + 1, Math.floor(((lineIndex + 1) * phrases.length) / lineStarts.length));
-      const lineNotes = phrases.slice(from, to).flat();
-      const count = wordEnd - wordStart;
-      for (let k = 0; k < count && lineNotes.length; k += 1) {
-        const a = Math.floor((k * lineNotes.length) / count);
-        const b = Math.max(a, Math.floor(((k + 1) * lineNotes.length) / count) - 1);
-        times[wordStart + k] = [lineNotes[a].start, lineNotes[Math.min(lineNotes.length - 1, b)].end];
-      }
-    });
+    // No transcript to borrow timing from: match the lyrics to the melody itself.
+    const lineStarts = [...hardBreaks].sort((x, y) => x - y);
+    const lines = lineStarts.map((from, i) => typed.slice(from, i + 1 < lineStarts.length ? lineStarts[i + 1] : typed.length));
+    alignToMelody(lines, analysis.notes).forEach((time, index) => { times[index] = time; });
   }
 
   // Interpolate words that did not match anything.
