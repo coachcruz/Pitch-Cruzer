@@ -1,4 +1,4 @@
-import { alignSyncedLyrics, applyTypedLyrics, breathMarks, buildLines, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
+import { alignSyncedLyrics, applyTypedLyrics, buildLines, lyricBreaths, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
 import { decodeAudio, downloadBlob } from '../../lib/audio';
 import { diagEntries, onDiag } from '../../lib/diag';
 import { BEAT_VERSION, countInCues, estimateBeat } from '../../lib/beat';
@@ -79,7 +79,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     .filter(word => word.text !== '♪' && !word.aside)
     .sort((a, b) => a.start - b.start)
     .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
-  const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, breathMarks(analysis.notes));
+  const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, lyricBreaths(analysis.lines, analysis.notes));
   // The song's beat (found once from the music, then saved) drives the silent count-in dots.
   const beatIsNew = analysis.beat === undefined || (analysis.beat !== null && analysis.beat.version !== BEAT_VERSION);
   if (beatIsNew) analysis.beat = estimateBeat(buffers.instrumental ?? buffers.lead);
@@ -335,7 +335,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   };
   /** New lyrics (written in the background, redone or fixed): refresh everything that shows them. */
   const lyricsChanged = () => {
-    lane.setLyrics(laneWords());
+    lane.setLyrics(laneWords(), lyricBreaths(analysis.lines, analysis.notes));
     cues = analysis.beat ? countInCues(analysis.lines, analysis.beat, analysis.notes) : [];
     lane.cues = cues;
     review.clear();
@@ -418,7 +418,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       const keep = $<HTMLInputElement>('#redoKeep').checked ? typedLyrics() : '';
       const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
-      }, song.title, keep || undefined);
+      });
       if (!heard) { redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.'; return; }
       if (keep) {
         // Your words stay; only their timing comes from what was just heard.

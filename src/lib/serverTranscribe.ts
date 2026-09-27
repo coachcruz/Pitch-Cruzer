@@ -70,7 +70,7 @@ function sungWords(result: ServerResult, offset: number, notes: NoteEvent[], lan
  * the caller can fall back to the in-browser model.
  */
 export async function transcribeOnServer(
-  buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, title: string | undefined,
+  buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions,
   onProgress: (fraction: number, detail: string) => void
 ): Promise<TimedWord[]> {
   const audio = await resampleMono(buffer, RATE);
@@ -85,7 +85,7 @@ export async function transcribeOnServer(
     const mp3 = await encodeMp3([samples], RATE, 48);
     const query = new URLSearchParams();
     if (lang) query.set('lang', lang);
-    if (title) query.set('prompt', title); // the song title (and its lyrics, when known) as a spelling hint
+    // No prompt/hint: Whisper tends to write hint text out as if it were sung (in intros, solos, silence).
     const response = await fetch('/api/transcribe?' + query.toString(), {
       method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
     });

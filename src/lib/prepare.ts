@@ -130,11 +130,11 @@ function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number
  * Words + timing for the lead vocal. The server model (Whisper Large v3 Turbo) is used when it's set
  * up — it's much more accurate on singing; otherwise, or if it fails, the in-browser model runs.
  */
-async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, title: string | undefined, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
+async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
   if (await serverTranscriptionAvailable()) {
     try {
       diag('Lyrics: using the server model (Whisper Large v3 Turbo)');
-      return { words: await transcribeOnServer(buffer, notes, options, title, onProgress), partial: false };
+      return { words: await transcribeOnServer(buffer, notes, options, onProgress), partial: false };
     } catch (error) {
       diag('Server lyrics failed (' + (error instanceof Error ? error.message : String(error)) + ') — using the in-browser model', 'warn');
     }
@@ -228,23 +228,12 @@ function inOrder(words: TimedWord[]): TimedWord[] {
   });
 }
 
-/**
- * The hint the server model reads before listening: the song title, then the lyrics when we already
- * have them — so it spells names and odd words the way they're written instead of guessing.
- */
-function listeningHint(title?: string, lyrics?: string): string | undefined {
-  const words = (lyrics ?? '').replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
-  const hint = [title?.trim(), words].filter(Boolean).join('. ');
-  return hint ? hint.slice(0, 600) : undefined;
-}
-
-export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress, title?: string, knownLyrics?: string): Promise<boolean> {
+export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress): Promise<boolean> {
   let words: TimedWord[] = [];
-  const hint = listeningHint(title, knownLyrics);
   const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
   progress('lyrics', 0);
   try {
-    const result = await transcribe(lead, analysis.notes, options, hint, (fraction, detail) => progress('lyrics', fraction, detail));
+    const result = await transcribe(lead, analysis.notes, options, (fraction, detail) => progress('lyrics', fraction, detail));
     words = inOrder(result.words);
     analysis.transcript = words.length ? 'ok' : 'none';
     progress('lyrics', 1, words.length ? words.length + ' words' + (result.partial ? ' (partial — use Redo lyrics or Fix lyrics for the rest)' : '') : 'No clear words heard');
@@ -273,7 +262,7 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
  * in the background by `lyricsJob`. Pasted or looked-up lyrics supply the exact words, and speech
  * recognition only supplies their timing.
  */
-export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}, title?: string): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<void> }> {
+export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<void> }> {
   progress('pitch', 0);
   const track = await pitchTrackFor(lead, fraction => progress('pitch', fraction), separated);
   const notes = segmentNotes(track);
@@ -305,7 +294,7 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
     }
     const words = pasted || found?.text || '';
     // Speech recognition gives timing (and the words, if we have none of our own).
-    await transcribeLyrics(lead, analysis, lyrics, progress, title, words);
+    await transcribeLyrics(lead, analysis, lyrics, progress);
     if (words) {
       analysis.lines = applyTypedLyrics(analysis, words);
       analysis.transcript = 'edited';
@@ -390,7 +379,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     backing: stems.backing ? await decodeAudio(await stems.backing.arrayBuffer()) : null,
     instrumental: stems.instrumental ? await decodeAudio(await stems.instrumental.arrayBuffer()) : null
   };
-  const { analysis, lyricsJob } = await analyzeLead(buffers.lead, useSeparation, lyrics, progress, source, title);
+  const { analysis, lyricsJob } = await analyzeLead(buffers.lead, useSeparation, lyrics, progress, source);
   const song: StoredSong = {
     id: crypto.randomUUID(),
     title: title || 'Untitled song',

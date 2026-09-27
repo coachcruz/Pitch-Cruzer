@@ -38,7 +38,6 @@ export class PitchLane {
   /** Duet: song stretches sung by your partner — drawn faded, so your own lines stand out. */
   partner: Array<{ start: number; end: number }> = [];
   private gutter = OCTAVE_COL + NOTE_COL;
-  private allBreaths: BreathMark[];
   private breaths: BreathMark[];
   /** Conveyor layout, computed once: each word's fixed position (in song seconds). */
   private layout: Array<{ at: number; size: number; text: string; start: number; end: number; midi: number | null }> | null = null;
@@ -67,23 +66,14 @@ export class PitchLane {
     }
     this.low = low;
     this.high = high;
-    this.allBreaths = breaths;
-    this.breaths = this.breathsBetweenWords();
+    this.breaths = breaths;
     this.resize();
   }
 
-  setLyrics(words: LaneWord[]): void {
+  setLyrics(words: LaneWord[], breaths: BreathMark[]): void {
     this.words = words;
     this.layout = null;
-    this.breaths = this.breathsBetweenWords();
-  }
-
-  /** Breaths only count in real gaps in the lyrics — not in the middle of a held or sliding word. */
-  private breathsBetweenWords(): BreathMark[] {
-    return this.allBreaths.filter(breath => {
-      const middle = breath.time + breath.length / 2;
-      return !this.words.some(word => word.start < middle - 0.05 && word.end > middle + 0.05);
-    });
+    this.breaths = breaths;
   }
 
   resize(): void {
@@ -126,11 +116,6 @@ export class PitchLane {
       if (distance < bestDistance) { bestDistance = distance; best = note; }
     }
     return best;
-  }
-
-  /** True while in a breathing gap between phrases. */
-  breathAt(time: number): boolean {
-    return this.breaths.some(breath => time >= breath.time && time < breath.time + breath.length && breath.length >= 0.35);
   }
 
   private isPartner(time: number): boolean {
