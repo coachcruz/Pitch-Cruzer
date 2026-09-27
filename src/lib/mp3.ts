@@ -33,16 +33,25 @@ export async function encodeMp3(channels: Float32Array[], sampleRate: number, kb
   return new Blob(parts as BlobPart[], { type: 'audio/mpeg' });
 }
 
-/** Returns an MP3 version of big uncompressed audio; anything else is returned unchanged. */
+/** A video file (e.g. an iPhone screen recording): only its sound is needed. */
+export function isVideo(file: Blob, name: string): boolean {
+  return /^video\//.test(file.type) || /\.(mp4|m4v|mov|mkv|webm|avi|3gp)$/i.test(name);
+}
+
+/**
+ * What gets uploaded for separation: videos are reduced to just their sound, and big uncompressed
+ * audio is compressed — both as MP3. Anything else is returned unchanged.
+ */
 export async function compressForUpload(file: Blob, name: string): Promise<{ file: Blob; name: string }> {
   const uncompressed = /\.(wav|wave|aiff?|flac)$/i.test(name) || /wav|aiff|flac/i.test(file.type);
-  if (!uncompressed || file.size < 4 * 1024 * 1024) return { file, name };
+  const video = isVideo(file, name);
+  if (!video && (!uncompressed || file.size < 4 * 1024 * 1024)) return { file, name };
   try {
     const began = performance.now();
-    const buffer = await decodeAudio(await file.arrayBuffer());
+    const buffer = await decodeAudio(await file.arrayBuffer(), true);
     const channels = Array.from({ length: Math.min(2, buffer.numberOfChannels) }, (_, c) => buffer.getChannelData(c));
     const mp3 = await encodeMp3(channels, buffer.sampleRate, channels.length === 2 ? 192 : 160);
-    diag('Compressed ' + (file.size / 1048576).toFixed(1) + ' MB → ' + (mp3.size / 1048576).toFixed(1) + ' MB MP3 in ' + ((performance.now() - began) / 1000).toFixed(1) + 's', 'ok');
+    diag((video ? 'Took the sound out of the video: ' : 'Compressed ') + (file.size / 1048576).toFixed(1) + ' MB → ' + (mp3.size / 1048576).toFixed(1) + ' MB MP3 in ' + ((performance.now() - began) / 1000).toFixed(1) + 's', 'ok');
     return { file: mp3, name: name.replace(/\.[a-z0-9]+$/i, '') + '.mp3' };
   } catch (error) {
     diag('Compression skipped (' + (error instanceof Error ? error.message : 'unknown') + ') — sending the original', 'warn');

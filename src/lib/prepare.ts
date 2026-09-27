@@ -1,7 +1,7 @@
 import { alignSyncedLyrics, applyTypedLyrics, buildLines, parseSyncedLyrics, type SyncedLine, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
-import { compressForUpload } from './mp3';
+import { compressForUpload, isVideo } from './mp3';
 import * as lalal from './lalal';
 import { diag } from './diag';
 import type { StoredSong } from './library';
@@ -257,6 +257,53 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
   return words.length > 0;
 }
 
+/** How much of what was heard (its distinctive words) appears in these lyrics, 0–1. */
+function heardMatch(lyrics: string, heard: TimedWord[]): number {
+  const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+  const lyricWords = new Set(lyrics.split(/\s+/).map(clean));
+  const distinct = [...new Set(heard.map(word => clean(word.text)).filter(word => word.length >= 4))];
+  return distinct.filter(word => lyricWords.has(word)).length / Math.max(1, distinct.length);
+}
+
+/**
+ * No lyrics given and none found by name: recognise the song from what was heard (a language model
+ * names it from the rough words), fetch its real lyrics, and put them on the singer's timing.
+ * The answer is only used if the fetched lyrics really contain what was heard. Original songs that
+ * aren't in the lyrics database keep what was heard. Returns true when the lyrics were replaced.
+ */
+export async function recognizeLyrics(analysis: SongAnalysis, progress: Progress, hint?: string): Promise<boolean> {
+  const heard = analysis.heard ?? [];
+  if (heard.length < 15) return false;
+  progress('lyrics', 0.95, 'Recognising the song…');
+  let named: { title: string | null; artist: string | null } | null = null;
+  try {
+    const response = await fetch('/api/identify', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000),
+      body: JSON.stringify({ heard: heard.slice(0, 300).map(word => word.text).join(' '), hint })
+    });
+    if (response.ok) named = await response.json();
+    else diag('Song recognition unavailable (HTTP ' + response.status + ')', 'warn');
+  } catch {
+    diag('Song recognition unavailable', 'warn');
+  }
+  if (!named?.title) { diag('Song not recognised — keeping the words as heard (an original song?)'); return false; }
+  const found = await findLyricsOnline(named.title + ' ' + (named.artist ?? ''), analysis.duration);
+  if (!found) return false;
+  // Trust it only if the real lyrics contain most of the distinctive words that were heard.
+  const match = heardMatch(found.text, heard);
+  if (match < 0.4) {
+    diag('Recognised as ' + found.label + ', but only ' + Math.round(match * 100) + '% of the heard words are in its lyrics — keeping what was heard', 'warn');
+    return false;
+  }
+  const aligned = found.synced ? alignSyncedLyrics(analysis, found.synced) : null;
+  analysis.lines = aligned ? aligned.lines : applyTypedLyrics(analysis, found.text);
+  analysis.transcript = 'edited';
+  analysis.typed = found.text;
+  analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
+  diag('Lyrics: recognised ' + found.label + ' — using its real lyrics, timed to the singer', 'ok');
+  return true;
+}
+
 /**
  * Finds the notes (seconds), then returns straight away so practice can start; the lyrics are written
  * in the background by `lyricsJob`. Pasted or looked-up lyrics supply the exact words, and speech
@@ -292,9 +339,15 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
       }
       diag('Lyrics: the timed lyrics didn’t fit this recording (another version?) — listening instead', 'warn');
     }
-    const words = pasted || found?.text || '';
+    let words = pasted || found?.text || '';
     // Speech recognition gives timing (and the words, if we have none of our own).
     await transcribeLyrics(lead, analysis, lyrics, progress);
+    // Lyrics found by name are checked against what was heard (a vague name can find the wrong song).
+    if (!pasted && words && analysis.heard && analysis.heard.length >= 15 && heardMatch(words, analysis.heard) < 0.4) {
+      diag('Lyrics: “' + found?.label + '” doesn’t match what’s sung — recognising the song instead', 'warn');
+      words = '';
+    }
+    if (!words) await recognizeLyrics(analysis, progress, source.lookup);
     if (words) {
       analysis.lines = applyTypedLyrics(analysis, words);
       analysis.transcript = 'edited';
@@ -370,7 +423,9 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     stems = { lead: lead!, instrumental, backing };
   } else {
     if (input.kind === 'link') throw new lalal.LalalError('Links need the LALAL.AI connection. Upload a file instead.');
-    stems = { lead: input.kind === 'file' ? input.file : input.blob };
+    const file = input.kind === 'file' ? input.file : input.blob;
+    // A video is kept as just its sound (a phone screen recording is mostly picture).
+    stems = { lead: isVideo(file, input.name) ? (await compressForUpload(file, input.name)).file : file };
     ['upload', 'separate', 'download'].forEach(step => progress(step as StepId, 1, 'Skipped'));
   }
 
