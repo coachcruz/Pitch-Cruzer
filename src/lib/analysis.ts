@@ -42,6 +42,8 @@ export interface SongAnalysis {
   duet?: { mine: 'low' | 'high'; overrides: Record<string, 'me' | 'partner'> };
   /** What speech recognition actually heard, with timing — typed/fixed lyrics borrow their timing from it. */
   heard?: TimedWord[];
+  /** The lyrics as you pasted, typed or found them. Redo lyrics keeps these words and only re-times them. */
+  typed?: string;
 }
 
 export interface LyricsOptions { languages: string[]; quality: 'fast' | 'best' }

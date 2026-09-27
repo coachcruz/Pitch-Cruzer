@@ -77,6 +77,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   // The staff's lyrics belt: whole words, each with the note it starts on ("♪" placeholders left off).
   const laneWords = (): LaneWord[] => analysis.lines.flatMap(line => line.words)
     .filter(word => word.text !== '♪' && !word.aside)
+    .sort((a, b) => a.start - b.start)
     .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
   const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, breathMarks(analysis.notes));
   // The song's beat (found once from the music, then saved) drives the silent count-in dots.
@@ -385,6 +386,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   applyShowNotes();
 
   // Redo the lyrics (listen again, maybe in other languages).
+  /** Lyrics you supplied (songs from before `typed` was saved: the fixed lyrics as they stand). */
+  const typedLyrics = () => analysis.typed
+    ?? (analysis.transcript === 'edited' ? analysis.lines.map(lineText).filter(text => !/^[♪\s]+$/.test(text)).join('\n') : '');
   const redoDialog = $<HTMLDialogElement>('#redoDialog');
   const redoLang = $<HTMLSelectElement>('#redoLang');
   const redoQuality = $<HTMLSelectElement>('#redoQuality');
@@ -396,6 +400,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     redoLang.value = current ? (LANGUAGE_CHOICES.find(choice => choice.value === current.languages.join(','))?.value ?? 'auto') : prefs.get('lyricsLang', 'auto');
     redoQuality.value = current?.quality ?? prefs.get('lyricsQuality2', 'fast');
     redoStatus.textContent = '';
+    $('#redoKeepWrap').classList.toggle('hidden', !typedLyrics());
+    $<HTMLInputElement>('#redoKeep').checked = true;
     void serverTranscriptionAvailable().then(available => redoQuality.closest('label')!.classList.toggle('hidden', available));
     redoDialog.showModal();
   });
@@ -409,10 +415,18 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     prefs.set('lyricsLang', redoLang.value);
     prefs.set('lyricsQuality2', redoQuality.value);
     try {
+      const keep = $<HTMLInputElement>('#redoKeep').checked ? typedLyrics() : '';
       const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
       }, song.title);
       if (!heard) { redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.'; return; }
+      if (keep) {
+        // Your words stay; only their timing comes from what was just heard.
+        analysis.lines = applyTypedLyrics(analysis, keep);
+        analysis.transcript = 'edited';
+        analysis.typed = keep;
+        analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
+      } else analysis.typed = undefined;
       lyricsChanged();
       void persist();
       toast('Lyrics redone.');
@@ -448,6 +462,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     foundOnline = null;
     analysis.lines = aligned ? aligned.lines : applyTypedLyrics(analysis, text);
     analysis.transcript = 'edited';
+    analysis.typed = text;
     analysis.lyricsPending = false;
     analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
     lyricsChanged();
