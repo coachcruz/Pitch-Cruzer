@@ -64,3 +64,55 @@ export const saveTake = (take: StoredTake) => run('takes', 'readwrite', s => s.p
 export const deleteTake = (id: string) => run('takes', 'readwrite', s => s.delete(id)).then(() => undefined);
 export const listTakes = (songId: string) => run<StoredTake[]>('takes', 'readonly', s => s.index('songId').getAll(songId))
   .then(takes => takes.sort((a, b) => b.score - a.score));
+
+// ---------------------------------------------------------------- song files (download / import)
+// A ".pitchcruzer" file holds everything about a song — its separated tracks, notes, lyrics, sections
+// and saved takes — so it can be kept anywhere and opened again on any device without re-preparing.
+// Layout: 4-byte header length, JSON header, then the audio blobs in header order.
+
+interface SongFileHeader {
+  format: 'pitch-cruzer-song';
+  version: 1;
+  song: Omit<StoredSong, 'stems'>;
+  stems: Array<{ name: keyof StoredSong['stems']; type: string; size: number }>;
+  takes: Array<Omit<StoredTake, 'voice'> & { voiceType: string; voiceSize: number }>;
+}
+
+export async function exportSong(song: StoredSong): Promise<Blob> {
+  const takes = await listTakes(song.id).catch(() => [] as StoredTake[]);
+  const stemEntries = (Object.entries(song.stems) as Array<[keyof StoredSong['stems'], Blob | undefined]>).filter((entry): entry is [keyof StoredSong['stems'], Blob] => Boolean(entry[1]));
+  const { stems: _stems, ...info } = song;
+  const header: SongFileHeader = {
+    format: 'pitch-cruzer-song',
+    version: 1,
+    song: info,
+    stems: stemEntries.map(([name, blob]) => ({ name, type: blob.type, size: blob.size })),
+    takes: takes.map(({ voice, ...take }) => ({ ...take, voiceType: voice.type, voiceSize: voice.size }))
+  };
+  const json = new TextEncoder().encode(JSON.stringify(header));
+  return new Blob([new Uint32Array([json.length]), json, ...stemEntries.map(([, blob]) => blob), ...takes.map(take => take.voice)],
+    { type: 'application/octet-stream' });
+}
+
+/** Reads a ".pitchcruzer" file and saves the song (and its takes) on this device. */
+export async function importSong(file: Blob): Promise<StoredSong> {
+  const bytes = await file.arrayBuffer();
+  const length = new Uint32Array(bytes.slice(0, 4))[0];
+  let header: SongFileHeader;
+  try { header = JSON.parse(new TextDecoder().decode(bytes.slice(4, 4 + length))); } catch { throw new Error('That isn’t a Pitch Cruzer song file.'); }
+  if (header.format !== 'pitch-cruzer-song') throw new Error('That isn’t a Pitch Cruzer song file.');
+  let offset = 4 + length;
+  const next = (size: number, type: string) => { const blob = new Blob([bytes.slice(offset, offset + size)], { type }); offset += size; return blob; };
+  const stems = {} as StoredSong['stems'];
+  for (const stem of header.stems) stems[stem.name] = next(stem.size, stem.type);
+  if (!stems.lead) throw new Error('The song file is missing its vocal track.');
+  const song: StoredSong = { ...header.song, stems };
+  await saveSong(song);
+  for (const { voiceType, voiceSize, ...take } of header.takes) await saveTake({ ...take, voice: next(voiceSize, voiceType) });
+  return song;
+}
+
+/** Asks the browser not to clear saved songs when space runs low (no prompt in most browsers). */
+export function keepStoragePersistent(): void {
+  void navigator.storage?.persist?.().catch(() => false);
+}

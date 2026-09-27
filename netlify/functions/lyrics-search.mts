@@ -3,7 +3,8 @@ import { json } from '../lib/http.mts';
 
 /**
  * Looks up real lyrics in LRCLIB (free, open lyrics database — https://lrclib.net) so songs don't
- * rely on speech recognition, which is unreliable on sung words.
+ * rely on speech recognition, which is unreliable on sung words. Timed ("synced") lyrics also give
+ * each line's start, so a song can be timed without transcribing it at all.
  */
 export default async (req: Request) => {
   const query = new URL(req.url).searchParams.get('q')?.trim();
@@ -13,12 +14,16 @@ export default async (req: Request) => {
   }).catch(() => null);
   if (!response?.ok) return json({ error: 'Lyrics lookup is unavailable right now.' }, 502);
   const results = (await response.json().catch(() => [])) as Array<Record<string, unknown>>;
-  return json(results.slice(0, 8).map(item => ({
-    title: item.trackName, artist: item.artistName, duration: item.duration,
-    lyrics: typeof item.plainLyrics === 'string' && item.plainLyrics.trim()
-      ? item.plainLyrics
-      : typeof item.syncedLyrics === 'string' ? item.syncedLyrics.replace(/^\[[^\]]*\]\s?/gm, '') : null
-  })).filter(item => item.lyrics));
+  return json(results.slice(0, 8).map(item => {
+    const synced = typeof item.syncedLyrics === 'string' && item.syncedLyrics.trim() ? item.syncedLyrics : null;
+    return {
+      title: item.trackName, artist: item.artistName, duration: item.duration,
+      lyrics: typeof item.plainLyrics === 'string' && item.plainLyrics.trim() ? item.plainLyrics
+        : synced ? synced.replace(/^\[[^\]]*\]\s?/gm, '') : null,
+      // "[mm:ss.xx] line" — when each line starts in the original recording.
+      synced
+    };
+  }).filter(item => item.lyrics));
 };
 
 export const config: Config = { path: '/api/lyrics' };

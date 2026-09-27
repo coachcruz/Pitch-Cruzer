@@ -1,4 +1,4 @@
-import { applyTypedLyrics, buildLines, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { alignSyncedLyrics, applyTypedLyrics, buildLines, parseSyncedLyrics, type SyncedLine, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
 import { compressForUpload } from './mp3';
@@ -18,15 +18,15 @@ export type SongInput =
 export interface LyricsSource { pasted?: string; lookup?: string }
 
 /** Finds the real lyrics in LRCLIB (via /api/lyrics), preferring the result whose length matches. */
-export async function findLyricsOnline(query: string, duration?: number): Promise<{ text: string; label: string } | null> {
+export async function findLyricsOnline(query: string, duration?: number): Promise<{ text: string; synced: SyncedLine[] | null; label: string } | null> {
   try {
     const response = await fetch('/api/lyrics?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
     if (!response.ok) { diag('Lyrics lookup → HTTP ' + response.status, 'warn'); return null; }
-    const results = (await response.json()) as Array<{ title: string; artist: string; duration?: number; lyrics: string }>;
+    const results = (await response.json()) as Array<{ title: string; artist: string; duration?: number; lyrics: string; synced?: string | null }>;
     if (!results.length) { diag('Lyrics lookup: nothing found for “' + query + '”', 'warn'); return null; }
     const best = [...results].sort((a, b) => (duration ? Math.abs((a.duration ?? 0) - duration) - Math.abs((b.duration ?? 0) - duration) : 0))[0];
     diag('Lyrics found online: ' + best.title + ' — ' + best.artist, 'ok');
-    return { text: best.lyrics, label: best.title + ' — ' + best.artist };
+    return { text: best.lyrics, synced: best.synced ? parseSyncedLyrics(best.synced) : null, label: best.title + ' — ' + best.artist };
   } catch {
     diag('Lyrics lookup failed', 'warn');
     return null;
@@ -255,8 +255,24 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
     transcript: 'none', separated, notesVersion: NOTES_VERSION, lyricsPending: true
   };
   const lyricsJob = async () => {
-    let words = source.pasted?.trim() || '';
-    if (!words && source.lookup) words = (await findLyricsOnline(source.lookup, lead.duration))?.text ?? '';
+    const pasted = source.pasted?.trim() || '';
+    const found = !pasted && source.lookup ? await findLyricsOnline(source.lookup, lead.duration) : null;
+    // Best case: timed lyrics from the lyrics database, lined up with the singer — no listening needed.
+    if (found?.synced) {
+      progress('lyrics', 0.5, 'Lining up the lyrics with the singer…');
+      const aligned = alignSyncedLyrics(analysis, found.synced);
+      if (aligned) {
+        analysis.lines = aligned.lines;
+        analysis.transcript = 'edited';
+        analysis.lyricsPending = false;
+        analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
+        diag('Lyrics: timed lyrics from ' + found.label + ' (shifted ' + aligned.offset.toFixed(1) + 's, fit ' + Math.round(aligned.fit * 100) + '%)', 'ok');
+        progress('lyrics', 1, 'Timed lyrics found');
+        return;
+      }
+      diag('Lyrics: the timed lyrics didn’t fit this recording (another version?) — listening instead', 'warn');
+    }
+    const words = pasted || found?.text || '';
     // Speech recognition gives timing (and the words, if we have none of our own).
     await transcribeLyrics(lead, analysis, lyrics, progress, title);
     if (words) {
