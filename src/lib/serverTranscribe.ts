@@ -7,10 +7,11 @@ import type { TimedWord } from './transcribe.worker';
 /**
  * Lyrics from the server model (Whisper Large v3 Turbo via /api/transcribe). It's far more accurate
  * on singing than the small in-browser models. The isolated vocal is sent as small MP3 pieces
- * (16 kHz mono, 48 kbps ≈ 0.35 MB per minute), cut in the silences between phrases.
+ * (16 kHz mono, 48 kbps ≈ 0.35 MB per minute), cut in the silences between phrases. Pieces are kept
+ * short: on a long piece Whisper can hallucinate in the intro and then skip whole verses.
  */
 const RATE = 16000;
-const PIECE_SECONDS = 420; // ≈ 2.5 MB per piece — safely under the function's request limit
+const PIECE_SECONDS = 45;
 
 let availability: Promise<boolean> | null = null;
 
@@ -46,7 +47,7 @@ function pieces(notes: NoteEvent[], duration: number): Array<{ start: number; en
     for (let i = 1; i < notes.length; i += 1) {
       const gapStart = notes[i - 1].end, gapEnd = notes[i].start;
       if (gapEnd > limit) break;
-      if (gapStart > start + 60 && gapEnd - gapStart > 0.25) cut = (gapStart + gapEnd) / 2;
+      if (gapStart > start + PIECE_SECONDS / 3 && gapEnd - gapStart > 0.25) cut = (gapStart + gapEnd) / 2;
     }
     out.push({ start, end: cut });
     start = cut;
@@ -55,9 +56,15 @@ function pieces(notes: NoteEvent[], duration: number): Array<{ start: number; en
   return out;
 }
 
-/** Whisper sometimes "hears" words in silence; keep only words that line up with actual singing. */
+/**
+ * Whisper sometimes "hears" words in silence; keep only words that line up with actual singing.
+ * Its own "no speech" score is often high on singing, so a stretch only counts as silent when the
+ * singer has (almost) no notes in it too.
+ */
 function sungWords(result: ServerResult, offset: number, notes: NoteEvent[], lang?: string): TimedWord[] {
-  const silent = result.segments.filter(segment => segment.noSpeech > 0.6 && segment.logProb < -0.8);
+  const sungSeconds = (start: number, end: number) => notes.reduce((sum, note) => sum + Math.max(0, Math.min(note.end, end) - Math.max(note.start, start)), 0);
+  const silent = result.segments.filter(segment => segment.noSpeech > 0.6 && segment.logProb < -0.8
+    && sungSeconds(offset + segment.start, offset + segment.end) < 0.2 * (segment.end - segment.start));
   return result.words
     .filter(word => !silent.some(segment => word.start >= segment.start && word.end <= segment.end))
     .filter(word => !/^[[(♪]|^(thank you|thanks for watching|subtitles by)/i.test(word.text))
@@ -79,16 +86,27 @@ export async function transcribeOnServer(
   const lang = options.languages.length === 1 ? options.languages[0] : '';
   const words: TimedWord[] = [];
   for (let index = 0; index < parts.length; index += 1) {
-    const part = parts[index];
+    // Only the singing: a piece starts just before its first note (a long instrumental lead-in is where
+    // Whisper makes things up), and a piece with no singing isn't sent at all.
+    const inside = notes.filter(note => note.end > parts[index].start && note.start < parts[index].end);
+    if (inside.reduce((sum, note) => sum + note.end - note.start, 0) < 1) continue;
+    const part = { start: Math.max(parts[index].start, inside[0].start - 1), end: parts[index].end };
     onProgress(index / parts.length, 'Listening on the server' + (parts.length > 1 ? ' · part ' + (index + 1) + '/' + parts.length : '') + '…');
     const samples = audio.slice(Math.floor(part.start * RATE), Math.ceil(part.end * RATE));
     const mp3 = await encodeMp3([samples], RATE, 48);
     const query = new URLSearchParams();
     if (lang) query.set('lang', lang);
     // No prompt/hint: Whisper tends to write hint text out as if it were sung (in intros, solos, silence).
-    const response = await fetch('/api/transcribe?' + query.toString(), {
-      method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
-    });
+    // Short pieces mean more requests: wait and retry if the service says "too many" or hiccups.
+    let response: Response | null = null;
+    for (const wait of [0, 4000, 12000]) {
+      if (wait) await new Promise(resolve => setTimeout(resolve, wait));
+      response = await fetch('/api/transcribe?' + query.toString(), {
+        method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
+      });
+      if (response.status !== 429 && response.status < 500) break;
+    }
+    if (!response) throw new Error('Server transcription failed.');
     if (!response.ok) {
       const body = await response.json().catch(() => ({})) as { error?: string };
       throw new Error(body.error ?? 'Server transcription failed (' + response.status + ').');
