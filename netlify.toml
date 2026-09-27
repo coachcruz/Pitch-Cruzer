@@ -5,10 +5,11 @@
 [functions]
   directory = "netlify/functions"
 
-# Cross-origin isolation lets the in-browser lyrics model (ONNX Runtime) use several CPU threads
-# instead of one. "credentialless" keeps cross-origin downloads (models, LALAL stems) working.
+# Cross-origin isolation lets the in-browser lyrics model (ONNX Runtime) use several CPU threads.
+# Document-Isolation-Policy (Chrome 137+) isolates just this page, so — unlike COOP/COEP — the app can
+# still control a song tab it opened (and close it) and embed YouTube's player. Browsers without it
+# simply run the fallback lyrics model on one thread.
 [[headers]]
   for = "/*"
   [headers.values]
-    Cross-Origin-Opener-Policy = "same-origin"
-    Cross-Origin-Embedder-Policy = "credentialless"
+    Document-Isolation-Policy = "isolate-and-credentialless"

@@ -1,4 +1,4 @@
-declare const Netlify: { env: { get(name: string): string | undefined } };
+import { env, json } from './http.mts';
 
 export const LALAL_BASE = 'https://www.lalal.ai/api/v1';
 /** Browser → function uploads are split into chunks below Netlify's request limit (~4.5 MB for binary). */
@@ -7,12 +7,8 @@ export const MAX_CHUNKS = 70;
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 export const UPLOAD_STORE = 'pitch-cruzer-uploads';
 
-export function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-}
-
 export function lalalKey(): string | null {
-  return Netlify.env.get('LALAL_API_KEY') ?? null;
+  return env('LALAL_API_KEY');
 }
 
 export const missingKey = () =>

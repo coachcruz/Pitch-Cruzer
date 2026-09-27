@@ -1,8 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { getStore } from '@netlify/blobs';
-import {
-  MAX_CHUNKS, MAX_UPLOAD_BYTES, UPLOAD_STORE, isValidUploadId, json, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal
-} from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
+import { MAX_CHUNKS, MAX_UPLOAD_BYTES, UPLOAD_STORE, isValidUploadId, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal } from '../lib/lalal.mts';
 
 /** Reassembles the chunks stored by /api/upload/chunk and forwards the file to LALAL.AI. */
 export default async (req: Request) => {

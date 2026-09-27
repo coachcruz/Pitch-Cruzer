@@ -86,12 +86,19 @@ export class CaptureMixer {
     this.onChange?.();
   }
 
-  /** Opens the share picker for a tab ("tab") or a whole screen with system audio ("desktop"). */
+  /**
+   * Opens the share picker for another tab ("tab") or a whole screen with system audio ("desktop").
+   * After you pick, focus comes back to this page (where the controls are).
+   */
   async connectShare(id: 'tab' | 'desktop'): Promise<void> {
     this.disconnect(id);
+    // CaptureController (Chrome 109+) lets us keep focus on this page once a tab is picked.
+    const Controller = (window as unknown as { CaptureController?: new () => { setFocusBehavior(behavior: string): void } }).CaptureController;
+    const controller = Controller ? new Controller() : undefined;
     const capture = await navigator.mediaDevices.getDisplayMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       ...({
+        controller,
         preferCurrentTab: false,
         selfBrowserSurface: 'exclude',
         systemAudio: 'include',
@@ -99,6 +106,7 @@ export class CaptureMixer {
       } as object),
       ...(id === 'desktop' ? { video: { displaySurface: 'monitor' } } : { video: { displaySurface: 'browser' } })
     } as DisplayMediaStreamOptions);
+    try { controller?.setFocusBehavior('focus-capturing-application'); } catch { /* only for tabs and windows */ }
     const audio = capture.getAudioTracks()[0];
     if (!audio) {
       capture.getTracks().forEach(track => track.stop());
@@ -112,6 +120,24 @@ export class CaptureMixer {
     // Track labels for tab shares are internal IDs, so describe the source instead.
     const label = surface === 'browser' ? 'Browser tab' : surface === 'monitor' ? 'Entire screen (system audio)' : 'Window';
     await this.attach(id, capture, label);
+  }
+
+  /**
+   * Records THIS page's own sound — the song playing in the built-in YouTube player — so nothing has
+   * to be opened in another tab. Chrome asks once to "share this tab".
+   */
+  async connectThisPage(): Promise<void> {
+    this.disconnect('tab');
+    const capture = await navigator.mediaDevices.getDisplayMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+      video: { displaySurface: 'browser' },
+      ...({ preferCurrentTab: true, selfBrowserSurface: 'include', systemAudio: 'exclude', surfaceSwitching: 'exclude' } as object)
+    } as DisplayMediaStreamOptions);
+    if (!capture.getAudioTracks()[0]) {
+      capture.getTracks().forEach(track => track.stop());
+      throw new Error('No audio was shared. Choose “This tab” and keep “Share tab audio” switched on.');
+    }
+    await this.attach('tab', capture, 'This page (song player)');
   }
 
   async connectMic(): Promise<void> {

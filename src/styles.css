@@ -522,6 +522,39 @@ input[type='range'] { accent-color: var(--accent); }
 }
 
 
+/* ------------------------------------------------ find & record */
+.findRow { display: flex; gap: 8px; flex-wrap: wrap; }
+.findRow input { flex: 1 1 220px; min-width: 0; }
+.findRow select { flex: 0 1 230px; }
+.findResults { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-top: 12px; }
+.findResults:empty { display: none; }
+.result {
+  display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: center; text-align: left; padding: 6px; cursor: pointer;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+}
+.result:hover, .result.picked { border-color: var(--accent); }
+.result img { width: 96px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #000; }
+.result strong { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 0.85rem; }
+.result small { color: var(--muted); font-size: 0.75rem; }
+.videoStage { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 14px; padding: 12px; border-radius: 12px; background: var(--surface-2); }
+.videoHost { aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #000; }
+.videoHost iframe, .videoHost > div { width: 100%; height: 100%; border: 0; display: block; }
+.videoTitle { display: block; font-size: 1rem; }
+.videoSide .recordRow { margin-top: 10px; }
+.videoSide .vu { margin-top: 10px; }
+#serviceStage { margin-top: 14px; }
+.moreInputs { margin-top: 16px; }
+.moreInputs > summary { cursor: pointer; color: var(--muted); font-weight: 600; }
+.capName { display: grid; gap: 4px; margin: 8px 0; font-weight: 600; font-size: 0.9rem; }
+@media (max-width: 640px) { .videoStage { grid-template-columns: 1fr; } }
+
+/* floating controls window (Document Picture-in-Picture) */
+body.floating { margin: 0; padding: 10px; display: grid; gap: 8px; align-content: start; background: var(--bg); color: var(--text); }
+body.floating video { width: 100%; aspect-ratio: 16 / 9; border-radius: 8px; background: #000; object-fit: contain; }
+.fTitle { font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fRow { display: flex; gap: 8px; align-items: center; }
+.fRow .btn { padding: 8px 12px; }
+
 /* ------------------------------------------------ lyrics source (add a song) */
 .lyricsSource { display: grid; gap: 8px; }
 .lyricsSource .textInput { width: 100%; }

@@ -4,7 +4,10 @@ import * as lalal from '../lib/lalal';
 import { formatTime, keyName } from '../lib/music';
 import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type SongInput, type StepId } from '../lib/prepare';
 import { CaptureMixer, type InputId } from '../lib/tabcapture';
+import { serverTranscriptionAvailable } from '../lib/serverTranscribe';
+import { FloatingControls } from '../ui/floatingControls';
 import { showRecordingReview } from '../ui/recordingReview';
+import { cleanSongTitle, EmbeddedVideo, searchYouTube, youtubeId, youtubeSearchAvailable } from '../lib/youtube';
 import { LYRICS_READY, session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 
@@ -43,7 +46,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <div class="tabs" role="tablist">
       <button role="tab" class="tab active" data-tab="upload" aria-selected="true">Upload a file</button>
       <button role="tab" class="tab" data-tab="link" aria-selected="false">Paste a link</button>
-      <button role="tab" class="tab" data-tab="tab" aria-selected="false">Record a browser tab</button>
+      <button role="tab" class="tab" data-tab="find" aria-selected="false">Find &amp; record</button>
     </div>
 
     <div class="tabPanel" data-panel="upload">
@@ -60,43 +63,69 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         <button class="btn primary" type="submit">Get song</button>
       </form>
       <div id="linkHelp" class="hint">Suno links and direct audio-file links are downloaded automatically.
-        YouTube, Spotify and Apple Music don't allow downloads, so we'll record the song while it plays in another tab.</div>
+        YouTube links play right here to be recorded; Spotify and Apple Music open in a new tab with floating record controls.</div>
       <div id="linkRecord" class="notice hidden"></div>
     </div>
 
-    <div class="tabPanel hidden" data-panel="tab">
-      <ol class="steps">
-        <li>Open the song in another tab (YouTube, Spotify, Apple Music, Suno…). <span class="links">
-          <a href="https://www.youtube.com/" target="_blank" rel="noopener">YouTube ↗</a>
-          <a href="https://open.spotify.com/" target="_blank" rel="noopener">Spotify ↗</a>
-          <a href="https://music.apple.com/" target="_blank" rel="noopener">Apple Music ↗</a>
-          <a href="https://suno.com/" target="_blank" rel="noopener">Suno ↗</a></span></li>
-        <li><b>Connect</b> the song’s tab below (keep “Share tab audio” on). Its meter moves when sound arrives.</li>
-        <li>Press <b>● Record</b>, play the song from the start, then <b>■ Stop</b> — play it back, trim it, and prepare it.</li>
-      </ol>
+    <div class="tabPanel hidden" data-panel="find">
+      <form id="findForm" class="findRow">
+        <input id="findInput" class="textInput" placeholder="Song name and artist" required>
+        <select id="findService" aria-label="Where to find it">
+          <option value="youtube">YouTube — plays right here</option>
+          <option value="spotify">Spotify</option>
+          <option value="apple">Apple Music</option>
+          <option value="soundcloud">SoundCloud</option>
+        </select>
+        <button class="btn primary" type="submit">Search</button>
+      </form>
+      <div id="findResults" class="findResults"></div>
 
-      <div class="inputs" role="group" aria-label="Recording inputs">
-        ${inputRow('tab', 'Song (browser tab)', 'Connect tab', 'The song playing in another tab.')}
-        ${inputRow('desktop', 'Desktop audio', 'Connect screen', 'Everything your computer plays. Windows / ChromeOS: share “Entire screen” with “Share system audio”. Not available on Mac.')}
-        ${inputRow('mic', 'Microphone', 'Turn on mic', 'Usually leave off — your voice would be mixed into the song.')}
+      <div id="videoStage" class="videoStage hidden">
+        <div id="videoHost" class="videoHost"></div>
+        <div class="videoSide">
+          <strong id="videoTitle" class="videoTitle"></strong>
+          <div class="recordRow">
+            <button id="vRecord" class="btn record">● Record the song</button>
+            <button id="vStop" class="btn danger hidden">■ Stop</button>
+            <button id="vRestart" class="btn ghost" title="Back to the start (while recording: throw away the take and start over)">↺ Restart</button>
+            <span id="vTime" class="mono">0:00</span>
+          </div>
+          <div class="vu" aria-hidden="true"><span id="vMeter"></span></div>
+          <p class="hint small">Record plays the song from the start and stops by itself at the end. The first time, Chrome asks to share this tab — choose it and keep “Share tab audio” on.</p>
+        </div>
       </div>
 
-      <div class="recordRow">
-        <button id="recStart" class="btn record">● Record</button>
-        <button id="recStop" class="btn danger hidden">■ Stop</button>
-        <button id="recRestart" class="btn ghost hidden" title="Throw away what’s recorded and start over from the same inputs">↺ Restart</button>
-        <span id="recTime" class="mono">0:00</span>
-        <span id="recState" class="hint small"></span>
-      </div>
-      <div class="hint">Meters are silent — you see the level, you don’t hear it twice. Works in Chrome and Edge on a computer.</div>
+      <div id="serviceStage" class="notice hidden"></div>
+
+      <details class="moreInputs">
+        <summary>Record any tab, your desktop or a mic instead</summary>
+        <ol class="steps">
+          <li>Open the song in another tab and play it there.</li>
+          <li><b>Connect</b> that tab below (keep “Share tab audio” on). Its meter moves when sound arrives.</li>
+          <li>Press <b>● Record</b>, play the song from the start, then <b>■ Stop</b> — play it back, trim it, and prepare it.</li>
+        </ol>
+        <div class="inputs" role="group" aria-label="Recording inputs">
+          ${inputRow('tab', 'Song (browser tab)', 'Connect tab', 'The song playing in another tab.')}
+          ${inputRow('desktop', 'Desktop audio', 'Connect screen', 'Everything your computer plays. Windows / ChromeOS: share “Entire screen” with “Share system audio”. Not available on Mac.')}
+          ${inputRow('mic', 'Microphone', 'Turn on mic', 'Usually leave off — your voice would be mixed into the song.')}
+        </div>
+        <div class="recordRow">
+          <button id="recStart" class="btn record">● Record</button>
+          <button id="recStop" class="btn danger hidden">■ Stop</button>
+          <button id="recRestart" class="btn ghost hidden" title="Throw away what’s recorded and start over from the same inputs">↺ Restart</button>
+          <span id="recTime" class="mono">0:00</span>
+          <span id="recState" class="hint small"></span>
+        </div>
+        <div class="hint">Meters are silent — you see the level, you don’t hear it twice. Works in Chrome and Edge on a computer.</div>
+      </details>
     </div>
 
     <div id="capturePreview" class="capturePreview hidden">
       <video id="captureVideo" muted playsinline autoplay aria-label="Live preview of the tab being recorded"></video>
       <div>
-        <strong>Recording this tab</strong>
-        <p class="hint">Float it to keep watching the song while you stay here. The audio keeps recording either way.</p>
-        <button id="capturePip" class="btn">⧉ Float the tab</button>
+        <strong>Connected to the song’s tab</strong>
+        <p class="hint">Float the controls to keep Record / Stop on top while you’re in the song’s tab.</p>
+        <button id="capturePip" class="btn">⧉ Float the controls</button>
       </div>
     </div>
 
@@ -160,6 +189,10 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   lyricsQuality.value = prefs.get('lyricsQuality2', 'fast');
   lyricsLang.addEventListener('change', () => prefs.set('lyricsLang', lyricsLang.value));
   lyricsQuality.addEventListener('change', () => prefs.set('lyricsQuality2', lyricsQuality.value));
+  // With the server model set up, the in-browser model's size/accuracy choice doesn't apply.
+  void serverTranscriptionAvailable().then(available => {
+    if (available && !disposed) lyricsQuality.closest('label')!.classList.add('hidden');
+  });
 
   const addCard = el(root, '.addSong');
   const progressCard = el(root, '#progressCard');
@@ -169,7 +202,6 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   let disposed = false;
   const mixer = new CaptureMixer();
   let meterFrame = 0;
-  let timerHandle: number | null = null;
 
   // ------------------------------------------------ LALAL status
   const renderLalal = () => {
@@ -334,24 +366,112 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     takeFile(event.dataTransfer?.files?.[0]);
   });
 
-  // ------------------------------------------------ tab recording: input mixer + record / stop / restart
+  // ------------------------------------------------ recording: one recorder, three ways to drive it
+  // (the in-page YouTube player, the floating controls over another tab, or the manual input mixer).
+  const recStart = el<HTMLButtonElement>(root, '#recStart');
+  const recStop = el<HTMLButtonElement>(root, '#recStop');
+  const recRestart = el<HTMLButtonElement>(root, '#recRestart');
+  const recTime = el(root, '#recTime');
+  const recState = el(root, '#recState');
+  const vRecord = el<HTMLButtonElement>(root, '#vRecord');
+  const vStop = el<HTMLButtonElement>(root, '#vStop');
+  const vTime = el(root, '#vTime');
+  const vMeter = el(root, '#vMeter');
+  const reviewHost = el(root, '#capReviewHost');
+  const INPUTS: InputId[] = ['tab', 'desktop', 'mic'];
+  const THIS_PAGE = 'This page (song player)';
+  const video = new EmbeddedVideo();
+  const floating = new FloatingControls();
+  let closeReview: (() => void) | null = null;
+  let recordingSource: 'video' | 'other' | null = null;
+  /** The song's name (from the search / video), used to name the recording and find its lyrics. */
+  let songTitle = '';
+  /** A song tab this page opened (Spotify, Apple Music…) — closed again when you're done with it. */
+  let songWindow: Window | null = null;
+
+  const shareError = (error: unknown) => {
+    const name = error instanceof Error ? error.name : '';
+    const message = name === 'NotAllowedError' ? 'Sharing was cancelled (or screen sharing is blocked for this browser in your system settings).'
+      : name === 'NotSupportedError' || name === 'TypeError' ? 'This browser can’t share tab audio. Use Chrome or Edge on a computer, or upload a file.'
+      : name === 'NotReadableError' || name === 'AbortError' ? 'The browser couldn’t start sharing. Close other screen-sharing apps and try again.'
+      : error instanceof Error ? error.message : 'Couldn’t connect that input.';
+    toast(message + (name && name !== 'Error' ? ' [' + name + ']' : ''), 'error');
+  };
+
+  const renderRecorder = () => {
+    const recording = mixer.recording;
+    const other = recording && recordingSource === 'other';
+    recStart.classList.toggle('hidden', other);
+    recStop.classList.toggle('hidden', !other);
+    recRestart.classList.toggle('hidden', !other);
+    recState.textContent = other ? 'Recording…' : '';
+    recTime.classList.toggle('live', other);
+    const fromVideo = recording && recordingSource === 'video';
+    vRecord.classList.toggle('hidden', fromVideo);
+    vStop.classList.toggle('hidden', !fromVideo);
+    const time = formatTime(recording ? mixer.seconds : 0);
+    recTime.textContent = time;
+    vTime.textContent = fromVideo ? '● ' + time : formatTime(video.time) + (video.duration ? ' / ' + formatTime(video.duration) : '');
+    const tab = mixer.state('tab');
+    vMeter.style.width = (tab.connected && tab.label === THIS_PAGE ? Math.round(tab.level * 100) : 0) + '%';
+    floating.update({ recording, seconds: mixer.seconds, level: tab.level, title: songTitle || 'Song tab' });
+  };
+
+  let warned = false;
+  const beginRecording = (source: 'video' | 'other') => {
+    closeReview?.();
+    closeReview = null;
+    if (!mixer.hasLiveInput) { toast('Connect the song’s tab first.', 'error'); return false; }
+    mixer.startRecording();
+    recordingSource = source;
+    warned = false;
+    renderRecorder();
+    return true;
+  };
+  const restartRecording = () => {
+    if (!mixer.recording) return;
+    mixer.reset();
+    if (recordingSource === 'video') video.restart();
+    else toast('Starting over — play the song from the beginning.');
+  };
+  const endRecording = () => {
+    if (!mixer.recording) return;
+    const source = recordingSource;
+    recordingSource = null;
+    const recording = mixer.stopRecording();
+    if (source === 'video') video.pause();
+    renderRecorder();
+    if (!recording) { toast('Nothing audible was recorded. Check that the song was playing and its input was on.', 'error'); return; }
+    closeReview = showRecordingReview(reviewHost, recording, {
+      use: (wav, title) => {
+        closeReview = null;
+        finishSongSession();
+        mixer.close();
+        renderInputs();
+        const name = title || 'Recorded song ' + new Date().toLocaleDateString();
+        void start({ kind: 'recording', blob: wav, name: name + '.wav' });
+      },
+      redo: () => { closeReview = null; if (source === 'video') void recordVideo(); else beginRecording('other'); },
+      discard: () => { closeReview = null; toast('Recording discarded.'); }
+    }, songTitle);
+    reviewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+
+  const recorderTick = window.setInterval(() => {
+    renderRecorder();
+    if (mixer.recording && !warned && mixer.seconds > 6 && mixer.peak < 0.02) {
+      warned = true;
+      toast('Nothing audible is being recorded. Is the song playing, and is its input switched on?', 'error');
+    }
+  }, 200);
+
+  // ------------------------------------------------ inputs (manual mixer) + live preview
   const capturePreview = el(root, '#capturePreview');
   const captureVideo = el<HTMLVideoElement>(root, '#captureVideo');
   const capturePip = el<HTMLButtonElement>(root, '#capturePip');
-  const pipSupported = 'pictureInPictureEnabled' in document && document.pictureInPictureEnabled;
-  capturePip.classList.toggle('hidden', !pipSupported);
-  capturePip.addEventListener('click', async () => {
-    try {
-      if (document.pictureInPictureElement) await document.exitPictureInPicture();
-      else await captureVideo.requestPictureInPicture();
-    } catch {
-      toast('Couldn’t float the tab. Press “⧉ Float the tab” again.', 'error');
-    }
-  });
-  captureVideo.addEventListener('enterpictureinpicture', () => { capturePip.textContent = '⧉ Bring it back'; });
-  captureVideo.addEventListener('leavepictureinpicture', () => { capturePip.textContent = '⧉ Float the tab'; });
   const syncPreview = () => {
-    const stream = mixer.videoStream;
+    // No preview when recording this page itself (it would just show the page).
+    const stream = mixer.state('tab').label === THIS_PAGE ? null : mixer.videoStream;
     if (stream) {
       const current = captureVideo.srcObject as MediaStream | null;
       if (current?.getVideoTracks()[0] !== stream.getVideoTracks()[0]) {
@@ -366,24 +486,6 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     }
   };
 
-  const recStart = el<HTMLButtonElement>(root, '#recStart');
-  const recStop = el<HTMLButtonElement>(root, '#recStop');
-  const recRestart = el<HTMLButtonElement>(root, '#recRestart');
-  const recTime = el(root, '#recTime');
-  const recState = el(root, '#recState');
-  const reviewHost = el(root, '#capReviewHost');
-  let closeReview: (() => void) | null = null;
-  const INPUTS: InputId[] = ['tab', 'desktop', 'mic'];
-
-  const shareError = (error: unknown) => {
-    const name = error instanceof Error ? error.name : '';
-    const message = name === 'NotAllowedError' ? 'Sharing was cancelled (or screen sharing is blocked for this browser in your system settings).'
-      : name === 'NotSupportedError' || name === 'TypeError' ? 'This browser can’t share tab audio. Use Chrome or Edge on a computer, or upload a file.'
-      : name === 'NotReadableError' || name === 'AbortError' ? 'The browser couldn’t start sharing. Close other screen-sharing apps and try again.'
-      : error instanceof Error ? error.message : 'Couldn’t connect that input.';
-    toast(message + (name && name !== 'Error' ? ' [' + name + ']' : ''), 'error');
-  };
-
   const renderInputs = () => {
     for (const id of INPUTS) {
       const row = el(root, `[data-input="${id}"]`);
@@ -396,20 +498,18 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       el(row, '.inputStatus').textContent = !state.connected ? 'Not connected' : (state.on ? 'On · ' : 'Muted · ') + state.label;
       el<HTMLButtonElement>(row, '.connect').textContent = state.connected ? 'Disconnect' : el(row, '.connect').dataset.label!;
     }
-    const any = mixer.hasLiveInput;
-    recStart.disabled = !any;
-    recStart.title = any ? '' : 'Connect and switch on at least one input first';
+    recStart.disabled = !mixer.hasLiveInput;
+    recStart.title = mixer.hasLiveInput ? '' : 'Connect and switch on at least one input first';
     syncPreview();
   };
   mixer.onChange = renderInputs;
 
-  // Silent meters: redraw every frame while anything is connected.
+  // Silent meters: redraw every frame.
   const meters = () => {
     meterFrame = requestAnimationFrame(meters);
     for (const id of INPUTS) {
-      const state = mixer.state(id);
       const bar = root.querySelector<HTMLElement>(`[data-input="${id}"] .vu span`);
-      if (bar) bar.style.width = Math.round(state.level * 100) + '%';
+      if (bar) bar.style.width = Math.round(mixer.state(id).level * 100) + '%';
     }
   };
   meters();
@@ -438,59 +538,151 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       else mixer.setOn(id, !state.on);
     });
   });
-
-  const setRecordingUi = (on: boolean) => {
-    recStart.classList.toggle('hidden', on);
-    recStop.classList.toggle('hidden', !on);
-    recRestart.classList.toggle('hidden', !on);
-    recState.textContent = on ? 'Recording…' : '';
-    recTime.classList.toggle('live', on);
-    if (timerHandle !== null) window.clearInterval(timerHandle);
-    let warned = false;
-    timerHandle = on ? window.setInterval(() => {
-      recTime.textContent = formatTime(mixer.seconds);
-      if (!warned && mixer.seconds > 6 && mixer.peak < 0.02) {
-        warned = true;
-        toast('Nothing audible is being recorded. Is the song playing, and is its input switched on?', 'error');
-      }
-    }, 200) : null;
-  };
-
-  const startRecording = () => {
-    closeReview?.();
-    closeReview = null;
-    if (!mixer.hasLiveInput) { toast('Connect the song’s tab first.', 'error'); return; }
-    mixer.startRecording();
-    recTime.textContent = '0:00';
-    setRecordingUi(true);
-  };
-  const stopRecording = () => {
-    if (!mixer.recording) return;
-    setRecordingUi(false);
-    const recording = mixer.stopRecording();
-    if (!recording) { toast('Nothing audible was recorded. Check that the song was playing and its input was on.', 'error'); return; }
-    closeReview = showRecordingReview(reviewHost, recording, {
-      use: wav => {
-        closeReview = null;
-        mixer.close();
-        renderInputs();
-        void start({ kind: 'recording', blob: wav, name: 'Recorded song ' + new Date().toLocaleDateString() + '.wav' });
-      },
-      redo: () => { closeReview = null; startRecording(); },
-      discard: () => { closeReview = null; toast('Recording discarded.'); }
-    });
-    reviewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-  };
-  recStart.addEventListener('click', startRecording);
-  recStop.addEventListener('click', stopRecording);
-  recRestart.addEventListener('click', () => {
-    mixer.reset();
-    recTime.textContent = '0:00';
-    toast('Starting over — play the song from the beginning.');
-  });
+  recStart.addEventListener('click', () => beginRecording('other'));
+  recStop.addEventListener('click', endRecording);
+  recRestart.addEventListener('click', restartRecording);
   renderInputs();
 
-  const openRecorder = () => el<HTMLButtonElement>(root, '[data-tab="tab"]').click();
+  // ------------------------------------------------ floating controls over another tab
+  const floatingActions = {
+    record: () => beginRecording('other'),
+    stop: endRecording,
+    restart: restartRecording,
+    // Closing the floating window ends the session: stop, stop sharing, close the song tab we opened.
+    closed: () => {
+      endRecording();
+      mixer.disconnect('tab');
+      renderInputs();
+      closeSongTab();
+    }
+  };
+  const openFloating = async () => {
+    if (!FloatingControls.supported()) {
+      // Older browsers: float just the live picture of the tab.
+      try { await captureVideo.requestPictureInPicture(); } catch { toast('This browser can’t float the controls. Keep this page beside the song’s tab.', 'error'); }
+      return;
+    }
+    if (!(await floating.open(mixer.videoStream, floatingActions))) toast('Press “⧉ Float the controls” to open the floating window.');
+  };
+  capturePip.addEventListener('click', () => void openFloating());
+
+  const closeSongTab = () => {
+    if (songWindow && !songWindow.closed) songWindow.close();
+    songWindow = null;
+    el(root, '#serviceStage').classList.add('hidden');
+  };
+  /** Done with a song session (a take was used): close the floating window and the song tab. */
+  const finishSongSession = () => {
+    floating.close();
+    closeSongTab();
+  };
+
+  // ------------------------------------------------ YouTube, right in the page
+  const videoStage = el(root, '#videoStage');
+  const findResults = el(root, '#findResults');
+  video.onStatus = status => {
+    if (status === 'ended' && recordingSource === 'video') endRecording();
+    renderRecorder();
+  };
+  const loadVideo = async (id: string, title = '') => {
+    closeSongTab();
+    videoStage.classList.remove('hidden');
+    el(root, '#videoTitle').textContent = title || 'Loading…';
+    try {
+      await video.mount(el(root, '#videoHost'), id);
+      const name = video.title || title;
+      el(root, '#videoTitle').textContent = name;
+      songTitle = cleanSongTitle(name);
+      videoStage.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (error) {
+      videoStage.classList.add('hidden');
+      toast(error instanceof Error ? error.message : 'Couldn’t load that video.', 'error');
+    }
+  };
+  /** Records this page while the built-in player plays the song from the start; stops at the end. */
+  const recordVideo = async () => {
+    const tab = mixer.state('tab');
+    if (!tab.connected || tab.label !== THIS_PAGE) {
+      if (!CaptureMixer.supported()) { toast('This browser can’t record tab audio. Use Chrome or Edge on a computer.', 'error'); return; }
+      try { await mixer.connectThisPage(); } catch (error) { shareError(error); return; }
+      renderInputs();
+    }
+    if (beginRecording('video')) video.restart();
+  };
+  vRecord.addEventListener('click', () => void recordVideo());
+  vStop.addEventListener('click', endRecording);
+  el(root, '#vRestart').addEventListener('click', () => { if (mixer.recording) restartRecording(); else video.restart(); });
+
+  // ------------------------------------------------ other services: open the song in a new tab
+  const SEARCH_URLS: Record<string, (q: string) => string> = {
+    youtube: q => 'https://www.youtube.com/results?search_query=' + encodeURIComponent(q),
+    spotify: q => 'https://open.spotify.com/search/' + encodeURIComponent(q),
+    apple: q => 'https://music.apple.com/us/search?term=' + encodeURIComponent(q),
+    soundcloud: q => 'https://soundcloud.com/search?q=' + encodeURIComponent(q)
+  };
+  const openSongTab = (url: string, service: string, title: string) => {
+    songTitle = title;
+    songWindow = window.open(url, '_blank');
+    const stage = el(root, '#serviceStage');
+    const youtubeFallback = service === 'YouTube';
+    stage.innerHTML = `<p><b>${escapeHtml(service)} is open in a new tab.</b> ${youtubeFallback
+      ? 'Find the video, copy its link, and paste it here to play it right in Pitch Cruzer:'
+      : 'Pick the song there, then connect it — a small floating window with Record / Stop stays on top of it.'}</p>
+      ${youtubeFallback ? `<form class="linkRow" data-act="paste"><input class="textInput" type="url" placeholder="https://www.youtube.com/watch?v=…" required><button class="btn primary">Play it here</button></form>` : `
+      <div class="recordRow">
+        <button class="btn primary" data-act="connect">Connect ${escapeHtml(service)} &amp; float the controls</button>
+        <button class="btn ghost" data-act="close">Close the ${escapeHtml(service)} tab</button>
+      </div>
+      <p class="hint small">Closing the floating window also closes the ${escapeHtml(service)} tab. ${songWindow ? '' : '(Your browser blocked the new tab — open ' + escapeHtml(service) + ' yourself; we can’t close tabs we didn’t open.)'}</p>`}`;
+    stage.classList.remove('hidden');
+    stage.querySelector('[data-act="connect"]')?.addEventListener('click', async () => {
+      try { await mixer.connectShare('tab'); } catch (error) { shareError(error); return; }
+      renderInputs();
+      await openFloating();
+    });
+    stage.querySelector('[data-act="close"]')?.addEventListener('click', () => { floating.close(); mixer.disconnect('tab'); renderInputs(); closeSongTab(); });
+    stage.querySelector<HTMLFormElement>('[data-act="paste"]')?.addEventListener('submit', event => {
+      event.preventDefault();
+      const id = youtubeId((event.currentTarget as HTMLFormElement).querySelector('input')!.value);
+      if (!id) { toast('That isn’t a YouTube video link.', 'error'); return; }
+      void loadVideo(id, title);
+    });
+  };
+
+  // ------------------------------------------------ search
+  const findService = el<HTMLSelectElement>(root, '#findService');
+  findService.value = prefs.get('findService', 'youtube');
+  findService.addEventListener('change', () => prefs.set('findService', findService.value));
+  el<HTMLFormElement>(root, '#findForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const query = el<HTMLInputElement>(root, '#findInput').value.trim();
+    if (!query) return;
+    findResults.innerHTML = '';
+    if (findService.value !== 'youtube') {
+      const service = findService.selectedOptions[0].textContent!.trim();
+      openSongTab(SEARCH_URLS[findService.value](query), service, query);
+      return;
+    }
+    if (!(await youtubeSearchAvailable())) { openSongTab(SEARCH_URLS.youtube(query), 'YouTube', query); return; }
+    findResults.innerHTML = '<p class="hint">Searching YouTube…</p>';
+    try {
+      const results = await searchYouTube(query);
+      if (disposed) return;
+      findResults.innerHTML = results.length ? results.map(result => `<button class="result" data-video="${escapeHtml(result.id)}" data-title="${escapeHtml(result.title)}">
+          <img src="${escapeHtml(result.thumbnail)}" alt="" loading="lazy" referrerpolicy="no-referrer">
+          <span><strong>${escapeHtml(result.title)}</strong><small>${escapeHtml(result.channel)}</small></span></button>`).join('')
+        : '<p class="hint">Nothing found — try the artist’s name too.</p>';
+      findResults.querySelectorAll<HTMLButtonElement>('[data-video]').forEach(button => button.addEventListener('click', () => {
+        findResults.querySelectorAll('.result').forEach(node => node.classList.toggle('picked', node === button));
+        void loadVideo(button.dataset.video!, button.dataset.title);
+      }));
+    } catch (error) {
+      findResults.innerHTML = '';
+      toast(error instanceof Error ? error.message : 'Search failed.', 'error');
+    }
+  });
+
+  const openFinder = () => el<HTMLButtonElement>(root, '[data-tab="find"]').click();
 
   // ------------------------------------------------ links
   const linkRecord = el(root, '#linkRecord');
@@ -509,15 +701,11 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       void start({ kind: 'link', url });
       return;
     }
-    const name = STREAMING_NAMES[kind] ?? 'This site';
-    linkRecord.innerHTML = `<p><b>${name} doesn’t allow downloading songs</b> — so let’s record it while it plays:</p>
-      <div class="recordRow">
-        <a class="btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">1 · Open song ↗</a>
-        <button class="btn primary goRecorder">2 · Go to the recorder</button>
-      </div>
-      <p class="hint">In the recorder, press “Connect tab”, pick the tab you just opened (keep “Share tab audio” on), then Record.</p>`;
-    linkRecord.classList.remove('hidden');
-    el(linkRecord, '.goRecorder').addEventListener('click', openRecorder);
+    // YouTube plays right here; other services open in a new tab with floating record controls.
+    openFinder();
+    const id = youtubeId(url);
+    if (id) { void loadVideo(id); return; }
+    openSongTab(url, STREAMING_NAMES[kind] ?? 'This site', '');
   });
 
   // ------------------------------------------------ library
@@ -549,7 +737,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     cancelAnimationFrame(meterFrame);
     window.clearInterval(elapsedTimer);
     stopDiag();
-    if (timerHandle !== null) window.clearInterval(timerHandle);
+    window.clearInterval(recorderTick);
+    video.destroy();
+    floating.close();
     closeReview?.();
     if (document.pictureInPictureElement === captureVideo) void document.exitPictureInPicture().catch(() => undefined);
     mixer.close();

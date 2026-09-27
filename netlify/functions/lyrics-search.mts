@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { json } from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
 
 /**
  * Looks up real lyrics in LRCLIB (free, open lyrics database — https://lrclib.net) so songs don't
