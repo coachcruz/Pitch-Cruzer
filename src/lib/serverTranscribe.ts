@@ -85,7 +85,7 @@ export async function transcribeOnServer(
     const mp3 = await encodeMp3([samples], RATE, 48);
     const query = new URLSearchParams();
     if (lang) query.set('lang', lang);
-    if (title) query.set('prompt', title);
+    if (title) query.set('prompt', title); // the song title (and its lyrics, when known) as a spelling hint
     const response = await fetch('/api/transcribe?' + query.toString(), {
       method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
     });
