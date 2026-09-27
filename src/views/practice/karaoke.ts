@@ -10,6 +10,8 @@ export interface KaraokeState {
   singer: ((line: LyricLine) => 'me' | 'partner') | null;
   /** Picking lines: the first line tapped. */
   anchor: LyricLine | null;
+  /** Silent count-in dots before lines (beat times). */
+  cues: Map<string, number[]>;
 }
 
 /**
@@ -18,6 +20,7 @@ export interface KaraokeState {
  */
 export class Karaoke {
   private current: HTMLElement | null = null;
+  private cueRows: Array<{ row: HTMLElement; dots: number[]; entry: number }> = [];
   private lastTime = NaN;
   private handScrollUntil = 0;
   /** While picking lines, the list stays where the person scrolls it. */
@@ -57,14 +60,26 @@ export class Karaoke {
         who === 'partner' ? 'partner' : '',
         isTagLine(line) ? 'tagLine' : line.words.every(word => word.aside) ? 'asideLine' : ''].filter(Boolean).join(' ');
       return header + `<div class="${classes}" data-line="${line.id}" role="button" tabindex="0">
+        ${state.cues.has(line.id) ? `<span class="cueDots" aria-hidden="true">${'<i></i>'.repeat(state.cues.get(line.id)!.length)}</span>` : ''}
         <span class="lineText">${syllablesHtml(line)}</span>
         ${who ? `<button class="who" title="Tap to switch who sings this line">${who === 'me' ? 'You' : 'Them'}</button>` : ''}
         ${score === undefined ? '' : `<span class="lineScore">${score}%</span>`}</div>`;
     }).join('') || '<p class="empty">No sung lines were found.</p>';
+    this.cueRows = [...state.cues.entries()].flatMap(([id, dots]) => {
+      const row = this.list.querySelector<HTMLElement>(`[data-line="${id}"] .cueDots`);
+      const line = this.analysis.lines.find(item => item.id === id);
+      return row && line ? [{ row, dots, entry: line.start }] : [];
+    });
   }
 
   /** Called every frame while the Karaoke view is showing. */
   update(time: number, playing: boolean): void {
+    // Silent count-in: the dots over the coming line light up on the beats before it.
+    for (const cue of this.cueRows) {
+      const showing = time >= cue.dots[0] - 1.5 && time < cue.entry + 0.2;
+      cue.row.classList.toggle('show', showing);
+      if (showing) cue.row.querySelectorAll('i').forEach((dot, k) => dot.classList.toggle('on', time >= cue.dots[k]));
+    }
     const rows = [...this.list.querySelectorAll<HTMLElement>('.lyricLine')];
     const lines = this.analysis.lines;
     if (!rows.length || rows.length !== lines.length) return;

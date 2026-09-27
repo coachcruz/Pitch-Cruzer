@@ -33,6 +33,8 @@ export class PitchLane {
   showVoiceTypes = true;
   /** Simple view: no voice staff, note names only on C rows, no syllable threads. */
   simple = false;
+  /** Silent count-in: dots that light up on the beats before a line starts (see beat.ts). */
+  cues: Array<{ dots: number[] }> = [];
   /** Duet: song stretches sung by your partner — drawn faded, so your own lines stand out. */
   partner: Array<{ start: number; end: number }> = [];
   private gutter = OCTAVE_COL + NOTE_COL;
@@ -343,6 +345,21 @@ export class PitchLane {
         ctx.stroke();
         ctx.setLineDash([]);
       }
+    }
+    // Silent count-in: a dot per beat before the singing comes in, lighting up as each beat passes.
+    for (const cue of this.cues) {
+      const entry = cue.dots[cue.dots.length - 1] + (cue.dots.length > 1 ? cue.dots[1] - cue.dots[0] : 0.5);
+      if (entry < t0 || cue.dots[0] > t1 || now > entry + 0.3) continue;
+      cue.dots.forEach(time => {
+        const lit = now >= time;
+        ctx.beginPath();
+        ctx.arc(x(time), 64, lit ? 6 : 5, 0, Math.PI * 2);
+        ctx.fillStyle = lit ? color('--accent-2') : color('--surface');
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = lit ? color('--accent-2') : color('--muted');
+        ctx.stroke();
+      });
     }
     // Breath marks: centered in the actual gap between the notes (the same gap the words sit around),
     // with a faint line down through the staff so it's clear which bars it falls between.

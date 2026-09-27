@@ -1,6 +1,7 @@
 import { alignSyncedLyrics, applyTypedLyrics, breathMarks, buildLines, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
 import { decodeAudio, downloadBlob } from '../../lib/audio';
 import { diagEntries, onDiag } from '../../lib/diag';
+import { countInCues, estimateBeat } from '../../lib/beat';
 import { duetParts, partnerRanges, type Part } from '../../lib/duet';
 import { exportSong, getSong, listTakes, saveSong, type StoredSong, type StoredTake } from '../../lib/library';
 import { LiveMic } from '../../lib/mic';
@@ -78,6 +79,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     .filter(word => word.text !== '♪' && !word.aside)
     .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
   const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, breathMarks(analysis.notes));
+  // The song's beat (found once from the music, then saved) drives the silent count-in dots.
+  const beatIsNew = analysis.beat === undefined;
+  if (beatIsNew) analysis.beat = estimateBeat(buffers.instrumental ?? buffers.lead);
+  let cues = analysis.beat ? countInCues(analysis.lines, analysis.beat) : [];
+  lane.cues = cues;
 
   let selected = new Set<string>();            // chosen sections (empty = whole song)
   let custom: { start: number; end: number; label: string } | null = null;   // picked lines
@@ -106,6 +112,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (!session.saved) return;
     try { await saveSong(song); } catch { toast('Could not save changes on this device.', 'error'); }
   };
+  if (beatIsNew) void persist();
 
   // ================================================================ what is being practiced
   const repeatsEl = $<HTMLSelectElement>('#repeats');
@@ -315,7 +322,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       inSelection,
       scores: current ? new Map(current.score.lines.map(item => [item.line.id, item.percent])) : null,
       singer: parts ? line => parts!.get(line.id) ?? 'me' : null,
-      anchor: pickAnchor
+      anchor: pickAnchor,
+      cues: new Map(cues.map(cue => [cue.lineId, cue.dots]))
     });
   };
   const lyricsHintText = () => {
@@ -327,6 +335,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   /** New lyrics (written in the background, redone or fixed): refresh everything that shows them. */
   const lyricsChanged = () => {
     lane.setLyrics(laneWords());
+    cues = analysis.beat ? countInCues(analysis.lines, analysis.beat) : [];
+    lane.cues = cues;
     review.clear();
     if (analysis.duet) analysis.duet.overrides = {};   // line ids changed; re-guess the parts
     parts = duetParts(analysis);
@@ -638,6 +648,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
   player.onEnded = () => {
     if (recording) void finishRecording();
+    idleTime = selectedRanges()[0].start;   // after a stop, Play starts from the top again
     reviewPlaying = false;
     lane.trail = liveTrail;
     countdown.classList.add('hidden');
@@ -647,9 +658,26 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   playButton.addEventListener('click', async () => {
     if (player.state === 'playing') { await player.pause(); renderTransport(); return; }
     if (player.state === 'paused') { await player.resume(); renderTransport(); return; }
-    await startPlayback(false);
+    await startPlayback(false, new Timeline(playbackRanges(), repeats()).timelineFor(idleTime) ?? 0);
   });
   stopButton.addEventListener('click', stopAll);
+
+  /** Jump to a moment of the song: keep playing from there, or (stopped) make it where Play starts. */
+  const jumpTo = (time: number) => {
+    if (recording) return;
+    if (!inSelection(time)) wholeSong();
+    if (player.state === 'stopped') { idleTime = time; updateClock(); return; }
+    void startPlayback(false, new Timeline(playbackRanges(), repeats()).timelineFor(time) ?? 0);
+  };
+  $('#toStart').addEventListener('click', () => jumpTo(0));
+  $('#toSection').addEventListener('click', () => {
+    // The start of the section you're in — or, right at a section's start, the one before it.
+    const now = idleTime;
+    const starts = analysis.sections.map(section => section.start).sort((a, b) => a - b);
+    const current = [...starts].reverse().find(start => start <= now + 0.05) ?? 0;
+    const target = now - current < 1.5 ? ([...starts].reverse().find(start => start < current - 0.05) ?? 0) : current;
+    jumpTo(target);
+  });
   recordButton.addEventListener('click', async () => {
     if (recording) { stopAll(); return; }
     if (!(await enableMic())) return;
