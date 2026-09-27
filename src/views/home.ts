@@ -2,7 +2,7 @@ import { diagEntries, diagReset, onDiag, diag } from '../lib/diag';
 import { deleteSong, exportSong, importSong, keepStoragePersistent, listSongs, saveSong, type StoredSong } from '../lib/library';
 import * as lalal from '../lib/lalal';
 import { downloadBlob } from '../lib/audio';
-import { isVideo } from '../lib/mp3';
+import { fileProblem, isSongFile, pickSongFile, songNameFromFile } from '../lib/songFile';
 import { formatTime, keyName } from '../lib/music';
 import { classifyLink, LANGUAGE_CHOICES, lyricsOptionsFrom, prepareSong, STEPS, type LyricsSource, type SongInput, type StepId } from '../lib/prepare';
 import { PageRecorder, shareErrorMessage } from '../lib/pageRecorder';
@@ -102,10 +102,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const lyricsSource = (input: SongInput): LyricsSource => {
     const pasted = pasteLyrics.value.trim();
     if (pasted) return { pasted };
-    const fromName = input.kind === 'link' ? '' : input.name.replace(/\.[a-z0-9]{2,5}$/i, '').replace(/[_]+/g, ' ');
-    // Screen recordings and camera files are named by date, not by song.
-    const meaningless = /^(recorded song|rpreplay|screen ?recording|screenrecording|img|vid|mov|trim|video|audio|recording|untitled)\b|^[\d\s:-]+$/i.test(fromName);
-    const lookup = songTitle || (meaningless ? '' : fromName);
+    const lookup = songTitle || (input.kind === 'link' ? '' : songNameFromFile(input.name));
     return lookup ? { lookup } : {};
   };
 
@@ -205,6 +202,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       if (abort.signal.aborted || disposed) return;
       const song = prepared.song;
       if (songTitle && input.kind !== 'link') song.title = songTitle;
+      const unnamed = !songTitle && !prepared.named;
       session.song = song;
       session.buffers = prepared.buffers;
       // Every song is kept on this device automatically (and can be downloaded as a file from My songs).
@@ -213,7 +211,10 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       keepStoragePersistent();
       // Open the song as soon as the notes are ready; the lyrics finish in the background and appear
       // on the practice screen when done.
-      const job = prepared.lyricsJob().catch(error => console.warn('Background lyrics failed', error)).then(async () => {
+      const job = prepared.lyricsJob().then(result => {
+        // A song added without a name (a screen recording…) is named after the lyrics it was matched to.
+        if (unnamed && result.label) song.title = result.label;
+      }, error => console.warn('Background lyrics failed', error)).then(async () => {
         song.analysis.lyricsPending = false;
         session.lyricsJobs.delete(song.id);
         if (session.saved) await saveSong(song).catch(() => undefined);
@@ -261,35 +262,27 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     }
   };
   const fileInput = el<HTMLInputElement>(root, '#fileInput');
-  /**
-   * The song among dropped/picked files. Dragging a video (from Photos, a screen-recording preview…)
-   * often brings a small preview picture along — never take the picture: take the sound/video, the biggest one.
-   */
-  const songFileFrom = (list: FileList | null | undefined): File | undefined => {
-    const files = [...(list ?? [])];
-    const media = files.filter(file => /^(audio|video)\//.test(file.type) || /\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff?|mp4|m4v|mov|mkv|webm|avi|pitchcruzer)$/i.test(file.name));
-    return (media.length ? media : files).sort((a, b) => b.size - a.size)[0];
-  };
-  const takeFile = (file: File | undefined) => {
-    if (!file) return;
-    if (/^image\//.test(file.type) || /\.(jpe?g|png|heic|heif|gif|webp|tiff?)$/i.test(file.name)) {
-      toast('That’s a picture, not the song. Pick the video or audio file itself.', 'error');
-      return;
-    }
-    if (/\.pitchcruzer$/i.test(file.name)) { void openSongFile(file); return; }
-    // Videos can be bigger: only their sound is kept (and sent), which is small.
-    const limit = isVideo(file, file.name) ? 1024 : 200;
-    if (file.size > limit * 1024 * 1024) { toast('That file is over ' + (limit === 1024 ? '1 GB' : '200 MB') + '.', 'error'); return; }
-    if (!songTitle) songTitle = searchInput.value.trim() && !/^https?:/i.test(searchInput.value.trim()) ? searchInput.value.trim() : '';
+  /** Picked or dropped files (see lib/songFile: the song is chosen and checked there). */
+  const takeFiles = (list: FileList | null | undefined) => {
+    if (!list?.length) return;
+    const file = pickSongFile(list);
+    const problem = fileProblem(file);
+    if (problem || !file) { toast(problem ?? 'Pick a song file.', 'error'); return; }
+    if (isSongFile(file)) { void openSongFile(file); return; }
+    addCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // The song's name: what's typed in the search bar now (a name left over from an earlier video or
+    // search could be another song); otherwise the file's own name, if it says anything.
+    const typed = searchInput.value.trim();
+    songTitle = typed && !/^https?:/i.test(typed) ? typed : '';
     void start({ kind: 'file', file, name: file.name });
   };
-  fileInput.addEventListener('change', () => { takeFile(songFileFrom(fileInput.files)); fileInput.value = ''; });
+  fileInput.addEventListener('change', () => { takeFiles(fileInput.files); fileInput.value = ''; });
   addCard.addEventListener('dragover', event => { event.preventDefault(); addCard.classList.add('over'); });
   addCard.addEventListener('dragleave', event => { if (!addCard.contains(event.relatedTarget as Node)) addCard.classList.remove('over'); });
   addCard.addEventListener('drop', event => {
     event.preventDefault();
     addCard.classList.remove('over');
-    takeFile(songFileFrom(event.dataTransfer?.files));
+    takeFiles(event.dataTransfer?.files);
   });
 
   // ------------------------------------------------ YouTube, right in the page: play, record, restart
@@ -486,12 +479,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   void renderLibrary();
   // Either button takes any file: a saved Pitch Cruzer song is opened, anything else is added as a song.
   const importInput = el<HTMLInputElement>(root, '#importInput');
-  importInput.addEventListener('change', () => {
-    const file = songFileFrom(importInput.files);
-    importInput.value = '';
-    if (file && !/\.pitchcruzer$/i.test(file.name)) addCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    takeFile(file);
-  });
+  importInput.addEventListener('change', () => { takeFiles(importInput.files); importInput.value = ''; });
 
   return () => {
     disposed = true;

@@ -1,6 +1,7 @@
 import { Mp3Encoder } from '@breezystack/lamejs';
 import { decodeAudio } from './audio';
 import { diag } from './diag';
+import { isVideo } from './songFile';
 
 /**
  * Compresses uncompressed audio (tab recordings, WAV/AIFF/FLAC files) to MP3 before upload:
@@ -33,11 +34,6 @@ export async function encodeMp3(channels: Float32Array[], sampleRate: number, kb
   return new Blob(parts as BlobPart[], { type: 'audio/mpeg' });
 }
 
-/** A video file (e.g. an iPhone screen recording): only its sound is needed. */
-export function isVideo(file: Blob, name: string): boolean {
-  return /^video\//.test(file.type) || /\.(mp4|m4v|mov|mkv|webm|avi|3gp)$/i.test(name);
-}
-
 /** Formats LALAL.AI takes as they are; anything else is converted to MP3 first. */
 const LALAL_FORMATS = /\.(mp3|wav|wave|flac|m4a|aac|ogg|aiff?)$/i;
 
@@ -51,7 +47,7 @@ export class UnplayableFile extends Error {}
  */
 export async function compressForUpload(file: Blob, name: string): Promise<{ file: Blob; name: string }> {
   const uncompressed = /\.(wav|wave|aiff?|flac)$/i.test(name) || /wav|aiff|flac/i.test(file.type);
-  const video = isVideo(file, name);
+  const video = isVideo({ name, type: file.type, size: file.size });
   const convert = video || !LALAL_FORMATS.test(name) || (uncompressed && file.size >= 4 * 1024 * 1024);
   let buffer: AudioBuffer;
   try {

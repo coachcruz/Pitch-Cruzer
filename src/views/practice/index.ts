@@ -7,8 +7,10 @@ import { exportSong, getSong, listTakes, saveSong, type StoredSong, type StoredT
 import { LiveMic } from '../../lib/mic';
 import { formatTime, midiToFrequency, midiToNote, octaveOf } from '../../lib/music';
 import { Player, Timeline, type Range } from '../../lib/player';
-import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, recheckNotes, recognizeLyrics, transcribeLyrics, type SongBuffers } from '../../lib/prepare';
+import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, LYRICS_DONE, lyricsServices, recheckNotes, type SongBuffers } from '../../lib/prepare';
 import { serverTranscriptionAvailable } from '../../lib/serverTranscribe';
+import { writeLyrics } from '../../lib/lyrics';
+import { songNameFromFile } from '../../lib/songFile';
 import { LiveVibrato } from '../../lib/vibrato';
 import { LYRICS_READY, session } from '../../session';
 import { el, escapeHtml, prefs, toast } from '../../ui/dom';
@@ -416,24 +418,18 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     prefs.set('lyricsQuality2', redoQuality.value);
     try {
       const keep = $<HTMLInputElement>('#redoKeep').checked ? typedLyrics() : '';
-      const progress = (step: string, fraction: number, detail?: string) => {
-        if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
+      const options = lyricsOptionsFrom(redoLang.value, redoQuality.value);
+      analysis.lyricsOptions = options;
+      const progress = (_step: string, fraction: number, detail?: string) => {
+        if (!disposed) redoStatus.textContent = Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
       };
-      const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), progress);
-      if (!heard) { redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.'; return; }
-      if (keep) {
-        // Your words stay; only their timing comes from what was just heard.
-        analysis.lines = applyTypedLyrics(analysis, keep);
-        analysis.transcript = 'edited';
-        analysis.typed = keep;
-        analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
-      } else {
-        analysis.typed = undefined;
-        await recognizeLyrics(analysis, progress, song.title);   // a known song gets its real lyrics
-      }
+      // Kept lyrics are only re-timed; otherwise they're looked up by the song's name, then heard/recognised.
+      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined },
+        lyricsServices(buffers.lead, analysis.notes, options, progress), fraction => progress('lyrics', fraction));
+      if (result.source === 'kept') { redoStatus.textContent = 'Couldn’t hear clear words — your current lyrics were kept.'; return; }
       lyricsChanged();
       void persist();
-      toast('Lyrics redone.');
+      toast(LYRICS_DONE[result.source] + (result.label ? ' (' + result.label + ')' : '') + '.');
       redoDialog.close();
     } finally {
       redoing = false;
