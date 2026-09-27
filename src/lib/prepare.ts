@@ -6,6 +6,7 @@ import { compressForUpload } from './mp3';
 import { songNameFromFile } from './songFile';
 import * as lalal from './lalal';
 import { diag } from './diag';
+import { fetchWithRetry } from './retry';
 import type { StoredSong } from './library';
 import type { PitchJobResult } from './pitch.worker';
 import { serverTranscriptionAvailable, transcribeOnServer } from './serverTranscribe';
@@ -221,11 +222,16 @@ export function lyricsServices(lead: AudioBuffer, notes: NoteEvent[], options: L
     lookup: query => findLyricsOnline(query, lead.duration),
     identify: async (heard, hint) => {
       try {
-        const response = await fetch('/api/identify', {
+        // Groq's free tier is rate-limited: a busy answer is waited out and asked again (a server error isn't: it won't pass).
+        const response = await fetchWithRetry(() => fetch('/api/identify', {
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000),
           body: JSON.stringify({ heard, hint })
-        });
-        if (!response.ok) { diag('Song recognition unavailable (HTTP ' + response.status + ')', 'warn'); return null; }
+        }), { retryServerErrors: false });
+        if (!response.ok) {
+          const failed = (await response.json().catch(() => ({}))) as { error?: string; detail?: string; tried?: string[] };
+          diag('Song recognition unavailable (HTTP ' + response.status + ')' + (failed.error ? ': ' + failed.error : '') + (failed.tried?.length ? ' — tried ' + failed.tried.join(', ') : '') + (failed.detail ? ' — ' + failed.detail : ''), 'warn');
+          return null;
+        }
         const named = (await response.json()) as { title: string | null; artist: string | null };
         return named.title ? { title: named.title, artist: named.artist } : null;
       } catch {

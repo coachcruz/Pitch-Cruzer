@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { env, json } from '../lib/http.mts';
+import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
 
 /**
  * Server-side lyrics transcription with Whisper Large v3 Turbo (via Groq) — far more accurate on sung
@@ -40,8 +41,9 @@ export default async (req: Request) => {
   const lang = params.get('lang');
   if (lang && /^[a-z]{2}$/.test(lang)) form.append('language', lang);
 
-  const response = await fetch(GROQ_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form }).catch(() => null);
+  const response = await groqFetch(() => fetch(GROQ_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form }), 4000);
   if (!response) return json({ error: 'The transcription service could not be reached.' }, 502);
+  if (isRateLimited(response.status)) return rateLimited(response);
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     return json({ error: 'Transcription service error ' + response.status, detail: detail.slice(0, 300) }, 502);
