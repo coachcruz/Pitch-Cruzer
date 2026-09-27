@@ -26,13 +26,6 @@ interface Review {
   singer?: string;
 }
 
-const SHORT_NAMES: Record<SectionKind, string> = { intro: 'In', verse: 'V', pre: 'Pre', chorus: 'C', bridge: 'Br', instrumental: 'Inst', outro: 'Out', part: 'P' };
-/** "Verse 2" → "V2": fits the section bar on a phone. Custom names keep their first letters. */
-function shortLabel(section: Section): string {
-  const number = section.label.match(/\d+$/)?.[0] ?? '';
-  return section.label.startsWith(SECTION_NAMES[section.kind]) ? SHORT_NAMES[section.kind] + number : section.label.slice(0, 3);
-}
-
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
 
 export function renderPractice(root: HTMLElement, songId: string): () => void {
@@ -112,6 +105,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
           <button id="downloadSong" class="menuItem" role="menuitem">Download song file</button>
           <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
           <button id="renameSong" class="menuItem" role="menuitem">Rename song</button>
+          <button id="choosePart" class="menuItem" role="menuitem">Practice a part…</button>
           <button id="pickLines" class="menuItem" role="menuitem">Pick lines to practice</button>
           <button id="renameSections" class="menuItem" role="menuitem">Rename sections</button>
           <button id="fixLyrics" class="menuItem" role="menuitem">Fix lyrics</button>
@@ -130,24 +124,28 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
           <button id="stop" class="tbtn" disabled>■ <span>Stop</span></button>
           <button id="record" class="tbtn record">● <span>Record</span></button>
           <button id="mic" class="tbtn" aria-pressed="false">🎤 <span>Mic</span></button>
-          <button id="mixToggle" class="tbtn" aria-expanded="false">🎚 <span>Mix</span></button>
+          <button id="mixToggle" class="tbtn" aria-expanded="false" title="Volume, repeat, Echo practice and display options">⚙ <span>Settings</span></button>
         </div>
         <div class="viewSwitch" role="radiogroup" aria-label="View">
           <button data-view="staff" role="radio" aria-checked="true" title="Notes on a staff with the words above them">🎼 Staff</button>
           <button data-view="karaoke" role="radio" aria-checked="false" title="Just the words, big, lighting up as they're sung">🎤 Karaoke</button>
         </div>
-        <select id="repeats" class="miniSelect" title="Repeat" aria-label="Repeat"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select>
-        <select id="practiceStyle" class="miniSelect" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet" aria-label="Practice style"><option value="along">Sing along</option><option value="echo">Echo</option></select>
-        <span id="echoModelWrap" class="hidden"><select id="echoModel" class="miniSelect" title="Who sings the line first in Echo" aria-label="Echo guide"><option value="artist">Artist first</option><option value="me">My best take first</option></select></span>
+        <button id="partChip" class="partChip hidden" title="Back to the whole song"></button>
         <span id="clock" class="mono clock">0:00 / 0:00</span>
       </div>
 
-      <div class="sectionBar" role="group" aria-label="Sections — tap one or more to practice them">
-        <button id="wholeSong" class="secAll" aria-pressed="true">Whole song</button>
-        <div id="sectionBar" class="secTrack"><span id="songPlayhead" class="playhead"></span></div>
+      <div id="timeline" class="timeline" title="Click to jump there">
+        <div id="timelineRange" class="tlRange"></div>
+        <div id="timelineMarks" class="tlMarks" aria-hidden="true"></div>
+        <span id="songPlayhead" class="playhead"></span>
       </div>
 
       <div id="mixPanel" class="mixPanel hidden">
+        <div class="practiceRow">
+          <label class="inline">Repeat <select id="repeats" class="miniSelect"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
+          <label class="inline" title="Echo: the artist sings a line, then it's your turn to sing it back in the quiet">Practice <select id="practiceStyle" class="miniSelect"><option value="along">Sing along</option><option value="echo">Echo (listen, then sing back)</option></select></label>
+          <label id="echoModelWrap" class="inline hidden">Echo guide <select id="echoModel" class="miniSelect"><option value="artist">The artist</option><option value="me">My best take</option></select></label>
+        </div>
         <div class="mixRow">
           <label for="mixLead">Singer</label>
           <input id="mixLead" type="range" min="0" max="100" step="1">
@@ -200,6 +198,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       <p class="hint small">Step by step: preparing this song and writing its lyrics. Copy it and send it along if something went wrong.</p>
       <ol id="detailsLog" class="diagLog"></ol>
       <div class="row end"><button id="detailsCopy" class="btn">Copy details</button><button id="detailsClose" class="btn ghost">Close</button></div>
+    </dialog>
+
+    <dialog id="partDialog" class="dialog" aria-label="Practice a part">
+      <h2>Practice a part</h2>
+      <p class="hint small">Tick one or more parts — or go back to the whole song.</p>
+      <div id="partList" class="partList"></div>
+      <div class="row end"><button id="partWhole" class="btn ghost" type="button">Whole song</button><button id="partDone" class="btn primary" type="button">Done</button></div>
     </dialog>
 
     <dialog id="sectionsDialog" class="dialog" aria-label="Rename sections">
@@ -315,36 +320,48 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     });
   };
 
-  // ---------------------------------------------------------------- sections (one bar: the whole song)
-  // Every section of the song, sized by its length and named (Intro, Verse 1, Chorus 1…). Tap sections
-  // to practice them (several are fine); "Whole song" clears the choice. The playhead shows where you are.
-  const sectionBar = el(root, '#sectionBar');
+  // ---------------------------------------------------------------- timeline + parts
+  // One thin timeline of the whole song: click to jump anywhere. Section names sit on it quietly
+  // (not buttons). Practicing a part is chosen in a small window (⋯ → Practice a part); the chosen
+  // part is lit on the timeline, and a chip beside the clock goes back to the whole song.
   const songPlayhead = el(root, '#songPlayhead');
-  const isOn = (section: Section) => selected.has(section.id) || Boolean(custom && custom.start < section.end && custom.end > section.start);
+  const partDialog = el<HTMLDialogElement>(root, '#partDialog');
+  const pct = (time: number) => ((100 * time) / analysis.duration).toFixed(3) + '%';
   const renderSections = () => {
     const whole = !selected.size && !custom;
-    sectionBar.querySelectorAll('[data-section]').forEach(node => node.remove());
-    sectionBar.insertAdjacentHTML('afterbegin', analysis.sections.map(section => {
-      const on = isOn(section);
-      return `<button data-section="${section.id}" class="kind-${section.kind}${on ? ' on' : ''}${whole ? ' all' : ''}" aria-pressed="${on}"
-        style="flex-grow:${(section.end - section.start).toFixed(2)}" title="${escapeHtml(section.label)} · ${formatTime(section.start)}–${formatTime(section.end)}"><span class="long">${escapeHtml(section.label)}</span><span class="short">${escapeHtml(shortLabel(section))}</span></button>`;
-    }).join(''));
-    const wholeButton = el(root, '#wholeSong');
-    wholeButton.setAttribute('aria-pressed', String(whole));
-    wholeButton.textContent = custom ? custom.label + ' ✕' : 'Whole song';
-    sectionBar.querySelectorAll<HTMLButtonElement>('[data-section]').forEach(button => button.addEventListener('click', () => {
-      if (recording) return;
-      const id = button.dataset.section!;
+    el(root, '#timelineMarks').innerHTML = analysis.sections.map(section =>
+      `<span style="left:${pct(section.start)};width:${pct(section.end - section.start)}">${escapeHtml(section.label)}</span>`).join('');
+    const ranges = whole ? [] : selectedRanges();
+    el(root, '#timelineRange').innerHTML = ranges.map(range => `<i style="left:${pct(range.start)};width:${pct(range.end - range.start)}"></i>`).join('');
+    const chip = el(root, '#partChip');
+    chip.classList.toggle('hidden', whole);
+    chip.textContent = labelForSelection() + ' ✕';
+    el(root, '#partList').innerHTML = analysis.sections.map(section => `<label class="check"><input type="checkbox" data-part="${section.id}" ${selected.has(section.id) ? 'checked' : ''}>
+      <span><b>${escapeHtml(section.label)}</b> <small class="hint">${formatTime(section.start)}–${formatTime(section.end)}</small></span></label>`).join('');
+    el(root, '#partList').querySelectorAll<HTMLInputElement>('[data-part]').forEach(box => box.addEventListener('change', () => {
       custom = null;
-      if (selected.has(id)) selected.delete(id); else selected.add(id);
+      if (box.checked) selected.add(box.dataset.part!); else selected.delete(box.dataset.part!);
       selectionChanged();
     }));
   };
-  el(root, '#wholeSong').addEventListener('click', () => {
+  const wholeSong = () => { custom = null; selected.clear(); selectionChanged(); };
+  el(root, '#partChip').addEventListener('click', () => { if (!recording) wholeSong(); });
+  el(root, '#choosePart').addEventListener('click', () => { renderSections(); partDialog.showModal(); });
+  el(root, '#partWhole').addEventListener('click', () => { wholeSong(); partDialog.close(); });
+  el(root, '#partDone').addEventListener('click', () => partDialog.close());
+  const timeline = el(root, '#timeline');
+  timeline.addEventListener('click', event => {
     if (recording) return;
-    custom = null;
-    selected.clear();
-    selectionChanged();
+    const rect = timeline.getBoundingClientRect();
+    const time = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * analysis.duration;
+    if (reviewPlaying && review) {
+      const from = review.timeline.timelineFor(time);
+      if (from !== null) void startPlayback(false, from, { buffer: review.voice, offset: review.offset });
+      return;
+    }
+    // Jumping outside the chosen part goes back to the whole song.
+    if (!inSelection(time)) wholeSong();
+    void startPlayback(false, new Timeline(playbackRanges(), repeats()).timelineFor(time) ?? 0);
   });
 
   const sectionsDialog = el<HTMLDialogElement>(root, '#sectionsDialog');
@@ -455,12 +472,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     void persist();
   }
 
-  // Start on the first chorus (or first sung section) — the part most people want to try first.
-  const defaultSelection = () => {
-    const pick = analysis.sections.find(s => s.kind === 'chorus') ?? analysis.sections.find(s => !['intro', 'outro', 'instrumental'].includes(s.kind));
-    return new Set(pick ? [pick.id] : []);
-  };
-  selected = defaultSelection();
+  // Start on the whole song.
 
   // ---------------------------------------------------------------- lyrics sheet
   const sectionFor = (time: number): Section | undefined => analysis.sections.find(s => time >= s.start && time < s.end);
@@ -472,7 +484,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     let lastSection: string | null = null;
     list.innerHTML = analysis.lines.map(line => {
       const section = sectionFor(line.start);
-      const header = section && section.id !== lastSection ? `<div class="lyricsSection kind-${section.kind}">${escapeHtml(section.label)}</div>` : '';
+      const header = section && section.id !== lastSection ? `<div class="lyricsSection">${escapeHtml(section.label)}</div>` : '';
       lastSection = section?.id ?? lastSection;
       const outside = !inSelection(line.start + 0.01);
       const anchor = pickAnchor?.id === line.id ? ' anchor' : '';
@@ -498,12 +510,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
         return;
       }
       if (recording) return;
-      if (!inSelection(line.start)) {
-        custom = null;
-        const section = sectionFor(line.start);
-        selected = new Set(section ? [section.id] : []);
-        selectionChanged();
-      }
+      if (!inSelection(line.start)) wholeSong();
       const from = new Timeline(playbackRanges(), repeats()).timelineFor(Math.max(0, line.start - 0.6)) ?? 0;
       void startPlayback(false, from);
     }));
@@ -526,7 +533,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     // keep going (only drop picks that no longer exist) so the music isn't interrupted.
     if (player.state === 'stopped') {
       custom = null;
-      selected = defaultSelection();
+      selected = new Set();
       idleTime = selectedRanges()[0].start;
       liveTrail = [];
     } else {

@@ -268,28 +268,18 @@ input[type='range'] { accent-color: var(--accent); }
 .menuItem { text-align: left; padding: 9px 10px; border-radius: 8px; border: 0; background: transparent; color: var(--text); font-size: 0.9rem; cursor: pointer; }
 .menuItem:hover { background: var(--surface-2); }
 
-/* section bar: every section, sized by length, named; tap to practice; the playhead shows where you are */
-.sectionBar { display: flex; gap: 6px; align-items: stretch; }
-.secAll { flex: none; height: 26px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); font-size: 0.78rem; font-weight: 700; cursor: pointer; white-space: nowrap; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
-.secAll[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.secTrack { position: relative; flex: 1; min-width: 0; display: flex; gap: 2px; }
-.secTrack button {
-  flex-basis: 0; min-width: 0; height: 26px; padding: 0 6px; border: 0; border-radius: 6px; cursor: pointer;
-  background: var(--surface-2); color: var(--muted); font-size: 0.72rem; font-weight: 700; text-align: left;
-  box-shadow: inset 0 -2px 0 var(--kind);
+/* timeline: the whole song, click to jump; section names sit on it quietly; a chosen part is lit */
+.timeline { position: relative; height: 22px; border-radius: 6px; background: var(--surface-2); cursor: pointer; overflow: hidden; }
+.tlRange i { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.tlMarks span {
+  position: absolute; top: 0; bottom: 0; padding: 0 6px; border-left: 1px solid var(--border); pointer-events: none;
+  font-size: 0.68rem; font-weight: 650; line-height: 22px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.secTrack button span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.secTrack button .short { display: none; }
-.secTrack button:hover { color: var(--text); }
-.secTrack button.all { background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); color: var(--text); }
-.secTrack button.on { background: color-mix(in srgb, var(--accent) 30%, var(--surface-2)); color: var(--text); box-shadow: inset 0 0 0 1.5px var(--accent); }
-.secTrack .playhead { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: var(--text); border-radius: 2px; pointer-events: none; }
-/* Muted section tints: a thin underline only, never a full rainbow. */
-.kind-intro, .kind-outro, .kind-instrumental, .kind-part { --kind: color-mix(in srgb, var(--muted) 60%, transparent); }
-.kind-verse { --kind: #6f8fbf; }
-.kind-pre { --kind: #8a80b8; }
-.kind-chorus { --kind: #b77a9c; }
-.kind-bridge { --kind: #b89a5e; }
+.tlMarks span:first-child { border-left: 0; }
+.timeline .playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.partChip { height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-size: 0.78rem; font-weight: 700; cursor: pointer; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.practiceRow { display: flex; gap: 14px; flex-wrap: wrap; padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+.partList { display: grid; gap: 8px; margin: 10px 0 14px; max-height: 55vh; overflow-y: auto; }
 
 /* mix panel floats over the stage instead of pushing it down */
 .mixPanel {
@@ -404,9 +394,6 @@ input[type='range'] { accent-color: var(--accent); }
   .tbtn span { display: none; }
   .tbtn { padding: 0 9px; }
   .viewSwitch button { padding: 0 8px; }
-  .secTrack button { padding: 0 3px; text-align: center; }
-  .secTrack button .long { display: none; }
-  .secTrack button .short { display: block; text-overflow: clip; }
   .stageRow.withUpNext { grid-template-columns: 1fr; }
   .stageRow.withUpNext .upNext { display: none; }
   .coach { grid-template-columns: auto auto 1fr; gap: 10px; }
