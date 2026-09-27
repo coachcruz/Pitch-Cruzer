@@ -175,8 +175,15 @@ export class Player {
     }, Math.max(50, remaining * 1000 + 60));
   }
 
+  /**
+   * Where in the timeline the sound you're hearing right now is. The audio clock runs ahead of the
+   * speakers by the output delay (tiny on wired headphones, ~0.2 s on Bluetooth), so the lyrics, the
+   * notes and the count-in follow what you hear, not what was just handed to the sound card.
+   */
   timelineTime(): number {
-    return this.state === 'stopped' ? 0 : this.ctx.currentTime - this.originAt;
+    if (this.state === 'stopped') return 0;
+    const delay = (this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0);
+    return this.ctx.currentTime - delay - this.originAt;
   }
 
   /** Where in the original song the timeline position `t` is (null during lead-in/after the end). */
