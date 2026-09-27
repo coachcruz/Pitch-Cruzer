@@ -261,8 +261,21 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     }
   };
   const fileInput = el<HTMLInputElement>(root, '#fileInput');
+  /**
+   * The song among dropped/picked files. Dragging a video (from Photos, a screen-recording preview…)
+   * often brings a small preview picture along — never take the picture: take the sound/video, the biggest one.
+   */
+  const songFileFrom = (list: FileList | null | undefined): File | undefined => {
+    const files = [...(list ?? [])];
+    const media = files.filter(file => /^(audio|video)\//.test(file.type) || /\.(mp3|wav|m4a|aac|flac|ogg|opus|aiff?|mp4|m4v|mov|mkv|webm|avi|pitchcruzer)$/i.test(file.name));
+    return (media.length ? media : files).sort((a, b) => b.size - a.size)[0];
+  };
   const takeFile = (file: File | undefined) => {
     if (!file) return;
+    if (/^image\//.test(file.type) || /\.(jpe?g|png|heic|heif|gif|webp|tiff?)$/i.test(file.name)) {
+      toast('That’s a picture, not the song. Pick the video or audio file itself.', 'error');
+      return;
+    }
     if (/\.pitchcruzer$/i.test(file.name)) { void openSongFile(file); return; }
     // Videos can be bigger: only their sound is kept (and sent), which is small.
     const limit = isVideo(file, file.name) ? 1024 : 200;
@@ -270,13 +283,13 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     if (!songTitle) songTitle = searchInput.value.trim() && !/^https?:/i.test(searchInput.value.trim()) ? searchInput.value.trim() : '';
     void start({ kind: 'file', file, name: file.name });
   };
-  fileInput.addEventListener('change', () => { takeFile(fileInput.files?.[0]); fileInput.value = ''; });
+  fileInput.addEventListener('change', () => { takeFile(songFileFrom(fileInput.files)); fileInput.value = ''; });
   addCard.addEventListener('dragover', event => { event.preventDefault(); addCard.classList.add('over'); });
   addCard.addEventListener('dragleave', event => { if (!addCard.contains(event.relatedTarget as Node)) addCard.classList.remove('over'); });
   addCard.addEventListener('drop', event => {
     event.preventDefault();
     addCard.classList.remove('over');
-    takeFile(event.dataTransfer?.files?.[0]);
+    takeFile(songFileFrom(event.dataTransfer?.files));
   });
 
   // ------------------------------------------------ YouTube, right in the page: play, record, restart
@@ -474,7 +487,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   // Either button takes any file: a saved Pitch Cruzer song is opened, anything else is added as a song.
   const importInput = el<HTMLInputElement>(root, '#importInput');
   importInput.addEventListener('change', () => {
-    const file = importInput.files?.[0];
+    const file = songFileFrom(importInput.files);
     importInput.value = '';
     if (file && !/\.pitchcruzer$/i.test(file.name)) addCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     takeFile(file);
