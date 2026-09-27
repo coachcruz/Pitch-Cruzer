@@ -9,6 +9,10 @@ import { escapeHtml } from '../../ui/dom';
  * stage — the Staff or the Karaoke lyrics — filling the rest of the screen. The playback controls
  * float over the stage as a small pill that can be dragged anywhere; settings open from it.
  */
+// Back buttons as small inline icons (emoji arrows look different on every phone).
+const BACK_TO_START = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M2 2h2v12H2zM15 2v12L9 8zM9 2v12L3 8z"/></svg>';
+const BACK_ONE = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2v12L4 8z"/></svg>';
+
 export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
   const analysis = song.analysis;
   const range = analysis.range;
@@ -63,6 +67,8 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
 
       <div id="controls" class="controls" role="toolbar" aria-label="Playback">
         <span id="grip" class="grip" tabindex="0" role="button" title="Drag to move the controls (or use the arrow keys)" aria-label="Move the controls">⠿</span>
+        <button id="toStart" class="cbtn" title="Back to the beginning of the song" aria-label="Back to the beginning of the song">${BACK_TO_START}</button>
+        <button id="toSection" class="cbtn" title="Back to the start of this section (twice: the section before)" aria-label="Back to the start of this section">${BACK_ONE}</button>
         <button id="play" class="cbtn primary" title="Play / pause (Space)" aria-label="Play">▶</button>
         <button id="stop" class="cbtn" title="Stop" aria-label="Stop" disabled>■</button>
         <button id="record" class="cbtn record" title="Record yourself" aria-label="Record">●</button>

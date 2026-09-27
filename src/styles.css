@@ -330,6 +330,11 @@ input[type='range'] { accent-color: var(--accent); }
 
 /* karaoke view: big lyrics that roll upward on their own (tilted back like a movie opening crawl) */
 .karaoke { display: flex; flex-direction: column; container-type: size; }
+/* Silent count-in: one dot per beat above the coming line, lighting up on the beats before it. */
+.cueDots { grid-column: 1 / -1; display: flex; justify-content: center; gap: 12px; height: 16px; opacity: 0; transition: opacity 0.25s; }
+.cueDots.show { opacity: 1; }
+.cueDots i { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--muted); transition: background 0.08s, border-color 0.08s, transform 0.08s; }
+.cueDots i.on { background: var(--accent-2); border-color: var(--accent-2); transform: scale(1.15); }
 .lyricLine .who { align-self: center; height: 24px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 0.72rem; font-weight: 700; cursor: pointer; }
 .lyricLine.partner .lineText { color: var(--muted); font-style: italic; }
 .lyricLine.partner .who { color: var(--accent-2); border-color: var(--accent-2); }
@@ -398,7 +403,11 @@ input[type='range'] { accent-color: var(--accent); }
   .stage.withUpNext { grid-template-columns: 1fr; }
   .stage.withUpNext .upNext { display: none; }
   .controls .clock { display: none; }
-  .viewSwitch button { padding: 0 7px; }
+  .controls { gap: 2px; padding: 3px 5px; max-width: calc(100vw - 16px); flex-wrap: wrap; justify-content: center; border-radius: 20px; }
+  .cbtn { width: 28px; height: 28px; font-size: 0.85rem; }
+  .grip { padding: 0 2px; }
+  .viewSwitch { margin-left: 2px; }
+  .viewSwitch button { padding: 0 6px; font-size: 0.7rem; }
   .mixRow { grid-template-columns: 1fr 44px; }
   .mixRow input { grid-column: 1 / -1; grid-row: 2; }
   .mixRow .presets { grid-column: 1 / -1; }

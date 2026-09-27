@@ -1,4 +1,5 @@
 import { estimateKey, median, type MusicalKey } from './music';
+import type { Beat } from './beat';
 import type { TimedWord } from './transcribe.worker';
 
 export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSeconds: number }
@@ -35,6 +36,8 @@ export interface SongAnalysis {
   lyricsPending?: boolean;
   separated: boolean;
   lyricsOptions?: LyricsOptions;
+  /** Tempo, beat grid and meter (for the silent count-in dots); null = no clear beat. Found once, then saved. */
+  beat?: Beat | null;
   /** Duet: which voice you sing (the lower or the higher), plus lines you reassigned by hand. */
   duet?: { mine: 'low' | 'high'; overrides: Record<string, 'me' | 'partner'> };
   /** What speech recognition actually heard, with timing — typed/fixed lyrics borrow their timing from it. */
