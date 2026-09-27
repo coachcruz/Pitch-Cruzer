@@ -447,7 +447,12 @@ export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<[num
   // Walk back: which phrases each line got.
   const assigned: Array<{ lines: number[]; phrases: [number, number] }> = [];
   let i = L, j = P;
-  if (!Number.isFinite(cost[L][P])) return lines.flat().map(() => [0, 0.3]);
+  if (!Number.isFinite(cost[L][P])) {
+    // Far more lines than sung phrases: share the sung stretch out evenly, word by word.
+    const words = lines.flat().length;
+    const from = notes[0]?.start ?? 0, span = Math.max(0.1, (notes[notes.length - 1]?.end ?? 0.3) - from);
+    return lines.flat().map((_, k) => [from + (span * k) / words, from + (span * (k + 0.9)) / words]);
+  }
   while (i > 0 || j > 0) {
     const back = step[i][j]!;
     if (back.kind === 'line') assigned.unshift({ lines: [back.i], phrases: [back.j, j] });
@@ -589,51 +594,94 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
   return groupLines(words, lineBreaks);
 }
 
-/** [start, end] for each sung typed word (see applyTypedLyrics). */
-function timeTypedWords(analysis: SongAnalysis, typed: string[], hardBreaks: Set<number>): Array<[number, number]> {
-  // Timing comes only from what was really heard (never from earlier typed lyrics, which may be
-  // placed wrong); songs saved before `heard` existed use their automatic transcript if they have one.
-  const old: Array<{ text: string; start: number; end: number }> = analysis.heard
+/** Levenshtein distance, stopping early once it's over `limit`. */
+function editDistance(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let previous = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i += 1) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j += 1) row[j] = Math.min(previous[j] + 1, row[j - 1] + 1, previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (Math.min(...row) > limit) return limit + 1;
+    previous = row;
+  }
+  return previous[b.length];
+}
+
+/** How surely a typed word is the heard word: 2 = the same, 1 = misheard by a letter ("rock"/"rook"), 0 = different. */
+function wordMatch(typed: string, heard: string): number {
+  const a = normalizeWord(typed), b = normalizeWord(heard);
+  if (!a || !b) return 0;
+  if (a === b) return 2;
+  return a.length >= 4 && b.length >= 4 && editDistance(a, b, 1) <= 1 ? 1 : 0;
+}
+
+/**
+ * Pairs typed words with the heard words that really are them (in order; a weighted longest common
+ * subsequence). Only real matches pair up — never "whatever was heard at that point" — so words the
+ * listening invented (in an intro, a solo) or missed can't pull the typed words to the wrong time.
+ * A short word ("I", "the") only counts next to another match, since they're heard everywhere.
+ */
+export function matchHeardWords(typed: string[], heard: Array<{ text: string }>): Array<[number, number]> {
+  const n = typed.length, m = heard.length;
+  const score: Float32Array[] = Array.from({ length: n + 1 }, () => new Float32Array(m + 1));
+  for (let i = 1; i <= n; i += 1) {
+    for (let j = 1; j <= m; j += 1) {
+      const match = wordMatch(typed[i - 1], heard[j - 1].text);
+      score[i][j] = Math.max(score[i - 1][j], score[i][j - 1], match ? score[i - 1][j - 1] + match : -1);
+    }
+  }
+  const pairs: Array<[number, number]> = [];
+  for (let i = n, j = m; i > 0 && j > 0;) {
+    const match = wordMatch(typed[i - 1], heard[j - 1].text);
+    if (match && score[i][j] === score[i - 1][j - 1] + match) { pairs.unshift([i - 1, j - 1]); i -= 1; j -= 1; }
+    else if (score[i][j] === score[i - 1][j]) i -= 1;
+    else j -= 1;
+  }
+  const paired = new Set(pairs.map(([i]) => i));
+  return pairs.filter(([i, j]) => normalizeWord(typed[i]).length > 3
+    || (paired.has(i - 1) && pairs.some(([a, b]) => a === i - 1 && b === j - 1))
+    || (paired.has(i + 1) && pairs.some(([a, b]) => a === i + 1 && b === j + 1)));
+}
+
+/**
+ * [start, end] for each sung typed word (see applyTypedLyrics). Words the singer was heard singing
+ * take that timing. Everything else is laid on the singer's notes between those words (by syllables
+ * and breaths — see alignToMelody), so a verse the listening missed still lands on its own notes.
+ */
+export function timeTypedWords(analysis: SongAnalysis, typed: string[], hardBreaks: Set<number>): Array<[number, number]> {
+  // Songs saved before `heard` existed use their automatic transcript if they have one.
+  const heard: Array<{ text: string; start: number; end: number }> = analysis.heard
     ?? (analysis.transcript === 'ok' ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪' && !word.aside) : []);
   const times: Array<[number, number] | null> = new Array(typed.length).fill(null);
-  if (old.length) {
-    const n = typed.length, m = old.length;
-    const cost: number[][] = Array.from({ length: n + 1 }, (_, i) => Array.from({ length: m + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
-    for (let i = 1; i <= n; i += 1) {
-      for (let j = 1; j <= m; j += 1) {
-        const same = normalizeWord(typed[i - 1]) === normalizeWord(old[j - 1].text) ? 0 : 1;
-        cost[i][j] = Math.min(cost[i - 1][j - 1] + same, cost[i - 1][j] + 1, cost[i][j - 1] + 1);
+  const pairs = matchHeardWords(typed, heard);
+  // A handful of chance matches isn't timing to trust.
+  if (pairs.length >= Math.max(3, typed.length * 0.1)) for (const [i, j] of pairs) times[i] = [heard[j].start, heard[j].end];
+
+  // Fill each run of unplaced words from the notes between its neighbours.
+  const notes = analysis.notes;
+  for (let a = 0; a < typed.length;) {
+    if (times[a]) { a += 1; continue; }
+    let b = a;
+    while (b < typed.length && !times[b]) b += 1;
+    const from = a > 0 ? times[a - 1]![1] : 0;
+    const to = b < typed.length ? times[b]![0] : analysis.duration;
+    const inside = notes.filter(note => note.start >= from - 0.05 && note.end <= to + 0.05);
+    if (inside.length) {
+      // The run's words, split where the typed lines break.
+      const lines: string[][] = [];
+      for (let k = a; k < b; k += 1) {
+        if (k === a || hardBreaks.has(k)) lines.push([]);
+        lines[lines.length - 1].push(typed[k]);
       }
+      alignToMelody(lines, inside).forEach((time, k) => { times[a + k] = time; });
+    } else {
+      // No singing there at all: share the gap out evenly.
+      const slot = Math.max(0.1, (to - from) / (b - a));
+      for (let k = a; k < b; k += 1) times[k] = [from + slot * (k - a), from + slot * (k - a + 0.9)];
     }
-    let i = n, j = m;
-    while (i > 0 && j > 0) {
-      const same = normalizeWord(typed[i - 1]) === normalizeWord(old[j - 1].text) ? 0 : 1;
-      if (cost[i][j] === cost[i - 1][j - 1] + same) {
-        times[i - 1] = [old[j - 1].start, old[j - 1].end];
-        i -= 1; j -= 1;
-      } else if (cost[i][j] === cost[i - 1][j] + 1) i -= 1;
-      else j -= 1;
-    }
-  } else if (analysis.notes.length) {
-    // No transcript to borrow timing from: match the lyrics to the melody itself.
-    const lineStarts = [...hardBreaks].sort((x, y) => x - y);
-    const lines = lineStarts.map((from, i) => typed.slice(from, i + 1 < lineStarts.length ? lineStarts[i + 1] : typed.length));
-    alignToMelody(lines, analysis.notes).forEach((time, index) => { times[index] = time; });
+    a = b;
   }
-
-  // Interpolate words that did not match anything.
-  const filled: Array<[number, number]> = [];
-  for (let index = 0; index < typed.length; index += 1) {
-    if (times[index]) { filled.push(times[index]!); continue; }
-    let next = index + 1;
-    while (next < typed.length && !times[next]) next += 1;
-    const prevEnd = index > 0 ? filled[index - 1][1] : 0;
-    const nextStart = next < typed.length ? times[next]![0] : Math.min(analysis.duration, prevEnd + 0.4 * (next - index));
-    const slot = Math.max(0.1, (nextStart - prevEnd) / (next - index));
-    filled.push([prevEnd, prevEnd + slot * 0.9]);
-  }
-
-  return filled;
+  return times.map(time => time!);
 }
 
 /** One line of timed lyrics (from LRCLIB's "[mm:ss.xx] text" format). */

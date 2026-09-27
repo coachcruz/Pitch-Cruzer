@@ -1,7 +1,9 @@
-import { alignSyncedLyrics, applyTypedLyrics, buildLines, parseSyncedLyrics, type SyncedLine, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { buildLines, parseSyncedLyrics, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { writeLyrics, type FoundLyrics, type LyricsResult, type LyricsServices } from './lyrics';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
 import { compressForUpload } from './mp3';
+import { songNameFromFile } from './songFile';
 import * as lalal from './lalal';
 import { diag } from './diag';
 import type { StoredSong } from './library';
@@ -18,7 +20,7 @@ export type SongInput =
 export interface LyricsSource { pasted?: string; lookup?: string }
 
 /** Finds the real lyrics in LRCLIB (via /api/lyrics), preferring the result whose length matches. */
-export async function findLyricsOnline(query: string, duration?: number): Promise<{ text: string; synced: SyncedLine[] | null; label: string } | null> {
+export async function findLyricsOnline(query: string, duration?: number): Promise<FoundLyrics | null> {
   try {
     const response = await fetch('/api/lyrics?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
     if (!response.ok) { diag('Lyrics lookup → HTTP ' + response.status, 'warn'); return null; }
@@ -46,7 +48,8 @@ export const STEPS: Array<{ id: StepId; label: string; background?: boolean }> =
 
 export type Progress = (step: StepId, fraction: number, detail?: string) => void;
 
-export interface PreparedSong { song: StoredSong; buffers: SongBuffers; lyricsJob: () => Promise<void> }
+/** `named`: the song had no real name (a screen recording…) — it can take the name its lyrics were found under. */
+export interface PreparedSong { song: StoredSong; buffers: SongBuffers; lyricsJob: () => Promise<LyricsResult>; named: boolean }
 export interface SongBuffers { lead: AudioBuffer; backing: AudioBuffer | null; instrumental: AudioBuffer | null }
 
 const PITCH_RATE = 11025;
@@ -211,105 +214,34 @@ function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: L
   }));
 }
 
-/**
- * (Re)writes the lyrics of a song and rebuilds its lines and sections.
- * Returns false (and leaves existing lyrics untouched) if a redo could not hear anything.
- */
-/**
- * Heard words in time order, once each: listening windows overlap a little, so a word at the edge of
- * two windows can come back twice.
- */
-function inOrder(words: TimedWord[]): TimedWord[] {
-  const sorted = [...words].sort((a, b) => a.start - b.start);
-  const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
-  return sorted.filter((word, i) => {
-    const before = sorted[i - 1];
-    return !before || clean(before.text) !== clean(word.text) || word.start - before.start > 0.3;
-  });
-}
-
-export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress): Promise<boolean> {
-  let words: TimedWord[] = [];
-  const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
-  progress('lyrics', 0);
-  try {
-    const result = await transcribe(lead, analysis.notes, options, (fraction, detail) => progress('lyrics', fraction, detail));
-    words = inOrder(result.words);
-    analysis.transcript = words.length ? 'ok' : 'none';
-    progress('lyrics', 1, words.length ? words.length + ' words' + (result.partial ? ' (partial — use Redo lyrics or Fix lyrics for the rest)' : '') : 'No clear words heard');
-  } catch (error) {
-    console.warn('Transcription failed', error);
-    diag('Lyrics failed: ' + (error instanceof Error ? error.message : String(error)), 'error');
-    analysis.transcript = 'failed';
-    progress('lyrics', 1, 'Lyrics unavailable — you can paste them in later');
-  }
-  analysis.lyricsPending = false;
-  if (!words.length && hadLyrics) {
-    analysis.transcript = 'edited';
-    return false;
-  }
-  analysis.lyricsOptions = options;
-  progress('sections', 0.2);
-  analysis.heard = words.length ? words : undefined;
-  analysis.lines = buildLines(words, analysis.notes);
-  analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, words.length > 0);
-  progress('sections', 1, analysis.sections.length + ' sections');
-  return words.length > 0;
-}
-
-/** How much of what was heard (its distinctive words) appears in these lyrics, 0–1. */
-function heardMatch(lyrics: string, heard: TimedWord[]): number {
-  const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
-  const lyricWords = new Set(lyrics.split(/\s+/).map(clean));
-  const distinct = [...new Set(heard.map(word => clean(word.text)).filter(word => word.length >= 4))];
-  return distinct.filter(word => lyricWords.has(word)).length / Math.max(1, distinct.length);
+/** The real services behind the lyrics (see lib/lyrics): the singer, the lyrics database, song recognition. */
+export function lyricsServices(lead: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, progress: Progress): LyricsServices {
+  return {
+    hear: () => transcribe(lead, notes, options, (fraction, detail) => progress('lyrics', 0.05 + fraction * 0.85, detail)),
+    lookup: query => findLyricsOnline(query, lead.duration),
+    identify: async (heard, hint) => {
+      try {
+        const response = await fetch('/api/identify', {
+          method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000),
+          body: JSON.stringify({ heard, hint })
+        });
+        if (!response.ok) { diag('Song recognition unavailable (HTTP ' + response.status + ')', 'warn'); return null; }
+        const named = (await response.json()) as { title: string | null; artist: string | null };
+        return named.title ? { title: named.title, artist: named.artist } : null;
+      } catch {
+        diag('Song recognition unavailable', 'warn');
+        return null;
+      }
+    }
+  };
 }
 
 /**
- * No lyrics given and none found by name: recognise the song from what was heard (a language model
- * names it from the rough words), fetch its real lyrics, and put them on the singer's timing.
- * The answer is only used if the fetched lyrics really contain what was heard. Original songs that
- * aren't in the lyrics database keep what was heard. Returns true when the lyrics were replaced.
+ * Finds the notes, then returns straight away so practice can start; the lyrics are written in the
+ * background by `lyricsJob` (see lib/lyrics for how). It resolves to the song's name when the song
+ * was recognised or its lyrics were found by name.
  */
-export async function recognizeLyrics(analysis: SongAnalysis, progress: Progress, hint?: string): Promise<boolean> {
-  const heard = analysis.heard ?? [];
-  if (heard.length < 15) return false;
-  progress('lyrics', 0.95, 'Recognising the song…');
-  let named: { title: string | null; artist: string | null } | null = null;
-  try {
-    const response = await fetch('/api/identify', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000),
-      body: JSON.stringify({ heard: heard.slice(0, 300).map(word => word.text).join(' '), hint })
-    });
-    if (response.ok) named = await response.json();
-    else diag('Song recognition unavailable (HTTP ' + response.status + ')', 'warn');
-  } catch {
-    diag('Song recognition unavailable', 'warn');
-  }
-  if (!named?.title) { diag('Song not recognised — keeping the words as heard (an original song?)'); return false; }
-  const found = await findLyricsOnline(named.title + ' ' + (named.artist ?? ''), analysis.duration);
-  if (!found) return false;
-  // Trust it only if the real lyrics contain most of the distinctive words that were heard.
-  const match = heardMatch(found.text, heard);
-  if (match < 0.4) {
-    diag('Recognised as ' + found.label + ', but only ' + Math.round(match * 100) + '% of the heard words are in its lyrics — keeping what was heard', 'warn');
-    return false;
-  }
-  const aligned = found.synced ? alignSyncedLyrics(analysis, found.synced) : null;
-  analysis.lines = aligned ? aligned.lines : applyTypedLyrics(analysis, found.text);
-  analysis.transcript = 'edited';
-  analysis.typed = found.text;
-  analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, true);
-  diag('Lyrics: recognised ' + found.label + ' — using its real lyrics, timed to the singer', 'ok');
-  return true;
-}
-
-/**
- * Finds the notes (seconds), then returns straight away so practice can start; the lyrics are written
- * in the background by `lyricsJob`. Pasted or looked-up lyrics supply the exact words, and speech
- * recognition only supplies their timing.
- */
-export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<void> }> {
+export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<LyricsResult> }> {
   progress('pitch', 0);
   const track = await pitchTrackFor(lead, fraction => progress('pitch', fraction), separated);
   const notes = segmentNotes(track);
@@ -318,46 +250,28 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
   const lines = buildLines([], notes);
   const analysis: SongAnalysis = {
     duration: lead.duration, key, range, notes, lines, sections: buildSections(lines, notes, lead.duration, false),
-    transcript: 'none', separated, notesVersion: NOTES_VERSION, lyricsPending: true
+    transcript: 'none', separated, notesVersion: NOTES_VERSION, lyricsPending: true, lyricsOptions: lyrics
   };
   const lyricsJob = async () => {
-    const pasted = source.pasted?.trim() || '';
-    const found = !pasted && source.lookup ? await findLyricsOnline(source.lookup, lead.duration) : null;
-    // Best case: timed lyrics from the lyrics database, lined up with the singer — no listening needed.
-    if (found?.synced) {
-      progress('lyrics', 0.5, 'Lining up the lyrics with the singer…');
-      const aligned = alignSyncedLyrics(analysis, found.synced);
-      if (aligned) {
-        analysis.lines = aligned.lines;
-        analysis.transcript = 'edited';
-        analysis.typed = found.text;
-        analysis.lyricsPending = false;
-        analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
-        diag('Lyrics: timed lyrics from ' + found.label + ' (shifted ' + aligned.offset.toFixed(1) + 's, fit ' + Math.round(aligned.fit * 100) + '%)', 'ok');
-        progress('lyrics', 1, 'Timed lyrics found');
-        return;
-      }
-      diag('Lyrics: the timed lyrics didn’t fit this recording (another version?) — listening instead', 'warn');
-    }
-    let words = pasted || found?.text || '';
-    // Speech recognition gives timing (and the words, if we have none of our own).
-    await transcribeLyrics(lead, analysis, lyrics, progress);
-    // Lyrics found by name are checked against what was heard (a vague name can find the wrong song).
-    if (!pasted && words && analysis.heard && analysis.heard.length >= 15 && heardMatch(words, analysis.heard) < 0.4) {
-      diag('Lyrics: “' + found?.label + '” doesn’t match what’s sung — recognising the song instead', 'warn');
-      words = '';
-    }
-    if (!words) await recognizeLyrics(analysis, progress, source.lookup);
-    if (words) {
-      analysis.lines = applyTypedLyrics(analysis, words);
-      analysis.transcript = 'edited';
-      analysis.typed = words;
-      analysis.sections = buildSections(analysis.lines, notes, lead.duration, true);
-      diag('Lyrics: using ' + (source.pasted?.trim() ? 'your pasted lyrics' : 'lyrics found online') + ', timed to the singer', 'ok');
-    }
+    progress('lyrics', 0);
+    const result = await writeLyrics(analysis, { own: source.pasted, lookup: source.lookup }, lyricsServices(lead, notes, lyrics, progress),
+      (fraction, detail) => progress('lyrics', fraction, detail));
+    progress('lyrics', 1, LYRICS_DONE[result.source]);
+    progress('sections', 1, analysis.sections.length + ' sections');
+    return result;
   };
   return { analysis, lyricsJob };
 }
+
+/** What the lyrics step says when it's done. */
+export const LYRICS_DONE: Record<LyricsResult['source'], string> = {
+  own: 'Your lyrics, timed to the singer',
+  found: 'Real lyrics found, timed to the singer',
+  recognized: 'Song recognised — real lyrics, timed to the singer',
+  heard: 'Written from what the singer sings',
+  kept: 'Nothing new heard — lyrics kept',
+  none: 'No lyrics — paste them with ⋯ → Fix lyrics'
+};
 
 /**
  * Re-detects the notes of an already prepared song (after note detection improves), keeping its
@@ -379,7 +293,7 @@ export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): P
 
 export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal, lyricsSource: LyricsSource = {}): Promise<PreparedSong> {
   let source = lyricsSource;
-  let title = input.kind === 'link' ? titleFromLink(input.url) : input.name.replace(/\.[a-z0-9]{2,5}$/i, '');
+  let title = input.kind === 'link' ? titleFromLink(input.url) : songNameFromFile(input.name);
   let stems: StoredSong['stems'];
 
   if (useSeparation) {
@@ -443,7 +357,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     analysis,
     stems
   };
-  return { song, buffers, lyricsJob };
+  return { song, buffers, lyricsJob, named: Boolean(title) && title !== 'Suno song' };
 }
 
 /**
