@@ -1,6 +1,6 @@
-import { applyTypedLyrics, breathMarks, buildLines, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
+import { alignSyncedLyrics, applyTypedLyrics, breathMarks, buildLines, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type Section, type SectionKind, type Syllable } from '../lib/analysis';
 import { decodeAudio, downloadBlob, encodeWav } from '../lib/audio';
-import { getSong, listTakes, saveSong, saveTake, deleteTake, type StoredSong, type StoredTake } from '../lib/library';
+import { deleteTake, exportSong, getSong, listTakes, saveSong, saveTake, type StoredSong, type StoredTake } from '../lib/library';
 import { LiveMic } from '../lib/mic';
 import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { Player, Timeline, type Range } from '../lib/player';
@@ -107,7 +107,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       <div class="menuWrap">
         <button id="moreBtn" class="iconBtn" aria-label="More options" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div id="moreMenu" class="popMenu hidden" role="menu">
-          <button id="saveSong" class="menuItem ${session.saved ? 'hidden' : ''}" role="menuitem">Save to my songs</button>
+          <button id="saveSong" class="menuItem ${session.saved ? 'hidden' : ''}" role="menuitem">Try saving on this device again</button>
+          <button id="downloadSong" class="menuItem" role="menuitem">Download song file</button>
           <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
           <button id="renameSong" class="menuItem" role="menuitem">Rename song</button>
           <button id="pickLines" class="menuItem" role="menuitem">Pick lines to practice</button>
@@ -615,11 +616,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
   });
 
+  let foundOnline: Awaited<ReturnType<typeof findLyricsOnline>> = null;
   el(root, '#lyricsSearchBtn').addEventListener('click', async () => {
     const query = el<HTMLInputElement>(root, '#lyricsSearch').value.trim() || song.title;
     const found = await findLyricsOnline(query, analysis.duration);
     if (!found) { toast('No lyrics found online for “' + query + '”. Paste them instead.', 'error'); return; }
     el<HTMLTextAreaElement>(root, '#lyricsText').value = found.text;
+    foundOnline = found;
     toast('Found: ' + found.label + ' — check them, then Apply.');
   });
   el(root, '#fixLyrics').addEventListener('click', () => {
@@ -631,7 +634,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (lyricsDialog.returnValue !== 'apply') return;
     const text = el<HTMLTextAreaElement>(root, '#lyricsText').value;
     if (!text.trim()) return;
-    analysis.lines = applyTypedLyrics(analysis, text);
+    // Unedited timed lyrics from the lookup carry their own timing; otherwise match words to the singer.
+    const aligned = foundOnline?.synced && text === foundOnline.text ? alignSyncedLyrics(analysis, foundOnline.synced) : null;
+    foundOnline = null;
+    analysis.lines = aligned ? aligned.lines : applyTypedLyrics(analysis, text);
     analysis.transcript = 'edited';
     analysis.lyricsPending = false;
     // Real words make repeated choruses much easier to spot, so re-find the sections.
@@ -647,6 +653,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     song.title = name;
     el(root, '#songTitle').textContent = name;
     void persist();
+  });
+  el(root, '#downloadSong').addEventListener('click', async () => {
+    downloadBlob(await exportSong(song), safeName(song.title) + '.pitchcruzer');
   });
   el(root, '#saveSong').addEventListener('click', async () => {
     try {

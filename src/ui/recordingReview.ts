@@ -1,5 +1,5 @@
 import { formatTime } from '../lib/music';
-import { trimmedWav, type Recording } from '../lib/tabcapture';
+import { trimmedWav, type Recording } from '../lib/pageRecorder';
 import { el } from './dom';
 
 export interface ReviewActions {

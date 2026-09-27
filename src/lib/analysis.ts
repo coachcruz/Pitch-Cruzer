@@ -400,6 +400,69 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
   return groupLines(words, hardBreaks);
 }
 
+/** One line of timed lyrics (from LRCLIB's "[mm:ss.xx] text" format). */
+export interface SyncedLine { time: number; text: string }
+
+export function parseSyncedLyrics(lrc: string): SyncedLine[] {
+  const lines: SyncedLine[] = [];
+  for (const row of lrc.split(/\r?\n/)) {
+    const match = row.match(/^\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)$/);
+    if (match) lines.push({ time: Number(match[1]) * 60 + Number(match[2]), text: match[3].trim() });
+  }
+  return lines.sort((a, b) => a.time - b.time);
+}
+
+/**
+ * Times the song from lyrics that already say when each line starts — no transcription needed.
+ * The recording may start earlier or later than the original (a longer intro, a trimmed start), so
+ * the lyrics are first slid (±40 s) until their line starts land on the singer's phrase starts. Each
+ * line's words are then spread over the notes sung in that line. Returns null if the lyrics don't
+ * fit this recording (another version, a live take…), so the caller can fall back.
+ */
+export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]): { lines: LyricLine[]; offset: number; fit: number } | null {
+  const notes = analysis.notes;
+  const sung = synced.filter(line => line.text && !/^[♪\s]*$/.test(line.text));
+  if (sung.length < 3 || notes.length < 8) return null;
+  // Where the singer starts a phrase: the first note after a gap.
+  const onsets = notes.filter((note, i) => i === 0 || note.start - notes[i - 1].end >= 0.25).map(note => note.start);
+  const nearest = (time: number) => {
+    let lo = 0, hi = onsets.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (onsets[mid] < time) lo = mid + 1; else hi = mid; }
+    return Math.min(Math.abs(onsets[lo] - time), lo > 0 ? Math.abs(onsets[lo - 1] - time) : Infinity);
+  };
+  const fitAt = (offset: number) => sung.reduce((sum, line) => sum + Math.exp(-((nearest(line.time + offset) / 0.3) ** 2)), 0) / sung.length;
+  let offset = 0, fit = -1;
+  for (let candidate = -40; candidate <= 40; candidate += 0.05) {
+    const value = fitAt(candidate);
+    if (value > fit) { fit = value; offset = candidate; }
+  }
+  if (fit < 0.35) return null;
+
+  const words: Word[] = [];
+  const hardBreaks = new Set<number>();
+  sung.forEach((line, index) => {
+    const start = line.time + offset;
+    const nextStart = index + 1 < sung.length ? sung[index + 1].time + offset : Math.min(analysis.duration, start + 12);
+    const inLine = notes.filter(note => note.start >= start - 0.25 && note.start < nextStart - 0.1);
+    const texts = line.text.split(/\s+/).filter(Boolean);
+    const end = inLine.length ? inLine[inLine.length - 1].end : Math.min(nextStart, start + texts.length * 0.45);
+    hardBreaks.add(words.length);
+    texts.forEach((text, k) => {
+      let from: number, to: number;
+      if (inLine.length >= texts.length) {
+        const a = Math.floor((k * inLine.length) / texts.length);
+        const b = Math.max(a, Math.floor(((k + 1) * inLine.length) / texts.length) - 1);
+        from = inLine[a].start; to = inLine[b].end;
+      } else {
+        const span = Math.max(0.2, end - start);
+        from = start + (span * k) / texts.length; to = start + (span * (k + 1)) / texts.length;
+      }
+      words.push(buildWord(text, Math.max(0, from), Math.max(to, from + 0.08), notes));
+    });
+  });
+  return { lines: groupLines(words, hardBreaks), offset, fit };
+}
+
 // ---------------------------------------------------------------- sections
 
 interface Block { units: LyricLine[]; start: number; end: number }
