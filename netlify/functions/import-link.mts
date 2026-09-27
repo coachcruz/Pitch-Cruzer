@@ -46,13 +46,11 @@ async function sunoAudioUrls(link: URL): Promise<{ urls: string[]; id: string } 
 
 /**
  * A Suno song's title and lyrics — Suno keeps the lyrics the song was made from. Tried from Suno's
- * public clip data first, then from the song page. Section tags ([Verse], [Chorus]…) are removed.
+ * public clip data first, then from the song page. Section tags ([Verse], [Chorus]…) are kept.
  */
 async function sunoDetails(id: string): Promise<{ title: string | null; lyrics: string | null }> {
-  const clean = (text: string) => text.split(/\r?\n/)
-    .filter(line => !/^\s*\[[^\]]*\]\s*$/.test(line))
-    .map(line => line.replace(/\[[^\]]*\]/g, '').trim())
-    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  // Keep [Verse]/[Chorus] tags: the app uses them to name the song's sections.
+  const clean = (text: string) => text.split(/\r?\n/).map(line => line.trim()).join('\n').replace(/\n{3,}/g, '\n\n').trim();
   for (const url of ['https://studio-api.prod.suno.com/api/clip/' + id, 'https://suno.com/api/clip/' + id]) {
     const response = await fetch(url, { headers: BROWSER_HEADERS }).catch(() => null);
     if (!response?.ok) continue;

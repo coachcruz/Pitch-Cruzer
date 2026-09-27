@@ -12,7 +12,7 @@ function noteLabel(syllable: Syllable): string {
 
 /** A lyric line as HTML: each syllable with its note above it and its timing in data attributes. */
 export function syllablesHtml(line: LyricLine): string {
-  return line.words.map(word => '<span class="word">' + word.syllables.map((syllable, index) => {
+  return line.words.map(word => word.aside ? `<span class="word aside">${escapeHtml(word.text)}</span>` : '<span class="word">' + word.syllables.map((syllable, index) => {
     const hz = syllable.midi === null ? '' : ` title="${midiToNote(syllable.midi)} · ${midiToFrequency(Math.round(syllable.midi)).toFixed(0)} Hz"`;
     const joiner = index < word.syllables.length - 1 ? '<b class="hy">-</b>' : '';
     return `<span class="syl" data-s="${syllable.start.toFixed(3)}" data-e="${syllable.end.toFixed(3)}"${hz}><i>${escapeHtml(noteLabel(syllable))}</i><span class="t">${escapeHtml(syllable.text)}${joiner}</span></span>`;
