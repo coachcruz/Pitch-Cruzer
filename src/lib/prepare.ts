@@ -6,6 +6,7 @@ import * as lalal from './lalal';
 import { diag } from './diag';
 import type { StoredSong } from './library';
 import type { PitchJobResult } from './pitch.worker';
+import { serverTranscriptionAvailable, transcribeOnServer } from './serverTranscribe';
 import type { TimedWord } from './transcribe.worker';
 
 export type SongInput =
@@ -125,7 +126,23 @@ function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number
   return windows;
 }
 
-function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
+/**
+ * Words + timing for the lead vocal. The server model (Whisper Large v3 Turbo) is used when it's set
+ * up — it's much more accurate on singing; otherwise, or if it fails, the in-browser model runs.
+ */
+async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, title: string | undefined, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
+  if (await serverTranscriptionAvailable()) {
+    try {
+      diag('Lyrics: using the server model (Whisper Large v3 Turbo)');
+      return { words: await transcribeOnServer(buffer, notes, options, title, onProgress), partial: false };
+    } catch (error) {
+      diag('Server lyrics failed (' + (error instanceof Error ? error.message : String(error)) + ') — using the in-browser model', 'warn');
+    }
+  } else diag('Lyrics: server model not set up (GROQ_API_KEY) — using the in-browser model', 'warn');
+  return transcribeInBrowser(buffer, notes, options, onProgress);
+}
+
+function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
   return resampleMono(buffer, 16000).then(audio => new Promise((resolve, reject) => {
     const clips = vocalClips(notes, buffer.duration).map(clip => ({
       audio: audio.slice(Math.floor(clip.start * 16000), Math.ceil(clip.end * 16000)),
@@ -193,12 +210,12 @@ function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOpti
  * (Re)writes the lyrics of a song and rebuilds its lines and sections.
  * Returns false (and leaves existing lyrics untouched) if a redo could not hear anything.
  */
-export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress): Promise<boolean> {
+export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis, options: LyricsOptions, progress: Progress, title?: string): Promise<boolean> {
   let words: TimedWord[] = [];
   const hadLyrics = analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
   progress('lyrics', 0);
   try {
-    const result = await transcribe(lead, analysis.notes, options, (fraction, detail) => progress('lyrics', fraction, detail));
+    const result = await transcribe(lead, analysis.notes, options, title, (fraction, detail) => progress('lyrics', fraction, detail));
     words = result.words;
     analysis.transcript = words.length ? 'ok' : 'none';
     progress('lyrics', 1, words.length ? words.length + ' words' + (result.partial ? ' (partial — use Redo lyrics or Fix lyrics for the rest)' : '') : 'No clear words heard');
@@ -226,7 +243,7 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
  * in the background by `lyricsJob`. Pasted or looked-up lyrics supply the exact words, and speech
  * recognition only supplies their timing.
  */
-export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<void> }> {
+export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics: LyricsOptions, progress: Progress, source: LyricsSource = {}, title?: string): Promise<{ analysis: SongAnalysis; lyricsJob: () => Promise<void> }> {
   progress('pitch', 0);
   const track = await pitchTrackFor(lead, fraction => progress('pitch', fraction), separated);
   const notes = segmentNotes(track);
@@ -241,7 +258,7 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
     let words = source.pasted?.trim() || '';
     if (!words && source.lookup) words = (await findLyricsOnline(source.lookup, lead.duration))?.text ?? '';
     // Speech recognition gives timing (and the words, if we have none of our own).
-    await transcribeLyrics(lead, analysis, lyrics, progress);
+    await transcribeLyrics(lead, analysis, lyrics, progress, title);
     if (words) {
       analysis.lines = applyTypedLyrics(analysis, words);
       analysis.transcript = 'edited';
@@ -315,7 +332,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     backing: stems.backing ? await decodeAudio(await stems.backing.arrayBuffer()) : null,
     instrumental: stems.instrumental ? await decodeAudio(await stems.instrumental.arrayBuffer()) : null
   };
-  const { analysis, lyricsJob } = await analyzeLead(buffers.lead, useSeparation, lyrics, progress, source);
+  const { analysis, lyricsJob } = await analyzeLead(buffers.lead, useSeparation, lyrics, progress, source, title);
   const song: StoredSong = {
     id: crypto.randomUUID(),
     title: title || 'Untitled song',

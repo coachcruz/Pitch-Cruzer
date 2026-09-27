@@ -1,15 +1,12 @@
 import { defineConfig } from 'vite';
 
-const isolation = {
-  'Cross-Origin-Opener-Policy': 'same-origin',
-  'Cross-Origin-Embedder-Policy': 'credentialless'
-};
+// Same isolation header as netlify.toml (see there for why).
+const isolation = { 'Document-Isolation-Policy': 'isolate-and-credentialless' };
 
 export default defineConfig({
   base: './',
   // Workers are ES modules (the lyrics worker lazy-loads the Whisper model).
   worker: { format: 'es' },
-  // Same cross-origin isolation headers as netlify.toml, so local dev/preview gets multi-threading too.
   server: { headers: isolation },
   preview: { headers: isolation },
   build: {

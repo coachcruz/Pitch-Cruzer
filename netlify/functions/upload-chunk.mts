@@ -1,6 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { getStore } from '@netlify/blobs';
-import { MAX_CHUNK_BYTES, MAX_CHUNKS, UPLOAD_STORE, isValidUploadId, json } from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
+import { MAX_CHUNK_BYTES, MAX_CHUNKS, UPLOAD_STORE, isValidUploadId } from '../lib/lalal.mts';
 
 /**
  * Stores one piece of a song file. Netlify functions reject request bodies over

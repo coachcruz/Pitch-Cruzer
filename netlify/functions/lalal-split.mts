@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
-import { LALAL_BASE, json, lalalKey, missingKey, relay } from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
+import { LALAL_BASE, lalalKey, missingKey, relay } from '../lib/lalal.mts';
 
 function splitRequest(key: string, sourceId: string, encoderFormat: string): Promise<Response> {
   return fetch(LALAL_BASE + '/split/stem_separator/', {

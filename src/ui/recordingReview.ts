@@ -3,7 +3,8 @@ import { trimmedWav, type Recording } from '../lib/tabcapture';
 import { el } from './dom';
 
 export interface ReviewActions {
-  use: (wav: Blob) => void;
+  /** `title`: the song's name — used to name it and to look up its real lyrics. */
+  use: (wav: Blob, title: string) => void;
   redo: () => void;
   discard: () => void;
 }
@@ -12,7 +13,7 @@ export interface ReviewActions {
  * Check a tab recording before spending LALAL minutes on it: play it, trim the start/end
  * (pre-set to cut silence), record again, or prepare it.
  */
-export function showRecordingReview(container: HTMLElement, recording: Recording, actions: ReviewActions): () => void {
+export function showRecordingReview(container: HTMLElement, recording: Recording, actions: ReviewActions, title = ''): () => void {
   const duration = recording.samples.length / recording.sampleRate;
   let start = recording.suggestedStart;
   let end = recording.suggestedEnd;
@@ -25,6 +26,7 @@ export function showRecordingReview(container: HTMLElement, recording: Recording
   container.innerHTML = `
     <div class="capReview">
       <div class="capHead"><strong>Your recording</strong><span id="capLength" class="hint small"></span></div>
+      <label class="capName">Song name <input id="capTitle" class="textInput" placeholder="Song name and artist — used to find the real lyrics" maxlength="120"></label>
       <div class="row wrap">
         <button id="capPlay" class="btn">▶ Play</button>
         <span id="capPos" class="mono">0:00</span>
@@ -201,7 +203,14 @@ export function showRecordingReview(container: HTMLElement, recording: Recording
     ctx = null;
     container.innerHTML = '';
   };
-  el(container, '#capUse').addEventListener('click', () => { const wav = trimmedWav(recording, start, end); close(); actions.use(wav); });
+  const titleInput = el<HTMLInputElement>(container, '#capTitle');
+  titleInput.value = title;
+  el(container, '#capUse').addEventListener('click', () => {
+    const name = titleInput.value.trim();
+    const wav = trimmedWav(recording, start, end);
+    close();
+    actions.use(wav, name);
+  });
   el(container, '#capRedo').addEventListener('click', () => { close(); actions.redo(); });
   el(container, '#capDiscard').addEventListener('click', () => { close(); actions.discard(); });
 

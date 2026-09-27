@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
-import { MAX_UPLOAD_BYTES, json, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal } from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
+import { MAX_UPLOAD_BYTES, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal } from '../lib/lalal.mts';
 
 /**
  * Imports a song from a link and sends it straight to LALAL.AI (server to server, so no size limit

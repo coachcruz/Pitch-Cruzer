@@ -5,6 +5,7 @@ import { LiveMic } from '../lib/mic';
 import { foldToOctave, formatTime, keyName, midiToFrequency, midiToNote, octaveOf, octaveRelation, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { Player, Timeline, type Range } from '../lib/player';
 import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, pitchTrackFor, recheckNotes, transcribeLyrics, type SongBuffers } from '../lib/prepare';
+import { serverTranscriptionAvailable } from '../lib/serverTranscribe';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
 import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { LYRICS_READY, session } from '../session';
@@ -583,6 +584,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       : prefs.get('lyricsLang', 'auto');
     redoQuality.value = current?.quality ?? prefs.get('lyricsQuality2', 'fast');
     redoStatus.textContent = '';
+    void serverTranscriptionAvailable().then(available => redoQuality.closest('label')!.classList.toggle('hidden', available));
     redoDialog.showModal();
   });
   redoDialog.addEventListener('cancel', event => { if (redoing) event.preventDefault(); });
@@ -597,7 +599,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     try {
       const heard = await transcribeLyrics(buffers.lead, analysis, lyricsOptionsFrom(redoLang.value, redoQuality.value), (step, fraction, detail) => {
         if (!disposed) redoStatus.textContent = (step === 'lyrics' ? 'Lyrics' : 'Sections') + ' · ' + Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
-      });
+      }, song.title);
       if (!heard) {
         redoStatus.textContent = 'Couldn’t hear clear words (or the lyrics model couldn’t download). Your current lyrics were kept.';
         return;

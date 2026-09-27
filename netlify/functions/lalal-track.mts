@@ -1,5 +1,5 @@
 import type { Config } from '@netlify/functions';
-import { json } from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
 
 /** Streams a separated track from LALAL.AI's download host (only) when the browser can't fetch it directly. */
 export default async (req: Request) => {

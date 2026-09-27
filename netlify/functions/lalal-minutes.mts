@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
-import { LALAL_BASE, json, lalalKey, missingKey, relay } from '../lib/lalal.mts';
+import { json } from '../lib/http.mts';
+import { LALAL_BASE, lalalKey, missingKey, relay } from '../lib/lalal.mts';
 
 export default async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
