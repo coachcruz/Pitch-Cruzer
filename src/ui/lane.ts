@@ -29,7 +29,6 @@ export class PitchLane {
   forgiveOctave = false;
   /** Seconds of song across the lane; fitted to the lyrics by layoutWords(). */
   private windowSeconds = 6;
-  liveMidi: number | null = null;
   /** Voice-type staff (bass, baritone, tenor…) beside the octave labels. */
   showVoiceTypes = true;
   /** Simple view: no voice staff, note names only on C rows, no syllable threads. */
@@ -397,7 +396,7 @@ export class PitchLane {
       previous = { px, py, t: point.t };
     }
 
-    // ---- playhead + live voice marker
+    // ---- playhead
     const playX = x(now);
     ctx.strokeStyle = color('--text');
     ctx.globalAlpha = 0.5;
@@ -407,22 +406,7 @@ export class PitchLane {
     ctx.lineTo(playX, height);
     ctx.stroke();
     ctx.globalAlpha = 1;
-    if (this.liveMidi !== null) {
-      const rawY = y(this.liveMidi);
-      const vy = Math.min(height - 10, Math.max(laneTop + 10, rawY));
-      const off = rawY < laneTop + 10 ? ' ▲' : rawY > height - 10 ? ' ▼' : '';
-      ctx.fillStyle = color('--voice');
-      ctx.beginPath();
-      ctx.arc(playX, vy, 6, 0, Math.PI * 2);
-      ctx.fill();
-      const label = 'You ' + midiToNote(this.liveMidi) + off;
-      ctx.font = '800 12px ui-sans-serif, system-ui, sans-serif';
-      const w = ctx.measureText(label).width + 12;
-      ctx.fillStyle = color('--surface');
-      roundRect(ctx, playX + 10, vy - 10, w, 20, 6);
-      ctx.fillStyle = color('--voice');
-      ctx.fillText(label, playX + 16, vy);
-    }
+
   }
 }
 
