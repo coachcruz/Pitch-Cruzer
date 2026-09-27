@@ -8,13 +8,31 @@ import { MAX_UPLOAD_BYTES, lalalKey, missingKey, relay, safeFilename, uploadByte
  * Streaming services (YouTube, Spotify, Apple Music) are DRM-protected or prohibit downloading, so the
  * app records those from a browser tab instead.
  */
-const SUNO_ID = /suno\.(?:com|ai)\/(?:song|s|embed)\/([0-9a-f-]{36})/i;
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const SUNO_ID = new RegExp('suno\\.(?:com|ai)/(?:song|s|embed)/(' + UUID + ')', 'i');
+const SUNO_HOST = /(^|\.)suno\.(com|ai)$/i;
 
-function resolveAudioUrl(link: URL): { url: string; filename: string } | { error: string } {
-  const suno = link.href.match(SUNO_ID);
-  if (suno) return { url: 'https://cdn1.suno.ai/' + suno[1] + '.mp3', filename: 'suno-' + suno[1] + '.mp3' };
-  if (/(^|\.)suno\.(com|ai)$/i.test(link.hostname) && !/cdn\d*\.suno\.ai$/i.test(link.hostname)) {
-    return { error: 'Open the Suno song page and copy its share link (it looks like suno.com/song/…).' };
+/**
+ * Suno share links come in two forms: suno.com/song/<id>, and short ones like suno.com/s/3y5yVXOIYP2uZvOj.
+ * A short link is opened to find the song's id (it redirects to, or mentions, the full song page).
+ */
+async function sunoSongId(link: URL): Promise<string | null> {
+  const direct = link.href.match(SUNO_ID);
+  if (direct) return direct[1];
+  const response = await fetchPublic(link.href);
+  if (!response) return null;
+  const landed = response.url.match(SUNO_ID);
+  if (landed) return landed[1];
+  const page = await response.text().catch(() => '');
+  const found = page.match(new RegExp('(?:/song/|cdn\\d*\\.suno\\.ai/)(' + UUID + ')', 'i'));
+  return found ? found[1] : null;
+}
+
+async function resolveAudioUrl(link: URL): Promise<{ url: string; filename: string } | { error: string }> {
+  if (SUNO_HOST.test(link.hostname) && !/^cdn\d*\./i.test(link.hostname)) {
+    const id = await sunoSongId(link);
+    if (!id) return { error: 'Couldn’t find the song behind that Suno link. Open the song on Suno, press Share → Copy link, and paste that.' };
+    return { url: 'https://cdn1.suno.ai/' + id + '.mp3', filename: 'suno-' + id + '.mp3' };
   }
   const last = link.pathname.split('/').pop() || 'linked-song';
   return { url: link.href, filename: last };
@@ -56,7 +74,7 @@ export default async (req: Request) => {
   if (link.protocol !== 'https:' && link.protocol !== 'http:') return json({ error: 'Only web links are supported.' }, 400);
   if (isPrivateHost(link.hostname)) return json({ error: 'That link is not reachable.' }, 400);
 
-  const resolved = resolveAudioUrl(link);
+  const resolved = await resolveAudioUrl(link);
   if ('error' in resolved) return json({ error: resolved.error }, 400);
 
   const upstream = await fetchPublic(resolved.url);
