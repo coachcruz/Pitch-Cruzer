@@ -1,4 +1,4 @@
-import type { LyricLine } from './analysis';
+import type { LyricLine, NoteEvent } from './analysis';
 
 /**
  * The song's beat: tempo (seconds per beat), where the beats fall, and whether it counts in 4 or 3.
@@ -6,7 +6,10 @@ import type { LyricLine } from './analysis';
  * is autocorrelated to find the beat period (60–180 BPM, leaning toward ~120), the beat grid is slid
  * to where onsets land, and the meter is the grouping (3 or 4 beats) whose first beat stands out most.
  */
-export interface Beat { period: number; phase: number; meter: 3 | 4 }
+export interface Beat { period: number; phase: number; meter: 3 | 4; version?: number }
+
+/** Bump when the detector changes so beats saved by an older version are found again. */
+export const BEAT_VERSION = 2;
 
 const RATE = 100; // onset curve samples per second
 
@@ -51,6 +54,10 @@ export function estimateBeat(buffer: AudioBuffer): Beat | null {
     if (scores[lag] * weight > best) { best = scores[lag] * weight; bestLag = lag; }
   }
   if (!bestLag) return null;
+  // Half-tempo guard: a slow pick (under ~90 BPM) whose double tempo also lines up well is almost always
+  // counting every other beat — the dots would come twice as slow and start far too early.
+  const half = Math.round(bestLag / 2);
+  if ((60 * RATE) / bestLag < 90 && half >= minLag && (scores[half] ?? autocorr(half)) >= 0.35 * scores[bestLag]) bestLag = half;
   const sample = (t: number) => {
     const i = Math.round(t * RATE);
     return (onset[i] ?? 0) + 0.5 * ((onset[i - 1] ?? 0) + (onset[i + 1] ?? 0));
@@ -79,22 +86,27 @@ export function estimateBeat(buffer: AudioBuffer): Beat | null {
     return bestRatio;
   };
   const meter: 3 | 4 = contrast(3) > contrast(4) * 1.15 ? 3 : 4;
-  return { period, phase, meter };
+  return { period, phase, meter, version: BEAT_VERSION };
 }
 
 /** Where the silent count-in dots go: before the first line, and before any line after a long gap. */
 export interface Cue { lineId: string; dots: number[] }
 
-export function countInCues(lines: LyricLine[], beat: Beat): Cue[] {
+export function countInCues(lines: LyricLine[], beat: Beat, notes: NoteEvent[] = []): Cue[] {
   const cues: Cue[] = [];
   const sung = lines.filter(line => line.words.some(word => !word.aside && word.text !== '♪'));
   sung.forEach((line, i) => {
     const previousEnd = i > 0 ? sung[i - 1].end : 0;
-    const room = line.start - previousEnd;
-    if (room < beat.meter * beat.period + 0.4) return;
-    // Count toward the beat the line starts on (if it starts close to one), one dot per beat before it.
-    const nearest = beat.phase + Math.round((line.start - beat.phase) / beat.period) * beat.period;
-    const target = Math.abs(nearest - line.start) <= beat.period * 0.3 ? nearest : line.start;
+    // Where the voice really comes in: the first sung word, moved to the singer's first note near it
+    // (lyric timing often starts a little early; the pitch track knows when the singing starts).
+    const firstWord = line.words.find(word => !word.aside && word.text !== '♪');
+    const lyricStart = firstWord ? firstWord.start : line.start;
+    const note = notes.find(n => n.start >= lyricStart - 0.35 && n.start <= lyricStart + 1.5);
+    const entry = note ? note.start : lyricStart;
+    if (entry - previousEnd < beat.meter * beat.period + 0.4) return;
+    // Count toward the beat the voice starts on (if it's close to one), one dot per beat before it.
+    const nearest = beat.phase + Math.round((entry - beat.phase) / beat.period) * beat.period;
+    const target = Math.abs(nearest - entry) <= beat.period * 0.3 ? nearest : entry;
     const dots = Array.from({ length: beat.meter }, (_, k) => target - (beat.meter - k) * beat.period);
     if (dots[0] > previousEnd) cues.push({ lineId: line.id, dots });
   });

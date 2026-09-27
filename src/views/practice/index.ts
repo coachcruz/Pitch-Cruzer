@@ -1,7 +1,7 @@
 import { alignSyncedLyrics, applyTypedLyrics, breathMarks, buildLines, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
 import { decodeAudio, downloadBlob } from '../../lib/audio';
 import { diagEntries, onDiag } from '../../lib/diag';
-import { countInCues, estimateBeat } from '../../lib/beat';
+import { BEAT_VERSION, countInCues, estimateBeat } from '../../lib/beat';
 import { duetParts, partnerRanges, type Part } from '../../lib/duet';
 import { exportSong, getSong, listTakes, saveSong, type StoredSong, type StoredTake } from '../../lib/library';
 import { LiveMic } from '../../lib/mic';
@@ -80,9 +80,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
   const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, breathMarks(analysis.notes));
   // The song's beat (found once from the music, then saved) drives the silent count-in dots.
-  const beatIsNew = analysis.beat === undefined;
+  const beatIsNew = analysis.beat === undefined || (analysis.beat !== null && analysis.beat.version !== BEAT_VERSION);
   if (beatIsNew) analysis.beat = estimateBeat(buffers.instrumental ?? buffers.lead);
-  let cues = analysis.beat ? countInCues(analysis.lines, analysis.beat) : [];
+  let cues = analysis.beat ? countInCues(analysis.lines, analysis.beat, analysis.notes) : [];
   lane.cues = cues;
 
   let selected = new Set<string>();            // chosen sections (empty = whole song)
@@ -335,7 +335,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   /** New lyrics (written in the background, redone or fixed): refresh everything that shows them. */
   const lyricsChanged = () => {
     lane.setLyrics(laneWords());
-    cues = analysis.beat ? countInCues(analysis.lines, analysis.beat) : [];
+    cues = analysis.beat ? countInCues(analysis.lines, analysis.beat, analysis.notes) : [];
     lane.cues = cues;
     review.clear();
     if (analysis.duet) analysis.duet.overrides = {};   // line ids changed; re-guess the parts
