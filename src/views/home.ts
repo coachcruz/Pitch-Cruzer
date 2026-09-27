@@ -44,7 +44,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <div class="sources" role="radiogroup" aria-label="Where to get the song">
       ${SOURCES.map(source => `<button type="button" role="radio" data-source="${source.id}" aria-checked="false" title="${escapeHtml(source.hint)}">${source.label}</button>`).join('')}
       <label class="srcFile" title="A song file on this device — bought/downloaded from Spotify, Apple Music, Amazon… (MP3, WAV, M4A, FLAC, video). Or drop it on this card.">📁 Upload a file
-        <input id="fileInput" type="file" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.aiff,.aif,.mp4,.mov,.mkv,.webm"></label>
+        <input id="fileInput" type="file" accept="audio/*,video/*,.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.aiff,.aif,.mp4,.mov,.mkv,.webm,.pitchcruzer"></label>
     </div>
     <p id="sourceHint" class="hint small"></p>
 
@@ -86,7 +86,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
 
   <section class="card">
     <div class="cardHead"><h2>My songs</h2>
-      <label class="btn ghost small" title="Open a song file you downloaded earlier">Import song file<input id="importInput" type="file" accept=".pitchcruzer" hidden></label></div>
+      <label class="btn ghost small" title="A song file saved from Pitch Cruzer (⬇), or any song or video to add">Open a file<input id="importInput" type="file" hidden></label></div>
     <p class="hint small">Songs stay on this device (they survive refreshing and closing). ⬇ downloads one as a file to keep anywhere.</p>
     <div id="songList" class="songList"><p class="empty">No songs yet.</p></div>
   </section>`;
@@ -250,9 +250,20 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   });
 
   // ------------------------------------------------ files: the 📁 button, or drop one anywhere on the card
+  /** A song saved from Pitch Cruzer (⬇ in My songs), with its takes. */
+  const openSongFile = async (file: File) => {
+    try {
+      const song = await importSong(file);
+      toast('Imported “' + song.title + '”.');
+      void renderLibrary();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Couldn’t open that file.', 'error');
+    }
+  };
   const fileInput = el<HTMLInputElement>(root, '#fileInput');
   const takeFile = (file: File | undefined) => {
     if (!file) return;
+    if (/\.pitchcruzer$/i.test(file.name)) { void openSongFile(file); return; }
     // Videos can be bigger: only their sound is kept (and sent), which is small.
     const limit = isVideo(file, file.name) ? 1024 : 200;
     if (file.size > limit * 1024 * 1024) { toast('That file is over ' + (limit === 1024 ? '1 GB' : '200 MB') + '.', 'error'); return; }
@@ -460,18 +471,13 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     }));
   };
   void renderLibrary();
+  // Either button takes any file: a saved Pitch Cruzer song is opened, anything else is added as a song.
   const importInput = el<HTMLInputElement>(root, '#importInput');
-  importInput.addEventListener('change', async () => {
+  importInput.addEventListener('change', () => {
     const file = importInput.files?.[0];
     importInput.value = '';
-    if (!file) return;
-    try {
-      const song = await importSong(file);
-      toast('Imported “' + song.title + '”.');
-      void renderLibrary();
-    } catch (error) {
-      toast(error instanceof Error ? error.message : 'Couldn’t open that file.', 'error');
-    }
+    if (file && !/\.pitchcruzer$/i.test(file.name)) addCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    takeFile(file);
   });
 
   return () => {
