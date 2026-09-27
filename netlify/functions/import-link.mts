@@ -44,6 +44,32 @@ async function sunoAudioUrls(link: URL): Promise<{ urls: string[]; id: string } 
   return { urls, id };
 }
 
+/**
+ * A Suno song's title and lyrics — Suno keeps the lyrics the song was made from. Tried from Suno's
+ * public clip data first, then from the song page. Section tags ([Verse], [Chorus]…) are removed.
+ */
+async function sunoDetails(id: string): Promise<{ title: string | null; lyrics: string | null }> {
+  const clean = (text: string) => text.split(/\r?\n/)
+    .filter(line => !/^\s*\[[^\]]*\]\s*$/.test(line))
+    .map(line => line.replace(/\[[^\]]*\]/g, '').trim())
+    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  for (const url of ['https://studio-api.prod.suno.com/api/clip/' + id, 'https://suno.com/api/clip/' + id]) {
+    const response = await fetch(url, { headers: BROWSER_HEADERS }).catch(() => null);
+    if (!response?.ok) continue;
+    const clip = await response.json().catch(() => null) as { title?: string; metadata?: { prompt?: string } } | null;
+    if (clip?.metadata?.prompt) return { title: clip.title ?? null, lyrics: clean(clip.metadata.prompt) };
+  }
+  const page = await fetch('https://suno.com/song/' + id, { headers: BROWSER_HEADERS }).then(r => (r.ok ? r.text() : ''), () => '');
+  // The page embeds the song's data as JSON, partly inside Next.js "flight" strings — decode those too.
+  const flight = [...page.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)]
+    .map(match => { try { return JSON.parse(match[1]) as string; } catch { return ''; } }).join('');
+  const raw = (page + '\n' + flight).match(/"prompt":"((?:[^"\\]|\\.)*)"/)?.[1];
+  let prompt: string | null = null;
+  try { prompt = raw ? JSON.parse('"' + raw + '"') as string : null; } catch { prompt = null; }
+  const title = page.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? null;
+  return { title: title ? title.replace(/\s*[|–-]\s*Suno.*$/i, '').trim() : null, lyrics: prompt ? clean(prompt) : null };
+}
+
 function isPrivateHost(hostname: string): boolean {
   return hostname === 'localhost' ||
     /^(127\.|10\.|192\.168\.|169\.254\.|0\.)/.test(hostname) ||
@@ -83,12 +109,15 @@ export default async (req: Request) => {
   // Where to download from: a Suno song's MP3 (several addresses), or the link itself.
   let urls: string[];
   let filename: string;
+  // The song's own title and lyrics, when the source has them (Suno does).
+  let details: { title: string | null; lyrics: string | null } = { title: null, lyrics: null };
   const suno = SUNO_HOST.test(link.hostname) && !/^cdn\d*\./i.test(link.hostname);
   if (suno) {
     const found = await sunoAudioUrls(link);
     if ('error' in found) return json({ error: found.error, step: 'suno-page', status: found.status ?? null }, 502);
     urls = found.urls;
     filename = 'suno-' + found.id + '.mp3';
+    details = await sunoDetails(found.id).catch(() => ({ title: null, lyrics: null }));
   } else {
     urls = [link.href];
     filename = link.pathname.split('/').pop() || 'linked-song';
@@ -115,12 +144,14 @@ export default async (req: Request) => {
     // where the audio is so the browser can fetch it itself.
     return json({
       error: (suno ? 'Suno' : 'That site') + ' blocked the download from our server (' + lastStatus + ').',
-      code: 'source_blocked', step: 'download', audioUrls: urls
+      code: 'source_blocked', step: 'download', audioUrls: urls, ...details
     }, 502);
   }
 
   const response = await uploadBytesToLalal(key, bytes, safeFilename(decodeURIComponent(filename), 'linked-song.mp3'));
-  return relay(response);
+  if (!response.ok) return relay(response);
+  const uploaded = await response.json().catch(() => ({})) as Record<string, unknown>;
+  return json({ ...uploaded, ...details });
 };
 
 export const config: Config = { path: '/api/import-link' };
