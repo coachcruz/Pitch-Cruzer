@@ -343,6 +343,8 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     reviewHost.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   };
   video.onStatus = status => {
+    // A stall (buffering) or pause never ends up in the recording: capture holds until it plays again.
+    recorder.hold = status === 'buffering' || status === 'paused';
     if (status === 'ended' && recorder.recording) stopRecording();
     renderRecorder();
   };
