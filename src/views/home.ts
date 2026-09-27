@@ -481,6 +481,11 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const importInput = el<HTMLInputElement>(root, '#importInput');
   importInput.addEventListener('change', () => { takeFiles(importInput.files); importInput.value = ''; });
 
+  // A new version of the app waits (see lib/update) while a song is being added, a video is open or
+  // recording, or lyrics are typed in.
+  session.busy = () => addCard.classList.contains('busy') || recorder.recording || closeReview !== null
+    || !videoStage.classList.contains('hidden') || Boolean(pasteLyrics.value.trim());
+
   return () => {
     disposed = true;
     abort?.abort();

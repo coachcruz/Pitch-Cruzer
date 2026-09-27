@@ -2,6 +2,7 @@ import { LiveMic } from '../lib/mic';
 import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { midiToFrequency, midiToNote, NOTE_NAMES, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { el, prefs, toast } from '../ui/dom';
+import { session } from '../session';
 
 /** A simple, friendly tuner: sing a note and see it, or pick a target and match it. */
 export function renderTuner(root: HTMLElement): () => void {
@@ -209,6 +210,8 @@ export function renderTuner(root: HTMLElement): () => void {
   el(root, '#tTone').addEventListener('click', () => void playTone(target.value ? Number(target.value) : 57));
   el(root, '#tReset').addEventListener('click', () => { low = high = null; rangeOut.textContent = '—'; voiceOut.textContent = 'Sing your lowest and highest comfortable notes to see your voice type.'; });
   loop();
+  // A new version of the app waits (see lib/update) while the mic is listening.
+  session.busy = () => mic.active;
 
   return () => {
     cancelAnimationFrame(frame);

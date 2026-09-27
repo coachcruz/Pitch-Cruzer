@@ -905,6 +905,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   renderMicButton();
   loop();
 
+  // A new version of the app waits (see lib/update) while you play, sing, record or have an unsaved take.
+  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId);
+
   return () => {
     disposed = true;
     cancelAnimationFrame(frame);

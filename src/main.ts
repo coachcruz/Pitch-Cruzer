@@ -2,6 +2,8 @@ import './styles.css';
 import { renderHome } from './views/home';
 import { renderPractice } from './views/practice';
 import { renderTuner } from './views/tuner';
+import { keepUpToDate } from './lib/update';
+import { session } from './session';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) throw new Error('App root not found');
@@ -27,6 +29,7 @@ function navigate(hash: string): void {
 function route(): void {
   dispose?.();
   dispose = null;
+  session.busy = null;
   const hash = location.hash || '#/';
   const song = hash.match(/^#\/song\/([\w-]+)/);
   app!.querySelectorAll<HTMLAnchorElement>('[data-nav]').forEach(link => {
@@ -40,6 +43,7 @@ function route(): void {
 
 window.addEventListener('hashchange', route);
 route();
+keepUpToDate();
 
 // Old versions of the app installed a caching service worker that could serve a stale page.
 // Replace it with the current one (network-first, never caches API calls or models).
