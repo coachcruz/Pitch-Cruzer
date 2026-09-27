@@ -25,13 +25,18 @@ const MIXED_GAP = 2.5;
 
 let transformers: typeof import('@huggingface/transformers') | null = null;
 let transcriber: any = null;
+let device: 'webgpu' | 'wasm' | null = null;
 
-async function loadModel(quality: TranscribeJob['quality']): Promise<any> {
-  if (transcriber) return transcriber;
+/** A note for the "Show details" log (something went wrong but the job carries on). */
+const note = (text: string) => self.postMessage({ stage: 'note', text });
+
+async function loadModel(quality: TranscribeJob['quality'], processorOnly = false): Promise<any> {
+  if (transcriber && !(processorOnly && device === 'webgpu')) return transcriber;
+  if (transcriber) { await transcriber.dispose?.().catch?.(() => undefined); transcriber = null; }
   transformers ??= await import('@huggingface/transformers');
   // Use the graphics chip (WebGPU) when the browser has one — often several times faster — and fall
-  // back to the processor (WebAssembly) everywhere else, or if the GPU route fails.
-  const gpu = 'gpu' in navigator && Boolean(await (navigator as any).gpu?.requestAdapter?.().catch(() => null));
+  // back to the processor (WebAssembly) everywhere else, if the GPU route fails, or if it hears nothing.
+  const gpu = !processorOnly && 'gpu' in navigator && Boolean(await (navigator as any).gpu?.requestAdapter?.().catch(() => null));
   const setups: Array<{ device: 'webgpu' | 'wasm'; dtype: any; label: string }> = [
     ...(gpu ? [{ device: 'webgpu' as const, dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' }, label: 'graphics chip' }] : []),
     { device: 'wasm', dtype: 'q8', label: 'processor' }
@@ -51,6 +56,7 @@ async function loadModel(quality: TranscribeJob['quality']): Promise<any> {
             self.postMessage({ stage: 'download', progress: values.reduce((x, y) => x + y, 0) / (values.length * 100), model });
           }
         });
+        device = setup.device;
         const threads = setup.device === 'webgpu' ? 'GPU' : (self as any).crossOriginIsolated ? 'multi' : 'single';
         self.postMessage({ stage: 'model', model: model + ' on the ' + setup.label, threads });
         return transcriber;
@@ -102,35 +108,74 @@ async function transcribePiece(audio: Float32Array, offset: number, lang: string
   return words;
 }
 
+/**
+ * The language of a piece of singing, best guess first. Language detection runs a separate model step
+ * that fails on some setups; then English is assumed (or the only allowed language) and the job goes on.
+ */
+let detectionWorks = true;
+async function languagesOf(audio: Float32Array, allowed: string[]): Promise<Array<[string, number]>> {
+  const fallback: Array<[string, number]> = [[allowed.includes('en') ? 'en' : allowed[0] ?? 'en', 0]];
+  if (allowed.length <= 1 || !detectionWorks) return allowed.length ? [[allowed[0], 0]] : fallback;
+  try {
+    return await languageScores(audio, allowed);
+  } catch (error) {
+    detectionWorks = false;
+    note('Language detection isn’t available here (' + (error instanceof Error ? error.message : String(error)) + ') — assuming ' + fallback[0][0].toUpperCase());
+    return fallback;
+  }
+}
+
+async function transcribeClip(clip: TranscribeClip, allowed: string[], multilingual: boolean): Promise<{ words: TimedWord[]; langs: string[]; mixed: boolean }> {
+  const scores = multilingual ? await languagesOf(clip.audio, allowed) : [['en', 0] as [string, number]];
+  const mixed = scores.length > 1 && clip.phrases.length > 1 && scores[0][1] - scores[1][1] < MIXED_GAP;
+  const langs = new Set<string>();
+  if (!mixed) {
+    const lang = scores[0]?.[0] ?? 'en';
+    langs.add(lang);
+    return { words: await transcribePiece(clip.audio, clip.offset, lang, multilingual), langs: [...langs], mixed };
+  }
+  // Sounds like more than one language: give each phrase its own language.
+  let words: TimedWord[] = [];
+  for (const phrase of clip.phrases) {
+    const piece = clip.audio.subarray(Math.floor(phrase.start * RATE), Math.ceil(phrase.end * RATE));
+    if (piece.length < RATE * 0.4) continue;
+    const lang = (await languagesOf(piece, allowed))[0]?.[0] ?? 'en';
+    langs.add(lang);
+    words = words.concat(await transcribePiece(piece, clip.offset + phrase.start, lang, multilingual));
+  }
+  return { words, langs: [...langs], mixed };
+}
+
 self.onmessage = async (event: MessageEvent<TranscribeJob>) => {
   const { clips, languages, quality } = event.data;
   try {
-    const asr = await loadModel(quality);
-    const multilingual = Boolean(asr.model.generation_config?.lang_to_id);
-    const allowed = multilingual ? languages : ['en'];
+    let asr = await loadModel(quality);
+    let heardAny = false;
+    let failed = 0;
     for (let index = 0; index < clips.length; index += 1) {
-      const clip = clips[index];
-      const scores = multilingual && allowed.length > 1 ? await languageScores(clip.audio, allowed) : [[allowed[0] ?? 'en', 0] as [string, number]];
-      const mixed = scores.length > 1 && clip.phrases.length > 1 && scores[0][1] - scores[1][1] < MIXED_GAP;
-      let words: TimedWord[] = [];
-      const langs = new Set<string>();
-      if (mixed) {
-        // Sounds like more than one language: give each phrase its own language.
-        for (const phrase of clip.phrases) {
-          const piece = clip.audio.subarray(Math.floor(phrase.start * RATE), Math.ceil(phrase.end * RATE));
-          if (piece.length < RATE * 0.4) continue;
-          const pieceScores = await languageScores(piece, allowed);
-          const lang = pieceScores[0]?.[0] ?? 'en';
-          langs.add(lang);
-          words = words.concat(await transcribePiece(piece, clip.offset + phrase.start, lang, multilingual));
-        }
-      } else {
-        const lang = scores[0]?.[0] ?? 'en';
-        langs.add(lang);
-        words = await transcribePiece(clip.audio, clip.offset, lang, multilingual);
+      const multilingual = Boolean(asr.model.generation_config?.lang_to_id);
+      const allowed = multilingual ? languages : ['en'];
+      let result: { words: TimedWord[]; langs: string[]; mixed: boolean } = { words: [], langs: [], mixed: false };
+      try {
+        result = await transcribeClip(clips[index], allowed, multilingual);
+      } catch (error) {
+        // One bad window shouldn't lose the whole song.
+        failed += 1;
+        note('Lyrics window ' + (index + 1) + ' failed (' + (error instanceof Error ? error.message : String(error)) + ') — skipped');
       }
-      self.postMessage({ stage: 'transcribe', progress: (index + 1) / clips.length, langs: [...langs], mixed, words });
+      heardAny ||= result.words.length > 0;
+      // On some graphics chips the GPU model quietly returns nothing: switch to the processor and start over.
+      if (!heardAny && device === 'webgpu' && index >= Math.min(1, clips.length - 1)) {
+        note('The graphics chip heard nothing — switching to the processor and starting over');
+        self.postMessage({ stage: 'restart' });
+        asr = await loadModel(quality, true);
+        index = -1;
+        failed = 0;
+        continue;
+      }
+      self.postMessage({ stage: 'transcribe', progress: (index + 1) / clips.length, langs: result.langs, mixed: result.mixed, words: result.words });
     }
+    if (failed === clips.length) throw new Error('Every part of the song failed to transcribe.');
     self.postMessage({ done: true });
   } catch (error) {
     self.postMessage({ error: error instanceof Error ? error.message : String(error) });
