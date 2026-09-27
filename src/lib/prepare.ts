@@ -232,6 +232,7 @@ export async function transcribeLyrics(lead: AudioBuffer, analysis: SongAnalysis
   }
   analysis.lyricsOptions = options;
   progress('sections', 0.2);
+  analysis.heard = words.length ? words : undefined;
   analysis.lines = buildLines(words, analysis.notes);
   analysis.sections = buildSections(analysis.lines, analysis.notes, analysis.duration, words.length > 0);
   progress('sections', 1, analysis.sections.length + ' sections');
