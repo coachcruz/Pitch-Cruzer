@@ -60,6 +60,42 @@ export function breathMarks(notes: NoteEvent[], minGap = 0.3): BreathMark[] {
   return marks;
 }
 
+/**
+ * Where to breathe, following the lyrics: once between each pair of lines (in the widest silence in
+ * the singing there), and inside a line only at a real pause. Tiny gaps between words and notes are
+ * not breaths. Songs without words fall back to the silences between notes.
+ */
+export function lyricBreaths(lines: LyricLine[], notes: NoteEvent[]): BreathMark[] {
+  const sung = lines.map(line => line.words.filter(word => !word.aside && word.text !== '♪')).filter(words => words.length);
+  if (!sung.length) return breathMarks(notes);
+  const widestGap = (from: number, to: number): BreathMark | null => {
+    let best: BreathMark | null = null;
+    for (let i = 1; i < notes.length; i += 1) {
+      const start = notes[i - 1].end, end = notes[i].start;
+      if (end <= from || start >= to) continue;
+      const a = Math.max(start, from), b = Math.min(end, to);
+      if (b - a > (best?.length ?? 0)) best = { time: a, length: b - a };
+    }
+    return best;
+  };
+  const marks: BreathMark[] = [];
+  sung.forEach((words, i) => {
+    // Pauses inside the line.
+    for (let k = 1; k < words.length; k += 1) {
+      const gap = widestGap(words[k - 1].start + 0.05, words[k].start + 0.05);
+      if (gap && gap.length >= 0.6) marks.push(gap);
+    }
+    // Between this line and the next.
+    const next = sung[i + 1];
+    if (!next) return;
+    const last = words[words.length - 1];
+    const gap = widestGap(last.start + 0.05, next[0].start + 0.1);
+    if (gap && gap.length >= 0.12) marks.push(gap);
+    else if (next[0].start - last.end >= 0.12) marks.push({ time: last.end, length: next[0].start - last.end });
+  });
+  return marks.filter(mark => mark.length < 6).sort((a, b) => a.time - b.time);
+}
+
 export const SECTION_NAMES: Record<SectionKind, string> = {
   intro: 'Intro', verse: 'Verse', pre: 'Pre-Chorus', chorus: 'Chorus', bridge: 'Bridge',
   instrumental: 'Instrumental', outro: 'Outro', part: 'Part'
