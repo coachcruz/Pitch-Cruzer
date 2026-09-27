@@ -179,6 +179,11 @@ function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: L
         diag('Lyrics failed: ' + data.error, 'error');
         if (words.length) finish(true);
         else { settled = true; window.clearTimeout(timeout); worker.terminate(); reject(new Error(data.error)); }
+      } else if (data.stage === 'restart') {
+        clipsDone = 0;
+        words.length = 0;
+      } else if (data.stage === 'note') {
+        diag('Lyrics: ' + data.text, 'warn');
       } else if (data.stage === 'download') {
         if (!modelNoted) { modelNoted = true; diag('Downloading lyrics model ' + (data.model ?? '') + ' (first time only)'); }
         onProgress(data.progress * 0.4, 'Downloading the lyrics model (first time only)… ' + Math.round(data.progress * 100) + '%');
