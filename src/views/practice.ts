@@ -9,6 +9,7 @@ import { serverTranscriptionAvailable } from '../lib/serverTranscribe';
 import { coachingTip, mixdown, scoreTake, type TakeScore } from '../lib/score';
 import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { LYRICS_READY, session } from '../session';
+import { diagEntries, onDiag } from '../lib/diag';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
 import { PitchLane, type LaneWord, type TrailPoint } from '../ui/lane';
 
@@ -117,6 +118,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
           <button id="redoLyrics" class="menuItem" role="menuitem">Redo lyrics (language)</button>
           <label class="menuItem check small"><input id="showNotes" type="checkbox"> Notes over the karaoke words</label>
           <label class="menuItem check small"><input id="showUpNext" type="checkbox"> Show “Up next” panel</label>
+          <button id="showDetails" class="menuItem" role="menuitem">Show details (what happened)</button>
         </div>
       </div>
     </header>
@@ -192,6 +194,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
         <div class="coachHint" id="coachHint">Press ▶ Play, then 🎤 Mic to see your voice on the staff.</div>
       </div>
     </section>
+
+    <dialog id="detailsDialog" class="dialog wide" aria-label="Details">
+      <h2>What happened</h2>
+      <p class="hint small">Step by step: preparing this song and writing its lyrics. Copy it and send it along if something went wrong.</p>
+      <ol id="detailsLog" class="diagLog"></ol>
+      <div class="row end"><button id="detailsCopy" class="btn">Copy details</button><button id="detailsClose" class="btn ghost">Close</button></div>
+    </dialog>
 
     <dialog id="sectionsDialog" class="dialog" aria-label="Rename sections">
       <h2>Rename sections</h2>
@@ -375,6 +384,19 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   document.addEventListener('click', onDocClick);
   document.addEventListener('keydown', onEsc);
   el(root, '#renameSections').addEventListener('click', () => { renderSectionEditor(); sectionsDialog.showModal(); });
+  const detailsDialog = el<HTMLDialogElement>(root, '#detailsDialog');
+  const renderDetails = () => {
+    el(root, '#detailsLog').innerHTML = diagEntries().map(entry =>
+      `<li class="d-${entry.tone}"><span class="mono">${entry.at.toFixed(1)}s</span> ${escapeHtml(entry.text)}</li>`).join('')
+      || '<li>Nothing logged yet in this visit (details are kept until the page is reloaded).</li>';
+  };
+  const stopDetails = onDiag(() => { if (detailsDialog.open) renderDetails(); });
+  el(root, '#showDetails').addEventListener('click', () => { renderDetails(); detailsDialog.showModal(); });
+  el(root, '#detailsClose').addEventListener('click', () => detailsDialog.close());
+  el(root, '#detailsCopy').addEventListener('click', () => {
+    const text = diagEntries().map(entry => entry.at.toFixed(1) + 's ' + entry.text).join('\n');
+    void navigator.clipboard?.writeText(text).then(() => toast('Details copied.'), () => toast('Couldn’t copy — take a screenshot instead.', 'error'));
+  });
 
   const showUpNext = el<HTMLInputElement>(root, '#showUpNext');
   showUpNext.checked = prefs.get('showUpNext', false);
@@ -1322,6 +1344,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     disposed = true;
     cancelAnimationFrame(frame);
     laneResize.disconnect();
+    stopDetails();
     window.removeEventListener('keydown', onKey);
     window.removeEventListener(LYRICS_READY, onLyricsReady);
     mic.stop();

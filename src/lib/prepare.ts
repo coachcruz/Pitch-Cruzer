@@ -303,14 +303,24 @@ export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): P
   analysis.notesVersion = NOTES_VERSION;
 }
 
-export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal, source: LyricsSource = {}): Promise<PreparedSong> {
-  const title = input.kind === 'link' ? titleFromLink(input.url) : input.name.replace(/\.[a-z0-9]{2,5}$/i, '');
+export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal, lyricsSource: LyricsSource = {}): Promise<PreparedSong> {
+  let source = lyricsSource;
+  let title = input.kind === 'link' ? titleFromLink(input.url) : input.name.replace(/\.[a-z0-9]{2,5}$/i, '');
   let stems: StoredSong['stems'];
 
   if (useSeparation) {
     progress('upload', 0);
     let sourceId: string;
-    if (input.kind === 'link') sourceId = await importLinkOrFetchHere(input.url, progress);
+    if (input.kind === 'link') {
+      const imported = await importLinkOrFetchHere(input.url, progress);
+      sourceId = imported.id;
+      // A Suno song arrives with its own title and lyrics: use them like pasted lyrics.
+      if (imported.title) title = imported.title;
+      if (imported.lyrics && !source.pasted?.trim()) {
+        source = { pasted: imported.lyrics };
+        diag('Lyrics: using the song’s own lyrics from the link (' + imported.lyrics.split('\n').filter(Boolean).length + ' lines)', 'ok');
+      }
+    }
     else {
       progress('upload', 0, 'Compressing…');
       const packed = await compressForUpload(input.kind === 'file' ? input.file : input.blob, input.name);
@@ -364,7 +374,7 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
  * Imports a link on the server. Some hosts (Suno) refuse downloads from servers but not from your
  * browser — then the browser downloads the song itself and uploads it like a file.
  */
-async function importLinkOrFetchHere(url: string, progress: Progress): Promise<string> {
+async function importLinkOrFetchHere(url: string, progress: Progress): Promise<{ id: string } & lalal.LinkDetails> {
   try {
     return await lalal.importLink(url);
   } catch (error) {
@@ -378,7 +388,9 @@ async function importLinkOrFetchHere(url: string, progress: Progress): Promise<s
       const blob = await response.blob();
       if (blob.size < 1024) continue;
       diag('Downloaded the song in this browser (' + (blob.size / 1048576).toFixed(1) + ' MB)', 'ok');
-      return lalal.uploadFile(blob, 'linked-song.mp3', f => progress('upload', f, (blob.size / 1048576).toFixed(1) + ' MB'));
+      const id = await lalal.uploadFile(blob, 'linked-song.mp3', f => progress('upload', f, (blob.size / 1048576).toFixed(1) + ' MB'));
+      const details = (error as lalal.LalalError).details as lalal.LinkDetails;
+      return { id, title: details.title, lyrics: details.lyrics };
     }
     throw new lalal.LalalError((error as Error).message + ' Your browser couldn’t download it either — on Suno use ⋯ → Download → MP3 Audio, then 📁 Upload a file.');
   }

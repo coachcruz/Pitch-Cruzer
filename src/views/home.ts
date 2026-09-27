@@ -201,7 +201,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       }, abort.signal, lyricsSource(input));
       if (abort.signal.aborted || disposed) return;
       const song = prepared.song;
-      if (songTitle) song.title = songTitle;
+      if (songTitle && input.kind !== 'link') song.title = songTitle;
       session.song = song;
       session.buffers = prepared.buffers;
       // Every song is kept on this device automatically (and can be downloaded as a file from My songs).

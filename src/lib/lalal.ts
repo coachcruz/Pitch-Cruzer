@@ -61,14 +61,17 @@ export async function uploadFile(file: Blob, filename: string, onProgress: (frac
   return data.id;
 }
 
-export async function importLink(url: string): Promise<string> {
-  const data = await requestJson<{ id?: string }>('/api/import-link', {
+/** The song's own title and lyrics, when the link's source has them (Suno does). */
+export interface LinkDetails { title?: string | null; lyrics?: string | null }
+
+export async function importLink(url: string): Promise<{ id: string } & LinkDetails> {
+  const data = await requestJson<{ id?: string } & LinkDetails>('/api/import-link', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
   });
   if (!data.id) throw new LalalError('LALAL did not accept the linked file.');
-  return data.id;
+  return { id: data.id, title: data.title, lyrics: data.lyrics };
 }
 
 export async function startSplit(sourceId: string): Promise<string> {
