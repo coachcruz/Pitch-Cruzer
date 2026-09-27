@@ -34,6 +34,8 @@ export class PitchLane {
   showVoiceTypes = true;
   /** Simple view: no voice staff, note names only on C rows, no syllable threads. */
   simple = false;
+  /** Duet: song stretches sung by your partner — drawn faded, so your own lines stand out. */
+  partner: Array<{ start: number; end: number }> = [];
   private gutter = OCTAVE_COL + NOTE_COL;
   private allBreaths: BreathMark[];
   private breaths: BreathMark[];
@@ -128,6 +130,10 @@ export class PitchLane {
   /** True while in a breathing gap between phrases. */
   breathAt(time: number): boolean {
     return this.breaths.some(breath => time >= breath.time && time < breath.time + breath.length && breath.length >= 0.35);
+  }
+
+  private isPartner(time: number): boolean {
+    return this.partner.some(range => time >= range.start && time < range.end);
   }
 
   /** Semitones between what you sang and the target (octave forgiven if enabled). */
@@ -297,11 +303,13 @@ export class PitchLane {
       const barY = y(Math.round(note.midi));
       const h = Math.max(6, rowHeight * 0.8);
       ctx.fillStyle = note === active ? color('--accent') : note.end < now ? color('--lane-past') : color('--lane-note');
+      ctx.globalAlpha = this.isPartner(note.start) ? 0.35 : 1;
       roundRect(ctx, left, barY - h / 2, Math.max(3, right - left - 1), h, 5);
       if (right - left > 24 && h >= 10) {
         ctx.fillStyle = note === active ? color('--on-accent') : color('--lane-note-text');
         ctx.fillText(midiToNote(note.midi), left + 4, barY);
       }
+      ctx.globalAlpha = 1;
     }
 
     // ---- conveyor belt of lyrics
@@ -322,7 +330,7 @@ export class PitchLane {
       const current = word.start <= now && now < word.end;
       const sung = word.end <= now;
       ctx.fillStyle = current ? color('--accent-2') : sung ? color('--muted') : color('--text');
-      ctx.globalAlpha = sung ? 0.5 : 1;
+      ctx.globalAlpha = sung || this.isPartner(word.start) ? 0.4 : 1;
       ctx.fillText(word.text, left, rowY);
       ctx.globalAlpha = 1;
       if (word.midi !== null && !sung && !this.simple) {

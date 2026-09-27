@@ -45,12 +45,32 @@ export class Timeline {
 }
 
 /**
+ * Cuts the song stretch [from, from + duration) at the edges of `ranges`: returns the pieces as
+ * [start, end, inside] in song time. Used to route a duet partner's lines differently.
+ */
+export function splitByRanges(from: number, duration: number, ranges: Range[]): Array<[number, number, boolean]> {
+  const end = from + duration;
+  const pieces: Array<[number, number, boolean]> = [];
+  let cursor = from;
+  for (const range of ranges.filter(item => item.end > from && item.start < end).sort((a, b) => a.start - b.start)) {
+    const a = Math.max(range.start, cursor), b = Math.min(range.end, end);
+    if (a > cursor) pieces.push([cursor, a, false]);
+    if (b > a) pieces.push([a, b, true]);
+    cursor = Math.max(cursor, b);
+  }
+  if (cursor < end) pieces.push([cursor, end, false]);
+  return pieces;
+}
+
+/**
  * Plays any list of song ranges back-to-back (with repeats) with all stems perfectly in sync,
  * and maps "time since play" back to "time in the original song" for lyrics and the pitch lane.
  */
 export class Player {
   readonly ctx: AudioContext;
   readonly gains: Record<StemName, GainNode>;
+  /** Duet: the original singer on your partner's lines, always at full volume. */
+  private partnerLead: GainNode;
   private sources: AudioBufferSourceNode[] = [];
   timeline: Timeline = new Timeline([], 1);
   private originAt = 0;
@@ -63,6 +83,7 @@ export class Player {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     const gain = () => { const node = this.ctx.createGain(); node.connect(this.ctx.destination); return node; };
     this.gains = { lead: gain(), music: gain(), voice: gain() };
+    this.partnerLead = gain();
   }
 
   setLevel(stem: StemName, value: number): void {
@@ -73,11 +94,13 @@ export class Player {
    * Builds the timeline for the given ranges and starts playing at `from` seconds into it.
    * `voice`: a recorded take to play along (review). `model`: Echo practice with your own best take as the guide. For each listen piece, `locate`
    * returns where in the take's audio that song moment was sung (or null → the artist sings it).
+   * `partner`: duet — song stretches sung by your partner, where the original singer stays at full volume.
    */
   async play(ranges: Range[], repeats: number, options: {
     from?: number; leadIn?: number;
     voice?: { buffer: AudioBuffer; offset: number };
     model?: { buffer: AudioBuffer; locate: (sourceTime: number) => number | null };
+    partner?: Range[];
   } = {}): Promise<number> {
     this.stop(false);
     if (this.ctx.state !== 'running') await this.ctx.resume();
@@ -108,7 +131,10 @@ export class Player {
         for (const [buffer, gain] of stems.slice(1)) this.schedule(buffer, gain, when, piece.sourceStart + skip, duration);
         continue;
       }
-      for (const [buffer, gain] of stems) this.schedule(buffer, gain, when, piece.sourceStart + skip, duration);
+      for (const [start, end, partner] of splitByRanges(piece.sourceStart + skip, duration, options.partner ?? [])) {
+        this.schedule(this.buffers.lead, partner ? this.partnerLead : this.gains.lead, when + start - (piece.sourceStart + skip), start, end - start);
+      }
+      for (const [buffer, gain] of stems.slice(1)) this.schedule(buffer, gain, when, piece.sourceStart + skip, duration);
     }
     if (options.voice) {
       const voiceStart = this.originAt + options.voice.offset;
