@@ -2,6 +2,7 @@ import type { LyricsOptions, NoteEvent } from './analysis';
 import { resampleMono } from './audio';
 import { diag } from './diag';
 import { encodeMp3 } from './mp3';
+import { fetchWithRetry } from './retry';
 import type { TimedWord } from './transcribe.worker';
 
 /**
@@ -97,16 +98,11 @@ export async function transcribeOnServer(
     const query = new URLSearchParams();
     if (lang) query.set('lang', lang);
     // No prompt/hint: Whisper tends to write hint text out as if it were sung (in intros, solos, silence).
-    // Short pieces mean more requests: wait and retry if the service says "too many" or hiccups.
-    let response: Response | null = null;
-    for (const wait of [0, 4000, 12000]) {
-      if (wait) await new Promise(resolve => setTimeout(resolve, wait));
-      response = await fetch('/api/transcribe?' + query.toString(), {
-        method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
-      });
-      if (response.status !== 429 && response.status < 500) break;
-    }
-    if (!response) throw new Error('Server transcription failed.');
+    // Short pieces mean more requests: wait (as long as the service asks) and retry if it says "too many" or hiccups.
+    const response = await fetchWithRetry(() => fetch('/api/transcribe?' + query.toString(), {
+      method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
+    }), { backoffMs: [4000, 12000, 20000], maxWaitMs: 65000 });
+    if (response.status === 429) diag('Lyrics (server): still rate-limited after waiting', 'warn');
     if (!response.ok) {
       const body = await response.json().catch(() => ({})) as { error?: string };
       throw new Error(body.error ?? 'Server transcription failed (' + response.status + ').');

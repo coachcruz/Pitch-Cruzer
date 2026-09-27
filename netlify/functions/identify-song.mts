@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { env, json } from '../lib/http.mts';
+import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
 
 /**
  * Names the song from the words heard in it, so its real lyrics can be fetched without the user
@@ -21,10 +22,12 @@ export default async (req: Request) => {
   const hint = typeof body.hint === 'string' ? body.hint.slice(0, 200).trim() : '';
   if (heard.split(/\s+/).length < 8) return json({ error: 'Not enough words to recognise the song.' }, 400);
 
-  // Models get retired now and then: try the next one if a model isn't available.
+  // Models get retired now and then: try the next one if a model isn't available. Each model has its own
+  // free-tier rate limit, so a model that's rate-limited (after a short wait) hands over to the next one too.
   let response: Response | null = null;
+  let limited: Response | null = null;
   for (const model of MODELS) {
-    response = await fetch(GROQ_URL, {
+    response = await groqFetch(() => fetch(GROQ_URL, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -42,9 +45,11 @@ export default async (req: Request) => {
           { role: 'user', content: (hint ? 'File or video name (may be meaningless): ' + hint + '\n\n' : '') + 'Heard lyrics:\n' + heard }
         ]
       })
-    }).catch(() => null);
+    }), 2000);
+    if (response && isRateLimited(response.status)) { limited ??= response; continue; }
     if (!response || (response.status !== 404 && response.status !== 400)) break;
   }
+  if (response && isRateLimited(response.status) && limited) return rateLimited(limited);
   if (!response) return json({ error: 'The recognition service could not be reached.' }, 502);
   if (!response.ok) return json({ error: 'Recognition service error ' + response.status }, 502);
   const result = (await response.json().catch(() => null)) as { choices?: Array<{ message?: { content?: string } }> } | null;
