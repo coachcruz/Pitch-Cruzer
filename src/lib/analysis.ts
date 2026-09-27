@@ -30,6 +30,8 @@ export interface SongAnalysis {
   lyricsPending?: boolean;
   separated: boolean;
   lyricsOptions?: LyricsOptions;
+  /** Duet: which voice you sing (the lower or the higher), plus lines you reassigned by hand. */
+  duet?: { mine: 'low' | 'high'; overrides: Record<string, 'me' | 'partner'> };
   /** What speech recognition actually heard, with timing — typed/fixed lyrics borrow their timing from it. */
   heard?: TimedWord[];
 }
@@ -275,27 +277,51 @@ export function buildWord(text: string, start: number, end: number, notes: NoteE
 let lineCounter = 0;
 const lineId = () => 'l' + (lineCounter += 1).toString(36) + Math.random().toString(36).slice(2, 6);
 
+/**
+ * Splits sung words into lyric lines the way a singer phrases them:
+ *  - typed lyrics keep their own lines (`hardBreaks` = the first word of each typed line);
+ *  - otherwise lines break where the singer breathes (a gap of ½ s or more), and tiny fragments
+ *    (under 4 words) join their nearest neighbour when the pause between them is short;
+ *  - any line still longer than 14 words or 9 seconds is split at its longest pause.
+ */
 export function groupLines(words: Word[], hardBreaks: Set<number> = new Set()): LyricLine[] {
-  const lines: LyricLine[] = [];
-  let current: Word[] = [];
-  const flush = () => {
-    if (current.length) lines.push({ id: lineId(), start: current[0].start, end: current[current.length - 1].end, words: current });
-    current = [];
-  };
+  if (!words.length) return [];
+  const gapBefore = (chunk: Word[], index: number) => chunk[index].start - chunk[index - 1].end;
+  let chunks: Word[][] = [];
   words.forEach((word, index) => {
-    const previous = current[current.length - 1];
-    if (previous) {
-      const gap = word.start - previous.end;
-      const lineDuration = word.end - current[0].start;
-      const punctuated = /[.,!?;:]$/.test(previous.text) && current.length >= 4;
-      if (hardBreaks.has(index) || (hardBreaks.size === 0 && (
-        gap >= 1.0 || (gap >= 0.45 && current.length >= 3) || lineDuration > 7 || current.length >= 12 || punctuated
-      ))) flush();
-    }
-    current.push(word);
+    const breakHere = index === 0 || (hardBreaks.size ? hardBreaks.has(index) : word.start - words[index - 1].end >= 0.5);
+    if (breakHere) chunks.push([word]); else chunks[chunks.length - 1].push(word);
   });
-  flush();
-  return lines;
+  if (!hardBreaks.size) {
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let i = 0; i < chunks.length; i += 1) {
+        if (chunks[i].length >= 4) continue;
+        const gapLeft = i > 0 ? chunks[i][0].start - chunks[i - 1][chunks[i - 1].length - 1].end : Infinity;
+        const gapRight = i + 1 < chunks.length ? chunks[i + 1][0].start - chunks[i][chunks[i].length - 1].end : Infinity;
+        const target = gapLeft <= gapRight ? i - 1 : i + 1;
+        const gap = Math.min(gapLeft, gapRight);
+        if (gap > 1.5 || chunks[target].length + chunks[i].length > 12) continue;
+        const [first, second] = target < i ? [target, i] : [i, target];
+        chunks.splice(first, 2, [...chunks[first], ...chunks[second]]);
+        changed = true;
+        break;
+      }
+    }
+  }
+  const tooLong = (chunk: Word[]) => chunk.length > 14 || chunk[chunk.length - 1].end - chunk[0].start > 9;
+  const split = (chunk: Word[]): Word[][] => {
+    if (!tooLong(chunk) || chunk.length < 4) return [chunk];
+    let at = Math.floor(chunk.length / 2), widest = -Infinity;
+    for (let k = 2; k <= chunk.length - 2; k += 1) {
+      // Prefer a long pause near the middle.
+      const score = gapBefore(chunk, k) - 0.02 * Math.abs(k - chunk.length / 2);
+      if (score > widest) { widest = score; at = k; }
+    }
+    return [...split(chunk.slice(0, at)), ...split(chunk.slice(at))];
+  };
+  chunks = chunks.flatMap(split);
+  return chunks.map(chunk => ({ id: lineId(), start: chunk[0].start, end: chunk[chunk.length - 1].end, words: chunk }));
 }
 
 /** Without lyrics, turn sung phrases into lines of ♪ so notes are still shown in time. */

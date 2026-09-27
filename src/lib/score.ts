@@ -1,7 +1,7 @@
 import type { LyricLine, NoteEvent, PitchTrack } from './analysis';
 import { encodeWav } from './audio';
 import { foldToOctave } from './music';
-import type { Timeline } from './player';
+import { splitByRanges, type Range, type Timeline } from './player';
 import { analyzeVibrato, centerTrack, summarizeVibrato, type VibratoSummary } from './vibrato';
 import type { SongBuffers } from './prepare';
 
@@ -32,6 +32,7 @@ function noteAt(notes: NoteEvent[], time: number): NoteEvent | null {
 /**
  * Compares the singer's take (pitch track aligned to the practice timeline) against the
  * artist's notes. "On pitch" = within a quarter tone (50 cents); octave can be ignored.
+ * Echo practice counts only the singer's turns; a duet counts only the singer's own lines.
  */
 export function scoreTake(
   voice: PitchTrack,
@@ -39,7 +40,9 @@ export function scoreTake(
   timeline: Timeline,
   notes: NoteEvent[],
   lines: LyricLine[],
-  flexibleOctave: boolean
+  flexibleOctave: boolean,
+  /** Only these moments count (duet: just your lines). */
+  counts: (sourceTime: number) => boolean = () => true
 ): TakeScore {
   const hop = 0.02;
   let targetFrames = 0, voicedFrames = 0, points = 0, hits = 0;
@@ -58,6 +61,7 @@ export function scoreTake(
     if (source === null) continue;
     // Echo practice: only the singer's turns count (the artist's demo parts are for listening).
     if (turnsOnly && !timeline.pieceAt(t)?.turn) continue;
+    if (!counts(source)) continue;
     const index = Math.round((t - voiceOffset) / voice.hopSeconds);
     const raw = index >= 0 && index < voice.midi.length ? voice.midi[index] : NaN;
     const sung = index >= 0 && index < center.length ? center[index] : NaN;
@@ -141,16 +145,25 @@ export async function mixdown(
   timeline: Timeline,
   levels: { lead: number; music: number; voice: number },
   voice: AudioBuffer,
-  voiceOffset: number
+  voiceOffset: number,
+  /** Duet: your partner's lines, where the original singer stays at full volume. */
+  partner: Range[] = []
 ): Promise<Blob> {
   const sampleRate = buffers.lead.sampleRate;
   const length = Math.ceil((timeline.duration + 0.5) * sampleRate);
   const offline = new OfflineAudioContext(2, length, sampleRate);
   const gain = (value: number) => { const node = offline.createGain(); node.gain.value = value; node.connect(offline.destination); return node; };
-  const stems: Array<[AudioBuffer | null, GainNode]> = [
-    [buffers.lead, gain(levels.lead)], [buffers.backing, gain(levels.music)], [buffers.instrumental, gain(levels.music)]
-  ];
+  const leadGain = gain(levels.lead), partnerGain = gain(1);
+  const stems: Array<[AudioBuffer | null, GainNode]> = [[buffers.backing, gain(levels.music)], [buffers.instrumental, gain(levels.music)]];
   for (const piece of timeline.pieces) {
+    if (piece.turn) continue; // Echo: the song is silent while you sing it back, as in playback
+    for (const [start, end, isPartner] of splitByRanges(piece.sourceStart, piece.duration, partner)) {
+      if (start >= buffers.lead.duration) continue;
+      const source = offline.createBufferSource();
+      source.buffer = buffers.lead;
+      source.connect(isPartner ? partnerGain : leadGain);
+      source.start(piece.timelineStart + start - piece.sourceStart, start, Math.min(end - start, buffers.lead.duration - start));
+    }
     for (const [buffer, node] of stems) {
       if (!buffer || piece.sourceStart >= buffer.duration) continue;
       const source = offline.createBufferSource();

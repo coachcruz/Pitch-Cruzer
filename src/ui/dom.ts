@@ -8,7 +8,9 @@ export function el<T extends HTMLElement = HTMLElement>(root: ParentNode, select
   return found;
 }
 
+/** A short message at the top of the screen; a new one replaces the one before. */
 export function toast(message: string, tone: 'info' | 'error' = 'info'): void {
+  document.querySelectorAll('.toast').forEach(old => old.remove());
   const node = document.createElement('div');
   node.className = 'toast toast-' + tone;
   node.setAttribute('role', 'status');
