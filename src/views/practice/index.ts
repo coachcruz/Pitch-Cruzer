@@ -774,14 +774,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       liveVib.push(performance.now() / 1000, reading.midi);
       // Encouragement judges the center of any vibrato; the staff still draws the real wave.
       sung = reading.midi === null ? null : liveVib.center();
-      lane.liveMidi = reading.midi;
       if (playing && source !== null && !reviewPlaying) {
         if (source < lastSource - 0.3) liveTrail.length = 0;
         lastSource = source;
         if (reading.midi !== null) liveTrail.push({ t: source, midi: reading.midi });
         if (liveTrail.length > 2000) liveTrail.splice(0, liveTrail.length - 1500);
       }
-    } else lane.liveMidi = null;
+    }
 
     if (view === 'staff') lane.draw(now);
     else karaoke.update(now, playing);
