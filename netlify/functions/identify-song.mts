@@ -15,11 +15,12 @@ import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
-// Groq's "compound" searches the web — it finds a song from a line of lyrics the way a person would.
-// Then the biggest plain model. The next one is tried if a model is unavailable.
-export const MODELS = ['groq/compound', 'openai/gpt-oss-120b', 'groq/compound-mini'];
-const COMPARE = ['moonshotai/kimi-k2-instruct', 'moonshotai/kimi-k2-instruct-0905', 'llama-3.3-70b-versatile', 'meta-llama/llama-4-maverick-17b-128e-instruct', 'qwen/qwen3-32b'];
-const searches = (model: string) => model.startsWith('groq/compound');
+// Live tests: from memory alone these models don't name songs reliably, even from exact lyrics. The
+// gpt-oss models can search the web (Groq's built-in browser search) — they find a song from a line of
+// its lyrics the way a person would. The next model is tried if one is unavailable.
+export const MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+const COMPARE = ['groq/compound', 'groq/compound-mini', 'llama-3.3-70b-versatile', 'moonshotai/kimi-k2-instruct'];
+const searches = (model: string) => model.startsWith('openai/gpt-oss') || model.startsWith('groq/compound');
 
 export default async (req: Request) => {
   const key = env('GROQ_API_KEY');
@@ -41,10 +42,11 @@ export default async (req: Request) => {
       model,
       temperature: 0,
       // Reasoning models think before they answer: room for that, kept short.
-      max_tokens: searches(model) ? 2500 : 1500,
-      ...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : {}),
+      max_tokens: searches(model) ? 4000 : 1500,
+      ...(model.startsWith('openai/') ? { reasoning_effort: 'medium' } : {}),
       // Web-searching models answer in text (JSON is picked out of it below).
       ...(searches(model) ? {} : { response_format: { type: 'json_object' } }),
+      ...(model.startsWith('openai/gpt-oss') ? { tools: [{ type: 'browser_search' }], tool_choice: 'auto' } : {}),
       messages: [
         {
           role: 'system',
