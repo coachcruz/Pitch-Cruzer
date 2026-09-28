@@ -525,24 +525,32 @@ input[type='range'] { accent-color: var(--accent); }
 .stage.withBuilder { grid-template-columns: minmax(0, 1fr) 340px; }
 .stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr) 220px 340px; }
 .builder {
-  display: flex; flex-direction: column; gap: 12px; padding: 14px; overflow-y: auto; min-height: 0;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px; overflow-y: auto; min-height: 0; align-self: start; max-height: 100%;
   background: var(--surface); border: 1px solid var(--border); border-radius: 0;
 }
 .builder > * { flex-shrink: 0; }  /* the panel scrolls as a whole; nothing in it gets squeezed */
-.builder .btn { border-radius: 2px; min-height: 38px; padding: 0 14px; font-size: 0.92rem; box-shadow: none; }
+/* The builder has its own buttons: the floating play bar (Play and Record are off while building) goes away. */
+.stage.withBuilder .controls { display: none; }
+.builder .btn { border-radius: 0; min-height: 40px; padding: 0 12px; font-size: 0.92rem; box-shadow: none; }
 .builder .btn:active:not(:disabled) { transform: none; }
-.builder .bHead { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
-.builder .bHead h2 { margin: 0; font-size: 0.95rem; text-transform: uppercase; letter-spacing: 0.06em; }
-.builder .bHead .bMeta { flex: 1; white-space: nowrap; }
-.builder .bClose { min-height: 30px; padding: 0 10px; }
+.builder .btn.ghost { background: transparent; border: 1px solid var(--border); }
+.builder .bHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.builder .bHead h2 { margin: 0; font-size: 1rem; white-space: nowrap; }
+.builder .bClose { min-height: 32px; padding: 0 10px; }
 .builder .bMeta { margin: 0; color: var(--muted); font-size: 0.82rem; }
-.builder .bLine { margin: 0; font-size: 1.3rem; font-weight: 700; line-height: 1.35; }
-.builder .bLine.highlight .bWord { transition: color 0.12s; color: var(--muted); }
-.builder .bLine.highlight .bWord.sung { color: var(--text); }
+.builder .bProgress { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.builder .bStrip { display: flex; gap: 2px; }
+.builder .bStrip i { flex: 1; height: 6px; background: var(--surface-2); }
+.builder .bStrip i.kept { background: var(--good); }
+.builder .bStrip i.now { outline: 2px solid var(--accent); outline-offset: 1px; }
+.builder .bNav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.builder .bNav .btn { min-height: 30px; width: 40px; padding: 0; }
+.builder .bLine { margin: 0; font-size: 1.35rem; font-weight: 700; line-height: 1.35; color: var(--text); }
+.builder .bLine.highlight .bWord { transition: color 0.12s; }
 .builder .bLine.highlight .bWord.now { color: var(--accent-2); }
-.builder .bBar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.builder .bNav { display: flex; gap: 6px; margin-left: auto; }
-.builder .bOpts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 8px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.builder .bGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.builder .bGrid.one { grid-template-columns: 1fr; }
+.builder .bOpts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-top: 10px; border-top: 1px solid var(--border); }
 .builder .bOpts .check { align-items: center; gap: 6px; }
 .builder .bOpts .check input { margin-top: 0; border-radius: 0; }
 .builder .bStatus { margin: 0; font-weight: 700; }
@@ -553,7 +561,7 @@ input[type='range'] { accent-color: var(--accent); }
 .builder .bScore.good { color: var(--good); }
 .builder .bScore.close { color: var(--close); }
 .builder .bScore.off { color: var(--off); }
-.builder .bFoot { display: grid; gap: 8px; margin-top: auto; }
+.builder .bFoot { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .builder .bFoot audio { width: 100%; }
 /* In the lyrics: the line being built, and kept lines with their score. */
 .lyricLine.building .lineText { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 10px; }

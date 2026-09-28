@@ -165,7 +165,6 @@ export class SongBuilder {
     this.index = Math.max(0, Math.min(this.lines.length - 1, index));
     this.attempt = null;
     this.phase = 'ready';
-    this.host.show(this.plan().start);
     this.render();
     this.host.linesChanged();
   }
@@ -379,43 +378,53 @@ export class SongBuilder {
     const all = keptCount === this.lines.length;
     const tone = (score: number) => (score >= 70 ? 'good' : score >= 45 ? 'close' : 'off');
     const plan = this.plan();
+    // Between turns the lyrics sit just before this line, not wherever the last playback stopped.
+    if (!busy) this.host.show(line.start - 0.05);
     const cueWords = plan.cueFrom === null ? '' : this.host.song.analysis.lines.flatMap(sung)
       .filter(word => word.start >= plan.cueFrom! - 0.01 && word.end <= plan.lineStart + 0.05).map(word => word.text).join(' ');
     const words = sung(line).map(word => `<span class="bWord" data-s="${word.start.toFixed(3)}" data-e="${word.end.toFixed(3)}">${escapeHtml(word.text)}</span>`).join(' ');
     const option = (key: keyof SongBuilder['opts'], label: string, hint: string) =>
       `<label class="check small" title="${escapeHtml(hint)}"><input type="checkbox" data-opt="${key}" ${this.opts[key] ? 'checked' : ''} ${busy ? 'disabled' : ''}> ${label}</label>`;
 
+    const stop = '<div class="bGrid one"><button class="btn" data-act="stop">■ Stop</button></div>';
     let body = '';
-    if (phase === 'listening' || phase === 'hearing') body = `<p class="bStatus">${phase === 'listening' ? 'Listening to the artist…' : 'Your take…'}</p><div class="bBar"><button class="btn" data-act="stop">■ Stop</button></div>`;
-    else if (phase === 'recording') body = `<p class="bStatus live">${plan.cueFrom === null ? 'Get ready — your turn after the count-in' : 'Your turn comes right after the artist’s cue'}</p><div class="bBar"><button class="btn" data-act="stop">■ Stop</button></div>`;
+    if (phase === 'listening' || phase === 'hearing') body = `<p class="bStatus">${phase === 'listening' ? 'Listening to the artist…' : 'Your take…'}</p>${stop}`;
+    else if (phase === 'recording') body = `<p class="bStatus live">${plan.cueFrom === null ? 'Get ready — your turn after the count-in' : 'Your turn comes right after the artist’s cue'}</p>${stop}`;
     else if (phase === 'scoring') body = '<p class="bStatus">Checking how it went…</p>';
     else if (phase === 'assembling') body = '<p class="bStatus">Putting your song together…</p>';
     else if (phase === 'result' && this.attempt) {
       const feedback = lineFeedback(this.attempt.score);
       body = `<div class="bResult"><span class="bScore ${tone(this.attempt.score.score)}">${this.attempt.score.score}%</span>
           <div><strong>${escapeHtml(feedback.headline)}</strong><p>${escapeHtml(feedback.note)}</p></div></div>
-        <div class="bBar">
+        <div class="bGrid">
           <button class="btn primary" data-act="keep">Keep &amp; next</button>
-          <button class="btn" data-act="retry">Try again</button>
-          <button class="btn" data-act="hear">Hear my take</button>
-          <button class="btn" data-act="listen">Original</button>
+          <button class="btn" data-act="retry">● Try again</button>
+          <button class="btn ghost" data-act="hear">▶ My take</button>
+          <button class="btn ghost" data-act="listen">▶ Original</button>
         </div>`;
     } else {
-      body = `${keptHere ? `<p class="bMeta">Kept at ${keptHere.score}%. Sing it again to replace it, or pick another line.</p>` : ''}
-        <div class="bBar">
+      body = `${keptHere ? `<p class="bMeta">Kept at ${keptHere.score}%. Sing it again to replace it.</p>` : ''}
+        <div class="bGrid">
           <button class="btn" data-act="listen">▶ Listen</button>
           <button class="btn primary" data-act="sing">● Sing</button>
-          <span class="bNav">
-            <button class="btn" data-act="prev" ${this.index === 0 ? 'disabled' : ''} title="Previous line" aria-label="Previous line">◀</button>
-            <button class="btn" data-act="next" ${this.index === this.lines.length - 1 ? 'disabled' : ''} title="Next line" aria-label="Next line">▶</button>
-          </span>
         </div>`;
     }
+    const strip = this.lines.map((item, i) => {
+      const done = this.kept.has(this.keyOf(item));
+      return `<i class="${done ? 'kept' : ''} ${i === this.index ? 'now' : ''}" title="Line ${i + 1}${done ? ' — kept' : ''}"></i>`;
+    }).join('');
 
     this.panel.innerHTML = `
       <div class="bHead"><h2>Build my song</h2>
-        <span class="bMeta">Line ${this.index + 1} of ${this.lines.length} · ${keptCount} kept</span>
-        <button class="btn bClose" data-act="close" aria-label="Close the builder" ${busy ? 'disabled' : ''}>✕</button></div>
+        <button class="btn bClose" data-act="close" aria-label="Close the builder" title="Close" ${busy ? 'disabled' : ''}>✕</button></div>
+      <div class="bProgress">
+        <div class="bStrip" aria-hidden="true">${strip}</div>
+        <div class="bNav">
+          <button class="btn ghost" data-act="prev" ${this.index === 0 || busy ? 'disabled' : ''} aria-label="Previous line">◀</button>
+          <span class="bMeta">Line ${this.index + 1} of ${this.lines.length} · ${keptCount} kept</span>
+          <button class="btn ghost" data-act="next" ${this.index === this.lines.length - 1 || busy ? 'disabled' : ''} aria-label="Next line">▶</button>
+        </div>
+      </div>
       <p class="bLine ${this.opts.highlight ? 'highlight' : ''}">${words}</p>
       <p class="bMeta">${cueWords ? `Cue: the artist sings “…${escapeHtml(cueWords)}”, then it’s you.` : this.opts.music ? 'Cue: the music counts you in.' : 'Cue: three beeps count you in.'}</p>
       ${body}
@@ -425,12 +434,10 @@ export class SongBuilder {
         ${option('highlight', 'Highlight words', 'Light up the words as they’re sung')}
       </div>
       <div class="bFoot">
-        <p class="bMeta">Tap any line in the lyrics to pick it.</p>
-        <div class="bBar">
-          <button class="btn ${all ? 'primary' : ''}" data-act="assemble" ${keptCount && !busy ? '' : 'disabled'}>${all ? 'Put my song together' : 'Put together what I’ve sung'}</button>
-          ${keptCount ? `<button class="btn" data-act="startOver" ${busy ? 'disabled' : ''}>Start over</button>` : ''}
-        </div>
-        ${this.result ? `<audio controls src="${this.result.url}"></audio><div class="bBar"><button class="btn" data-act="download">⬇ Download</button></div>` : ''}
+        <button class="btn ${all ? 'primary' : ''}" data-act="assemble" ${keptCount && !busy ? '' : 'disabled'}>${all ? 'Put my song together' : 'Put together what I’ve sung'}</button>
+        ${keptCount ? `<button class="btn ghost" data-act="startOver" ${busy ? 'disabled' : ''}>Start over</button>` : ''}
+        ${this.result ? `<audio controls src="${this.result.url}"></audio><button class="btn" data-act="download">⬇ Download</button>` : ''}
+        <p class="bMeta">Tip: tap any line in the lyrics to jump to it.</p>
       </div>`;
     this.update(-1);
   }
