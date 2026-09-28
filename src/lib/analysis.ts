@@ -21,7 +21,7 @@ export type SectionKind = 'intro' | 'verse' | 'pre' | 'chorus' | 'bridge' | 'ins
 export interface Section { id: string; kind: SectionKind; label: string; start: number; end: number }
 
 /** Bump when note detection changes, so saved songs re-check their notes when opened. */
-export const NOTES_VERSION = 2;
+export const NOTES_VERSION = 3;   // 3: fewer notes read an octave low (tenor, alto, soprano)
 
 export interface SongAnalysis {
   duration: number;

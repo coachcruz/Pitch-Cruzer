@@ -54,11 +54,10 @@ export class PitchLane {
     breaths: BreathMark[] = []
   ) {
     this.ctx = canvas.getContext('2d')!;
-    // The staff spans exactly what the song sings plus 2 notes each side, and never moves. A voice
-    // outside it is pinned to the edge with an arrow.
-    const sung = notes.map(note => Math.round(note.midi));
-    const songLow = sung.length ? Math.min(...sung) : range?.[0];
-    const songHigh = sung.length ? Math.max(...sung) : range?.[1];
+    // The staff spans what the song sings plus 2 notes each side, and never moves. A few stray notes (a
+    // detection slip, a squeak) don't stretch it: it covers the notes that make up 98% of the singing
+    // time. A note or voice outside it is pinned to the edge with an arrow.
+    const [songLow, songHigh] = notes.length ? singingRange(notes) : [range?.[0], range?.[1]];
     let low = songLow === undefined ? 45 : songLow - 2;
     let high = songHigh === undefined ? 69 : songHigh + 2;
     if (high - low < 8) {
@@ -442,4 +441,16 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
   ctx.fill();
+}
+
+/** The lowest and highest notes the song really sings: 1% of the singing time is left out at each end. */
+export function singingRange(notes: Array<{ start: number; end: number; midi: number }>): [number, number] {
+  const sorted = notes.map(note => ({ midi: Math.round(note.midi), time: Math.max(0.01, note.end - note.start) })).sort((a, b) => a.midi - b.midi);
+  const total = sorted.reduce((sum, note) => sum + note.time, 0);
+  const at = (share: number) => {
+    let seen = 0;
+    for (const note of sorted) { seen += note.time; if (seen >= total * share) return note.midi; }
+    return sorted[sorted.length - 1].midi;
+  };
+  return [at(0.01), at(0.99)];
 }
