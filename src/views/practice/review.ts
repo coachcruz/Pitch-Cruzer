@@ -7,6 +7,7 @@ import type { TrailPoint } from '../../ui/lane';
 import { session } from '../../session';
 import { el, escapeHtml, prefs, toast } from '../../ui/dom';
 import { bestLine, lineText, safeName } from './text';
+import { visitId, visitStore } from '../../lib/visit';
 
 /** A take being reviewed: the recorded voice, where it sits against the song, and its score. */
 export interface Review {
@@ -20,6 +21,8 @@ export interface Review {
   label: string;
   savedId?: string;
   singer?: string;
+  /** Not saved yet, but kept on the device for this visit (until the window is closed): its take id. */
+  keptId?: string;
 }
 
 /** What the review needs from the practice screen. */
@@ -56,7 +59,7 @@ export class TakeReview {
   constructor(private host: ReviewHost) {
     this.dialog = el<HTMLDialogElement>(host.root, '#reviewDialog');
     this.panel = el(host.root, '#review');
-    this.dialog.addEventListener('close', () => { if (host.isPlayingTake()) host.stop(); });
+    this.dialog.addEventListener('close', () => { if (host.isPlayingTake()) host.stop(); visitStore.set('reviewTake', null); });
     el(host.root, '#reviewDialogClose').addEventListener('click', () => this.dialog.close());
   }
 
@@ -75,11 +78,50 @@ export class TakeReview {
     this.panel.classList.add('hidden');
   }
 
-  /** Scores a fresh recording and shows it. */
+  /** Scores a fresh recording and shows it — and keeps it for this visit, even before it's saved. */
   async fromRecording(voice: AudioBuffer, offset: number, ranges: Range[], repeats: number, label: string): Promise<void> {
     this.panel.innerHTML = '<p>Scoring your take…</p>';
     this.open(true);
     await this.build(voice, offset, ranges, repeats, label);
+    await this.keepForVisit();
+  }
+
+  /**
+   * Your take stays until you close the window, not just while this page is in memory: switching tabs
+   * or apps, locking the phone or the page being reloaded (phones reclaim background pages) keeps it.
+   */
+  private kept: StoredTake | null = null;
+  private async keepForVisit(): Promise<void> {
+    const review = this.current;
+    if (!review || review.savedId) return;
+    try {
+      if (!session.saved) { await saveSong(this.host.song); session.saved = true; }
+      const take: StoredTake = this.kept && this.kept.id === review.keptId
+        ? { ...this.kept, score: review.score.score, offsetSeconds: review.offset }
+        : {
+          id: review.keptId ?? crypto.randomUUID(), songId: this.host.song.id, singer: prefs.get('singer', '') || 'Me',
+          createdAt: Date.now(), score: review.score.score, label: review.label,
+          voice: encodeWav([review.voice.getChannelData(0)], review.voice.sampleRate), sampleRate: review.voice.sampleRate,
+          segments: review.ranges, offsetSeconds: review.offset, visit: visitId()
+        };
+      await saveTake(take);
+      this.kept = take;
+      review.keptId = take.id;
+      if (this.dialog.open) visitStore.set('reviewTake', take.id);
+      void this.renderTakes();
+    } catch { /* storage full: the take stays on screen, it just isn't kept past this page */ }
+  }
+
+  /** After the page was reloaded (a phone reclaiming it, an update): open the take that was being reviewed. */
+  async restoreAfterReload(): Promise<void> {
+    const id = visitStore.get('reviewTake');
+    if (!id || this.current) return;
+    const take = (await listTakes(this.host.song.id).catch(() => [] as StoredTake[])).find(item => item.id === id);
+    if (!take) { visitStore.set('reviewTake', null); return; }
+    const voice = await decodeAudio(await take.voice.arrayBuffer());
+    this.panel.innerHTML = '<p>Opening your take…</p>';
+    this.open(true);
+    await this.build(voice, take.offsetSeconds, take.segments, 1, take.label, take);
   }
 
   /** Re-scores the current take (after changing octave forgiveness, sync or duet parts). */
@@ -88,6 +130,7 @@ export class TakeReview {
     this.current.score = this.score(this.current.offset, this.current.timeline);
     this.render();
     this.host.changed();
+    if (this.current.keptId) void this.keepForVisit();
   }
 
   refreshPlayButton(): void {
@@ -103,7 +146,13 @@ export class TakeReview {
   private async build(voice: AudioBuffer, offset: number, ranges: Range[], repeats: number, label: string, saved?: StoredTake): Promise<void> {
     const timeline = new Timeline(ranges, repeats);
     this.track = await pitchTrackFor(voice);
-    this.current = { voice, offset, baseOffset: saved ? saved.offsetSeconds : offset, ranges, repeats, timeline, score: this.score(offset, timeline), label, savedId: saved?.id, singer: saved?.singer };
+    const keptOnly = saved?.visit !== undefined;   // a take kept for this visit, not saved yet
+    this.current = {
+      voice, offset, baseOffset: saved ? saved.offsetSeconds : offset, ranges, repeats, timeline, score: this.score(offset, timeline), label,
+      savedId: keptOnly ? undefined : saved?.id, keptId: keptOnly ? saved!.id : undefined, singer: keptOnly ? undefined : saved?.singer
+    };
+    this.kept = keptOnly ? saved! : null;
+    if (this.dialog.open && (saved?.id)) visitStore.set('reviewTake', saved.id);
     this.render();
     this.host.changed();
   }
@@ -159,6 +208,7 @@ export class TakeReview {
     el(panel, '#reviewDiscard').addEventListener('click', () => {
       if (!review.savedId && !confirm('Discard this take without saving it?')) return;
       if (host.isPlayingTake()) host.stop();
+      if (review.keptId && !review.savedId) void deleteTake(review.keptId).then(() => this.renderTakes());
       this.clear();
       host.showTrail(null);
       host.changed();
@@ -195,7 +245,7 @@ export class TakeReview {
       try {
         if (!session.saved) { await saveSong(host.song); session.saved = true; }
         const take: StoredTake = {
-          id: review.savedId ?? crypto.randomUUID(),
+          id: review.savedId ?? review.keptId ?? crypto.randomUUID(),
           songId: host.song.id,
           singer,
           createdAt: Date.now(),
@@ -208,6 +258,8 @@ export class TakeReview {
         };
         await saveTake(take);
         review.savedId = take.id;
+        review.keptId = undefined;
+        this.kept = null;
         review.singer = singer;
         toast('Take saved for ' + singer + '.');
         this.render();
@@ -247,7 +299,7 @@ export class TakeReview {
     if (!takes.length) { list.innerHTML = '<p class="empty">Save a take to start your leaderboard — pass the mic around!</p>'; return; }
     list.innerHTML = '<ol class="board">' + takes.map((take, index) => `<li>
       <span class="rank">${index === 0 ? '🏆' : index + 1}</span>
-      <span class="who"><b>${escapeHtml(take.singer)}</b><small>${escapeHtml(take.label)} · ${new Date(take.createdAt).toLocaleDateString()}</small></span>
+      <span class="who"><b>${escapeHtml(take.singer)}</b><small>${escapeHtml(take.label)} · ${take.visit ? 'not saved yet — kept until you close the window' : new Date(take.createdAt).toLocaleDateString()}</small></span>
       <span class="pts">${take.score}</span>
       <button class="btn ghost small" data-open-take="${take.id}">Open</button>
       <button class="btn ghost small" data-delete-take="${take.id}" aria-label="Delete take">✕</button></li>`).join('') + '</ol>';

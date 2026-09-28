@@ -756,6 +756,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     changed: renderLyrics
   });
   $('#openTakes').addEventListener('click', () => review.open());
+  // The page was reloaded while a take was open (a phone reclaiming it, an update): open it again.
+  void review.restoreAfterReload();
 
   // ================================================================ build my song (line by line)
   builder = new SongBuilder({
@@ -966,7 +968,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   loop();
 
   // A new version of the app waits (see lib/update) while you play, sing, record or have an unsaved take.
-  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId) || Boolean(builder?.busy);
+  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId && !review.current.keptId) || Boolean(builder?.busy);
 
   return () => {
     disposed = true;

@@ -3,6 +3,8 @@ import { renderHome } from './views/home';
 import { renderPractice } from './views/practice';
 import { renderTuner } from './views/tuner';
 import { keepUpToDate } from './lib/update';
+import { forgetClosedVisits } from './lib/library';
+import { markVisitAlive, openVisits } from './lib/visit';
 import { session } from './session';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -44,6 +46,11 @@ function route(): void {
 window.addEventListener('hashchange', route);
 route();
 keepUpToDate();
+// Unsaved takes are kept until their window is closed: now's when to throw out those of closed windows.
+markVisitAlive();
+window.setInterval(markVisitAlive, 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') markVisitAlive(); });
+void forgetClosedVisits(openVisits()).catch(() => undefined);
 
 // Old versions of the app installed a caching service worker that could serve a stale page.
 // Replace it with the current one (network-first, never caches API calls or models).
