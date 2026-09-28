@@ -7,12 +7,15 @@ import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
  * having to find them. Speech recognition on singing is only roughly right, but a language model
  * recognises a song from rough lines the way a person would. Uses the same GROQ_API_KEY as /api/transcribe.
  *
- * POST { heard: string, hint?: string }  ←  { title, artist } or { title: null }
+ * POST { heard: string, hint?: string }  ←  { title, artist, model } (title null: not recognised)
+ * ?model=… asks only that one of MODELS (to compare them on real lyrics).
  * The caller double-checks the answer against what was heard before trusting it.
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
-const MODELS = ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant'];
+// Most song knowledge first (tested on real lyrics: the small Llama models name the wrong song even
+// from exact lyrics). The next one is tried if a model is unavailable.
+const MODELS = ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'llama-3.3-70b-versatile'];
 
 export default async (req: Request) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -32,7 +35,9 @@ export default async (req: Request) => {
     body: JSON.stringify({
       model,
       temperature: 0,
-      max_tokens: 300,
+      // Reasoning models think before they answer: room for that, kept short.
+      max_tokens: 1500,
+      ...(model.startsWith('openai/') ? { reasoning_effort: 'low' } : {}),
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -60,7 +65,9 @@ export default async (req: Request) => {
     }
     return false;
   };
-  if (!(await tryModels(MODELS)) && !limited) await tryModels(await currentModels(key));
+  const only = new URL(req.url).searchParams.get('model');
+  if (only && MODELS.includes(only)) await tryModels([only]);
+  else if (!(await tryModels(MODELS)) && !limited) await tryModels(await currentModels(key));
   const final = response as Response | null;
   // A model that was only busy beats one that's gone: the browser waits and asks again.
   if (limited && !final?.ok) return rateLimited(limited);
@@ -73,7 +80,7 @@ export default async (req: Request) => {
   let answer: { title?: unknown; artist?: unknown } = {};
   try { answer = JSON.parse(result?.choices?.[0]?.message?.content ?? '{}'); } catch { /* not JSON: treat as unknown */ }
   const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, 120) : null);
-  return json({ title: text(answer.title), artist: text(answer.artist) });
+  return json({ title: text(answer.title), artist: text(answer.artist), model: tried[tried.length - 1]?.split(' → ')[0] ?? null });
 };
 
 /** Chat models Groq offers right now (not the listed ones, nor speech, safety or tiny models), biggest first. */

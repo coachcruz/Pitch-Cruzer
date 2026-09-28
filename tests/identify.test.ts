@@ -26,25 +26,32 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('/api/identify', () => {
   it('uses the first listed model that works', async () => {
-    const asked = groq([], model => (model === 'llama-3.3-70b-versatile' ? song('Hello') : gone()));
-    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone' });
-    expect(asked).toEqual(['llama-3.3-70b-versatile']);
+    const asked = groq([], model => (model === 'moonshotai/kimi-k2-instruct' ? song('Hello') : gone()));
+    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone', model: 'moonshotai/kimi-k2-instruct' });
+    expect(asked).toEqual(['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct']);
   });
 
   it('when every listed model is retired, tries the chat models Groq has now, biggest first', async () => {
     const asked = groq(['whisper-large-v3', 'llama-guard-4-12b', 'tiny-1b', 'new-chat-70b', 'other-chat-32b'],
       model => (model === 'other-chat-32b' ? song('Hello') : gone()));
-    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone' });
+    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone', model: 'other-chat-32b' });
     expect(asked.slice(3)).toEqual(['new-chat-70b', 'other-chat-32b']);
   });
 
   it('passes on a rate limit even when the models after it are gone', async () => {
-    const asked = groq(['new-chat-70b'], model => (model === 'llama-3.3-70b-versatile'
+    const asked = groq(['new-chat-70b'], model => (model === 'openai/gpt-oss-120b'
       ? new Response('{}', { status: 429, headers: { 'retry-after': '30' } }) : gone()));
     const response = await identify(request());
     expect(response.status).toBe(429);
     expect(response.headers.get('retry-after')).toBe('30');
-    expect(asked).toEqual(['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant']);
+    expect(asked).toEqual(['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct', 'llama-3.3-70b-versatile']);
+  });
+
+  it('?model= asks only that model (to compare them)', async () => {
+    const asked = groq([], () => song('Hello'));
+    const one = new Request('https://site/api/identify?model=llama-3.3-70b-versatile', { method: 'POST', body: JSON.stringify({ heard: HEARD }) });
+    expect((await (await identify(one)).json()).model).toBe('llama-3.3-70b-versatile');
+    expect(asked).toEqual(['llama-3.3-70b-versatile']);
   });
 
   it('says what Groq answered when nothing works', async () => {
@@ -54,6 +61,6 @@ describe('/api/identify', () => {
     const body = await response.json();
     expect(body.error).toBe('Recognition service error 404');
     expect(body.detail).toContain('decommissioned');
-    expect(body.tried).toEqual(['llama-3.3-70b-versatile → 404', 'openai/gpt-oss-120b → 404', 'llama-3.1-8b-instant → 404']);
+    expect(body.tried).toEqual(['openai/gpt-oss-120b → 404', 'moonshotai/kimi-k2-instruct → 404', 'llama-3.3-70b-versatile → 404']);
   });
 });
