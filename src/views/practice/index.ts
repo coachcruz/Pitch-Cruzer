@@ -599,6 +599,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     recordButton.textContent = recording ? '■ Review' : '●';
     recordButton.title = recording ? 'Stop and see how you did' : 'Record yourself';
     recordButton.classList.toggle('live', recording);
+    // Switching the mic mid-take would drop the rest of the recording: the mic settings wait until it's done.
+    const taking = recording || Boolean(builder?.active);
+    for (const id of ['#micInput', '#micRaw', '#speakers']) $<HTMLInputElement | HTMLSelectElement>(id).disabled = taking;
   };
 
   const beep = (when: number, accent: boolean) => {

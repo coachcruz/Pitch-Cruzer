@@ -46,7 +46,7 @@ export function micPicker(select: HTMLSelectElement, status: HTMLElement, mic: L
     const chosen = chosenMic();
     select.innerHTML = '<option value="">Automatic (the device picks)</option>'
       + mics.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
-    const match = chosen && mics.find(item => item.id === chosen.id || item.label === chosen.label);
+    const match = chosen && (mics.find(item => item.id === chosen.id) ?? mics.find(item => item.label === chosen.label));
     select.value = match ? match.id : '';
     if (chosen && !match) select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(chosen.id)}" selected>${escapeHtml(chosen.label)} (not connected)</option>`);
     const warning = mic.active ? micWarning(mic) : '';

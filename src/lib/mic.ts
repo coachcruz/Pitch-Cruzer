@@ -53,7 +53,10 @@ export class LiveMic {
     const audio: MediaTrackConstraints & { voiceIsolation?: boolean } = raw
       ? { echoCancellation: echoCancel, noiseSuppression: false, autoGainControl: false, voiceIsolation: false, channelCount: 1 }
       : { echoCancellation: echoCancel, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
-    const id = choice ? (await listMics()).find(mic => mic.id === choice.id || mic.label === choice.label)?.id : undefined;
+    const mics = choice ? await listMics() : [];
+    // The exact mic first; by name only if its id changed (two mics of the same model share a name).
+    const id = choice ? (mics.find(mic => mic.id === choice.id) ?? mics.find(mic => mic.label === choice.label))?.id : undefined;
+    if (choice && !id) this.fellBack = true;   // the picked mic isn't connected: the default one is used
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...audio, deviceId: { exact: id } } : audio, video: false });
     } catch (error) {
