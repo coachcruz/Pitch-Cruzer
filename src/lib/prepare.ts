@@ -311,8 +311,10 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
       sourceId = imported.id;
       // A Suno song arrives with its own title and lyrics: use them like pasted lyrics.
       if (imported.title) title = imported.title;
-      if (imported.lyrics && !source.pasted?.trim()) {
-        source = { pasted: imported.lyrics };
+      if (imported.lyrics) {
+        // Lyrics you paste (even later, while the song is prepared) still win over the link's own.
+        const given = lyricsSource, own = imported.lyrics;
+        source = { get pasted() { return given.pasted?.trim() || own; }, lookup: given.lookup };
         diag('Lyrics: using the song’s own lyrics from the link (' + imported.lyrics.split('\n').filter(Boolean).length + ' lines)', 'ok');
       }
     }

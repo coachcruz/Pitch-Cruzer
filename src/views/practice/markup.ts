@@ -31,6 +31,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
       <div class="menuWrap">
         <button id="moreBtn" class="iconBtn" aria-label="More options" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div id="moreMenu" class="popMenu hidden" role="menu">
+          <button id="buildSong" class="menuItem" role="menuitem">🧩 Build my song (line by line)</button>
           <button id="choosePart" class="menuItem" role="menuitem">Practice a part…</button>
           <button id="pickLines" class="menuItem" role="menuitem">Pick lines to practice</button>
           <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
@@ -64,6 +65,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <div id="lineFlash" class="lineFlash" aria-live="polite"></div>
       </div>
       <aside class="upNext hidden" id="upNextPanel" aria-label="Up next"><h3>Up next</h3><ol id="upNext"></ol></aside>
+      <section id="builder" class="builder hidden" aria-label="Build my song" aria-live="polite"></section>
 
       <div id="controls" class="controls" role="toolbar" aria-label="Playback">
         <span id="grip" class="grip" tabindex="0" role="button" title="Drag to move the controls (or use the arrow keys)" aria-label="Move the controls">⠿</span>

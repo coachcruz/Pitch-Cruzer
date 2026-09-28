@@ -25,6 +25,8 @@ export class PitchLane {
   private readonly low: number = 45;
   private readonly high: number = 69;
   trail: TrailPoint[] = [];
+  /** The note you're singing right now (steadied), shown at the playhead — also while the song is stopped. */
+  voice: number | null = null;
   /** Score the right note in any octave (the line is still drawn where you really sing). */
   forgiveOctave = false;
   /** Seconds of song across the lane; fitted to the lyrics by layoutWords(). */
@@ -409,6 +411,22 @@ export class PitchLane {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
+    // ---- your voice now: a dot on the playhead (no text: a label that changed every frame was hard to read)
+    if (this.voice !== null) {
+      const rawY = y(this.voice);
+      const vy = Math.min(height - 8, Math.max(laneTop + 8, rawY));
+      ctx.fillStyle = color('--voice');
+      ctx.beginPath();
+      if (vy === rawY) ctx.arc(playX, vy, 7, 0, Math.PI * 2);
+      else { // above or below the staff: an arrow pointing to where you are
+        const dir = rawY < vy ? -1 : 1;
+        ctx.moveTo(playX, vy + dir * 8);
+        ctx.lineTo(playX - 7, vy - dir * 4);
+        ctx.lineTo(playX + 7, vy - dir * 4);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
   }
 }
 

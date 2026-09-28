@@ -41,6 +41,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         `<option value="${choice.value}">${choice.value === 'auto' ? 'Any language' : escapeHtml(choice.label)}</option>`).join('')}</select>
       <button class="btn primary" type="submit">Search</button>
     </form>
+    <details class="pasteWrap"><summary>Have the lyrics? Paste them <small>(for any song — a file, a recording, YouTube or Suno)</small></summary>
+      <textarea id="pasteLyrics" rows="5" placeholder="One sung line per line — they’re matched to the singer automatically. You can paste them before or after picking the song, while it’s being prepared."></textarea>
+    </details>
     <div class="sources" role="radiogroup" aria-label="Where to get the song">
       ${SOURCES.map(source => `<button type="button" role="radio" data-source="${source.id}" aria-checked="false" title="${escapeHtml(source.hint)}">${source.label}</button>`).join('')}
       <label class="srcFile" title="A song file on this device — bought/downloaded from Spotify, Apple Music, Amazon… (MP3, WAV, M4A, FLAC, video). Or drop it on this card.">📁 Upload a file
@@ -69,9 +72,6 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
 
     <div id="capReviewHost"></div>
 
-    <details class="pasteWrap"><summary>Have the lyrics? Paste them <small>(best for your own or Suno songs)</small></summary>
-      <textarea id="pasteLyrics" rows="5" placeholder="One sung line per line — they’re matched to the singer automatically."></textarea>
-    </details>
   </section>
 
   <section id="progressCard" class="card hidden" aria-live="polite">
@@ -100,10 +100,13 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   /** The song's name (typed, or the video's title) — names the song and finds its real lyrics. */
   let songTitle = '';
   const lyricsSource = (input: SongInput): LyricsSource => {
-    const pasted = pasteLyrics.value.trim();
-    if (pasted) return { pasted };
     const lookup = songTitle || (input.kind === 'link' ? '' : songNameFromFile(input.name));
-    return lookup ? { lookup } : {};
+    return {
+      // Read when the lyrics are written (after sending, separating and finding the notes), not when the
+      // song was picked: lyrics pasted while the song is being prepared still count, for any kind of song.
+      get pasted() { return pasteLyrics.value.trim() || undefined; },
+      lookup: lookup || undefined
+    };
   };
 
   const addCard = el(root, '.addSong');
@@ -480,6 +483,11 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   // Either button takes any file: a saved Pitch Cruzer song is opened, anything else is added as a song.
   const importInput = el<HTMLInputElement>(root, '#importInput');
   importInput.addEventListener('change', () => { takeFiles(importInput.files); importInput.value = ''; });
+
+  // A new version of the app waits (see lib/update) while a song is being added, a video is open or
+  // recording, or lyrics are typed in.
+  session.busy = () => addCard.classList.contains('busy') || recorder.recording || closeReview !== null
+    || !videoStage.classList.contains('hidden') || Boolean(pasteLyrics.value.trim());
 
   return () => {
     disposed = true;
