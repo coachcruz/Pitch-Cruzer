@@ -108,7 +108,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   let disposed = false;
   let parts: Map<string, Part> | null = duetParts(analysis);
 
-  const levels = { lead: prefs.get('mix.lead', 100), music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100 };
+  const levels = {
+    lead: prefs.get('mix.lead', 100), music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100,
+    // Listening back to a take has its own mix: the singer you sang with as a guide is off by default,
+    // since the take is your voice (it was never in your recording — only the player's copy of it).
+    takeLead: prefs.get('mix.takeLead', 0), takeMusic: prefs.get('mix.takeMusic', 100)
+  };
   const forgiveOctave = $<HTMLInputElement>('#forgiveOctave');
   const countIn = $<HTMLInputElement>('#countIn');
   forgiveOctave.checked = prefs.get('forgiveOctave', false);
@@ -672,6 +677,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const useCountIn = withRecording && countIn.checked;
     const model = await echoModelVoice();
     player.setLevel('voice', model ? levels.voice / 100 : 0);
+    player.setLevel('lead', levels.lead / 100);
+    player.setLevel('music', levels.music / 100);
     if (withRecording) mic.startRecording();
     const origin = await player.play(playbackRanges(), repeats(), {
       from, leadIn: useCountIn ? 1.9 : 0.12, model, partner: partnerRanges(analysis, parts)
@@ -687,6 +694,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     reviewPlaying = true;
     lane.trail = take.score.trail;
     player.setLevel('voice', levels.voice / 100);
+    player.setLevel('lead', analysis.separated ? levels.takeLead / 100 : 1);
+    player.setLevel('music', levels.takeMusic / 100);
     await player.play(take.ranges, take.repeats, { from, voice: { buffer: take.voice, offset: take.offset }, partner: partnerRanges(analysis, parts) });
     renderTransport();
   };
