@@ -35,7 +35,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
           <button id="pickLines" class="menuItem" role="menuitem">Pick lines to practice</button>
           <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
           <button id="fixLyrics" class="menuItem" role="menuitem">Fix lyrics</button>
-          <button id="redoLyrics" class="menuItem" role="menuitem">Redo lyrics (language)</button>
+          <button id="redoLyrics" class="menuItem" role="menuitem">Redo lyrics (listen again)</button>
           <button id="renameSections" class="menuItem" role="menuitem">Rename sections</button>
           <button id="renameSong" class="menuItem" role="menuitem">Rename song</button>
           <button id="downloadSong" class="menuItem" role="menuitem">Download song file</button>
@@ -162,7 +162,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
     <dialog id="redoDialog" class="dialog">
       <form method="dialog">
         <h2>Redo the lyrics</h2>
-        <p class="hint">Listens to the singer again. For bilingual songs pick both languages — each line gets its own language.</p>
+        <p class="hint">Listens to the singer again and writes down what’s sung. The language is found by itself; pick one only if it gets it wrong (for a bilingual song, pick both).</p>
         <label class="inline">Language <select id="redoLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
         <label class="inline">Accuracy <select id="redoQuality"><option value="fast">Faster (≈80 MB, recommended)</option><option value="best">Best (≈250 MB, several times slower)</option></select></label>
         <label id="redoKeepWrap" class="check small"><input id="redoKeep" type="checkbox" checked> Keep my lyrics — only line them up with the singer again</label>

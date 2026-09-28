@@ -8,9 +8,7 @@ import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
  * audio. Needs GROQ_API_KEY; without it the app falls back to the in-browser model.
  *
  * GET  → { available }             (is the server model set up?)
- * POST → audio/mpeg body (≤ 4 MB), ?lang=xx (optional), ?model=best (Whisper Large v3: slower and
- *        about 3× the price, but fewer misheard words), ?prompt=… (the words just before this piece,
- *        so a line cut between two pieces is heard in context)
+ * POST → audio/mpeg body (≤ 4 MB), ?lang=xx (optional)
  *      ← { language, words: [{ text, start, end }], segments: [{ start, end, noSpeech, logProb }] }
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -35,9 +33,7 @@ export default async (req: Request) => {
   const params = new URL(req.url).searchParams;
   const form = new FormData();
   form.append('file', new Blob([audio], { type: 'audio/mpeg' }), 'vocal.mp3');
-  form.append('model', params.get('model') === 'best' ? 'whisper-large-v3' : 'whisper-large-v3-turbo');
-  const prompt = params.get('prompt')?.trim().slice(-600);
-  if (prompt) form.append('prompt', prompt);
+  form.append('model', 'whisper-large-v3-turbo');
   form.append('response_format', 'verbose_json');
   form.append('timestamp_granularities[]', 'word');
   form.append('timestamp_granularities[]', 'segment');

@@ -320,22 +320,39 @@ export function buildWord(text: string, start: number, end: number, notes: NoteE
   return { text, start, end, syllables, lang };
 }
 
+// Chinese and Japanese are written without spaces: two such words sit side by side.
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]/u;
+
+/** Words written out as a line: spaced, except between Chinese/Japanese words. `render` gives each word's text or HTML. */
+export function joinWords<W extends { text: string }>(words: W[], render: (word: W) => string = word => word.text): string {
+  return words.map((word, i) => (i && !(CJK.test(words[i - 1].text.slice(-1)) && CJK.test(word.text.charAt(0))) ? ' ' : '') + render(word)).join('');
+}
+
 let lineCounter = 0;
 const lineId = () => 'l' + (lineCounter += 1).toString(36) + Math.random().toString(36).slice(2, 6);
 
 /**
  * Splits sung words into lyric lines the way a singer phrases them:
  *  - typed lyrics keep their own lines (`hardBreaks` = the first word of each typed line);
- *  - otherwise lines break where the singer breathes (a gap of ½ s or more), and tiny fragments
- *    (under 4 words) join their nearest neighbour when the pause between them is short;
- *  - any line still longer than 14 words or 9 seconds is split at its longest pause.
+ *  - otherwise lines break where the singer breathes (a gap of ½ s or more) and where the heard
+ *    words end a phrase (a comma or full stop — the listening model stretches a word over the
+ *    pause after it, so its punctuation is often the only sign). Tiny fragments (under 4 words)
+ *    join the neighbour they're least separated from;
+ *  - any line still longer than 14 words or 9 seconds is split where it's most separated, a rest
+ *    in the melody (`notes`) counting too.
  */
-export function groupLines(words: Word[], hardBreaks: Set<number> = new Set()): LyricLine[] {
+export function groupLines(words: Word[], hardBreaks: Set<number> = new Set(), notes: NoteEvent[] = []): LyricLine[] {
   if (!words.length) return [];
-  const gapBefore = (chunk: Word[], index: number) => chunk[index].start - chunk[index - 1].end;
+  // How clearly a line could end between `before` and `after`: seconds of pause, plus the punctuation.
+  const separation = (before: Word, after: Word) => {
+    const punctuation = /[.?!…]["'”’)\]]*$/.test(before.text) ? 1 : /[,;:—–]["'”’)\]]*$/.test(before.text) ? 0.6 : 0;
+    return after.start - before.end + punctuation;
+  };
+  const gapBefore = (chunk: Word[], index: number) => separation(chunk[index - 1], chunk[index])
+    + (notes.length ? 0.5 * longestRest(notes, chunk[index - 1].start, chunk[index].start) : 0);
   let chunks: Word[][] = [];
   words.forEach((word, index) => {
-    const breakHere = index === 0 || (hardBreaks.size ? hardBreaks.has(index) : word.start - words[index - 1].end >= 0.5);
+    const breakHere = index === 0 || (hardBreaks.size ? hardBreaks.has(index) : separation(words[index - 1], word) >= 0.5);
     if (breakHere) chunks.push([word]); else chunks[chunks.length - 1].push(word);
   });
   if (!hardBreaks.size) {
@@ -343,8 +360,8 @@ export function groupLines(words: Word[], hardBreaks: Set<number> = new Set()): 
       changed = false;
       for (let i = 0; i < chunks.length; i += 1) {
         if (chunks[i].length >= 4) continue;
-        const gapLeft = i > 0 ? chunks[i][0].start - chunks[i - 1][chunks[i - 1].length - 1].end : Infinity;
-        const gapRight = i + 1 < chunks.length ? chunks[i + 1][0].start - chunks[i][chunks[i].length - 1].end : Infinity;
+        const gapLeft = i > 0 ? separation(chunks[i - 1][chunks[i - 1].length - 1], chunks[i][0]) : Infinity;
+        const gapRight = i + 1 < chunks.length ? separation(chunks[i][chunks[i].length - 1], chunks[i + 1][0]) : Infinity;
         const target = gapLeft <= gapRight ? i - 1 : i + 1;
         const gap = Math.min(gapLeft, gapRight);
         if (gap > 1.5 || chunks[target].length + chunks[i].length > 12) continue;
@@ -393,7 +410,19 @@ function linesFromNotes(notes: NoteEvent[]): LyricLine[] {
 export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] {
   if (!timed.length) return linesFromNotes(notes);
   const words = timed.map(word => buildWord(word.text, word.start, word.end, notes, word.lang));
-  return groupLines(words);
+  return groupLines(words, new Set(), notes);
+}
+
+/** The longest stretch between `from` and `to` with no sung note (a rest in the melody). */
+function longestRest(notes: NoteEvent[], from: number, to: number): number {
+  let longest = 0, cursor = from;
+  for (const note of notes) {
+    if (note.end <= cursor) continue;
+    if (note.start >= to) break;
+    longest = Math.max(longest, note.start - cursor);
+    cursor = Math.max(cursor, note.end);
+  }
+  return Math.max(longest, to - cursor);
 }
 
 const normalizeWord = (value: string) => value.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}']/gu, '');

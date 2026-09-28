@@ -1,4 +1,4 @@
-import type { LyricLine } from '../../lib/analysis';
+import { joinWords, type LyricLine } from '../../lib/analysis';
 import { assembleSpan, lineFeedback, stitchVocal, turnPlan, type KeptLine, type TurnPlan } from '../../lib/assemble';
 import { decodeAudio, downloadBlob, encodeWav } from '../../lib/audio';
 import { buildLineId, clearBuild, listBuildLines, saveBuildLine, type StoredBuildLine, type StoredSong } from '../../lib/library';
@@ -287,7 +287,7 @@ export class SongBuilder {
     const line = this.line;
     const kept: StoredBuildLine = {
       id: this.keyOf(line), songId: this.host.song.id, start: line.start, end: line.end,
-      text: sung(line).map(word => word.text).join(' '), score: attempt.score.score,
+      text: joinWords(sung(line)), score: attempt.score.score,
       voice: encodeWav([attempt.voice.getChannelData(0)], attempt.voice.sampleRate),
       songTimeAtStart: attempt.range.start + attempt.offset, createdAt: Date.now()
     };
@@ -380,9 +380,10 @@ export class SongBuilder {
     const plan = this.plan();
     // Between turns the lyrics sit just before this line, not wherever the last playback stopped.
     if (!busy) this.host.show(line.start - 0.05);
-    const cueWords = plan.cueFrom === null ? '' : this.host.song.analysis.lines.flatMap(sung)
-      .filter(word => word.start >= plan.cueFrom! - 0.01 && word.end <= plan.lineStart + 0.05).map(word => word.text).join(' ');
-    const words = sung(line).map(word => `<span class="bWord" data-s="${word.start.toFixed(3)}" data-e="${word.end.toFixed(3)}">${escapeHtml(word.text)}</span>`).join(' ');
+    const cueWords = plan.cueFrom === null ? [] : this.host.song.analysis.lines.flatMap(sung)
+      .filter(word => word.start >= plan.cueFrom! - 0.01 && word.end <= plan.lineStart + 0.05);
+    const cueText = joinWords(cueWords);
+    const words = joinWords(sung(line), word => `<span class="bWord" data-s="${word.start.toFixed(3)}" data-e="${word.end.toFixed(3)}">${escapeHtml(word.text)}</span>`);
     const option = (key: keyof SongBuilder['opts'], label: string, hint: string) =>
       `<label class="check small" title="${escapeHtml(hint)}"><input type="checkbox" data-opt="${key}" ${this.opts[key] ? 'checked' : ''} ${busy ? 'disabled' : ''}> ${label}</label>`;
 
@@ -426,7 +427,7 @@ export class SongBuilder {
         </div>
       </div>
       <p class="bLine ${this.opts.highlight ? 'highlight' : ''}">${words}</p>
-      <p class="bMeta">${cueWords ? `Cue: the artist sings “…${escapeHtml(cueWords)}”, then it’s you.` : this.opts.music ? 'Cue: the music counts you in.' : 'Cue: three beeps count you in.'}</p>
+      <p class="bMeta">${cueText ? `Cue: the artist sings “…${escapeHtml(cueText)}”, then it’s you.` : this.opts.music ? 'Cue: the music counts you in.' : 'Cue: three beeps count you in.'}</p>
       ${body}
       <div class="bOpts">
         ${option('music', 'Music', 'Off: hear the artist alone, and sing in the quiet')}

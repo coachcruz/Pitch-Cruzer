@@ -441,8 +441,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       const progress = (_step: string, fraction: number, detail?: string) => {
         if (!disposed) redoStatus.textContent = Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
       };
-      // Kept lyrics are only re-timed; otherwise they're looked up by the song's name, then heard/recognised.
-      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined },
+      // Kept lyrics are only re-timed; otherwise the singer is listened to, and lyrics found by name or by
+      // recognising the song are used only if they match what's sung.
+      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined, listen: true },
         lyricsServices(buffers.lead, analysis.notes, options, progress), fraction => progress('lyrics', fraction));
       if (result.source === 'kept') { redoStatus.textContent = 'Couldn’t hear clear words — your current lyrics were kept.'; return; }
       lyricsChanged();
