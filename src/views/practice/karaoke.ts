@@ -12,6 +12,8 @@ export interface KaraokeState {
   anchor: LyricLine | null;
   /** Silent count-in dots before lines (beat times). */
   cues: Map<string, number[]>;
+  /** Build my song: the line being built, and the kept lines with their scores. */
+  building?: { current: string; kept: Map<string, number> } | null;
 }
 
 /**
@@ -52,10 +54,13 @@ export class Karaoke {
       const header = section && section.id !== lastSection ? `<div class="lyricsSection">${escapeHtml(section.label)}</div>` : '';
       lastSection = section?.id ?? lastSection;
       const score = state.scores?.get(line.id);
+      const kept = state.building?.kept.get(line.id);
       const who = line.words.every(word => word.aside) ? undefined : state.singer?.(line);
       const classes = ['lyricLine',
         state.inSelection(line.start + 0.01) ? '' : 'outside',
         state.anchor?.id === line.id ? 'anchor' : '',
+        state.building?.current === line.id ? 'building' : '',
+        kept === undefined ? '' : 'kept',
         score === undefined ? '' : score >= 70 ? 'good' : score >= 40 ? 'ok' : 'bad',
         who === 'partner' ? 'partner' : '',
         isTagLine(line) ? 'tagLine' : line.words.every(word => word.aside) ? 'asideLine' : ''].filter(Boolean).join(' ');
@@ -63,7 +68,8 @@ export class Karaoke {
         ${state.cues.has(line.id) ? `<span class="cueDots" aria-hidden="true">${'<i></i>'.repeat(state.cues.get(line.id)!.length)}</span>` : ''}
         <span class="lineText">${syllablesHtml(line)}</span>
         ${who ? `<button class="who" title="Tap to switch who sings this line">${who === 'me' ? 'You' : 'Them'}</button>` : ''}
-        ${score === undefined ? '' : `<span class="lineScore">${score}%</span>`}</div>`;
+        ${score === undefined ? '' : `<span class="lineScore">${score}%</span>`}
+        ${kept === undefined ? '' : `<span class="keptScore" title="Kept for your song">✓ ${kept}%</span>`}</div>`;
     }).join('') || '<p class="empty">No sung lines were found.</p>';
     this.cueRows = [...state.cues.entries()].flatMap(([id, dots]) => {
       const row = this.list.querySelector<HTMLElement>(`[data-line="${id}"] .cueDots`);

@@ -87,7 +87,19 @@ export class Player {
   }
 
   setLevel(stem: StemName, value: number): void {
-    this.gains[stem].gain.setTargetAtTime(Math.max(0, value), this.ctx.currentTime, 0.02);
+    const gain = this.gains[stem].gain;
+    gain.cancelScheduledValues(this.ctx.currentTime);   // a change planned ahead (see handOver) gives way
+    gain.setTargetAtTime(Math.max(0, value), this.ctx.currentTime, 0.02);
+  }
+
+  /** Plays `stem` at full level until clock time `at`, then fades it out (50 ms): the artist hands over to you. */
+  handOver(stem: StemName, at: number): void {
+    const gain = this.gains[stem].gain;
+    const now = this.ctx.currentTime;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(1, now);
+    gain.setValueAtTime(1, Math.max(now, at - 0.05));
+    gain.linearRampToValueAtTime(0, Math.max(now + 0.01, at));
   }
 
   /**

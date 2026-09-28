@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lineFeedback, singingLevel, stitchVocal, type KeptLine } from '../src/lib/assemble';
+import { assembleSpan, lineFeedback, singingLevel, stitchVocal, turnPlan, type KeptLine } from '../src/lib/assemble';
 import type { TakeScore } from '../src/lib/score';
 
 const RATE = 8000;
@@ -70,5 +70,47 @@ describe('song builder: what it says after a line', () => {
     expect(lineFeedback(score({ score: 55, meanCents: 40 })).note).toMatch(/sharp/);
     expect(lineFeedback(score({ score: 55, steadiness: 30 })).note).toMatch(/steadier/);
     expect(lineFeedback(score({ score: 80, coverage: 20 })).note).toMatch(/sing out/);
+  });
+});
+
+describe('song builder: the cue into your line', () => {
+  const word = (text: string, start: number) => ({ text, start, end: start + 0.4, syllables: [] });
+  const line = (id: string, words: Array<[string, number]>) => {
+    const list = words.map(([text, start]) => word(text, start));
+    return { id, start: list[0].start, end: list[list.length - 1].end, words: list };
+  };
+  const one = line('a', [['walking', 2], ['down', 2.5], ['the', 3], ['road', 3.5]]);
+  const two = line('b', [['every', 4.5], ['window', 5], ['burning', 5.5]]);
+  const late = line('c', [['after', 20], ['the', 20.5], ['solo', 21]]);
+
+  it('cues you in with the last two words of the line before', () => {
+    expect(turnPlan([one, two], two, 30)).toEqual({ start: 2.85, lineStart: 4.5, end: 6.5, cueFrom: 3 });
+  });
+
+  it('counts in instead for the first line, or after a long instrumental', () => {
+    expect(turnPlan([one, two, late], one, 30).cueFrom).toBeNull();
+    expect(turnPlan([one, two, late], one, 30).start).toBe(0);
+    expect(turnPlan([one, two, late], late, 30)).toEqual({ start: 18, lineStart: 20, end: 22, cueFrom: null });
+  });
+
+  it('cues from the words before yours when the lines overlap', () => {
+    const overlapping = line('d', [['road', 3.4], ['again', 3.8]]);
+    const plan = turnPlan([one, overlapping], overlapping, 30);
+    expect(plan.cueFrom).toBe(2.5);          // "down the" — both before your line starts
+    expect(plan.lineStart).toBe(3.4);
+  });
+});
+
+describe('song builder: putting it together', () => {
+  it('makes the whole song only when every line is kept', () => {
+    expect(assembleSpan([{ start: 10, end: 14 }, { start: 15, end: 19 }], 2, 200)).toEqual({ start: 0, end: 200, whole: true });
+  });
+
+  it('makes just the stretch you have sung when the song isn’t finished', () => {
+    expect(assembleSpan([{ start: 10, end: 14 }, { start: 15, end: 19 }], 30, 200)).toEqual({ start: 8, end: 21.5, whole: false });
+  });
+
+  it('makes nothing from nothing', () => {
+    expect(assembleSpan([], 30, 200)).toEqual({ start: 0, end: 0, whole: false });
   });
 });

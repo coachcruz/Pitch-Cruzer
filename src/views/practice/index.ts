@@ -301,6 +301,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   let view: View = prefs.get<string>('view', 'staff') === 'karaoke' ? 'karaoke' : 'staff';
   const karaoke = new Karaoke($('#lyricsList'), analysis, {
     tap: line => {
+      if (builder?.isOpen) { if (!builder.pick(line)) toast('That line isn’t one you sing here — pick a line with words.'); return; }
       if (pickingLines) { pickLine(line); return; }
       if (recording) return;
       if (!inSelection(line.start)) wholeSong();
@@ -330,7 +331,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       scores: current ? new Map(current.score.lines.map(item => [item.line.id, item.percent])) : null,
       singer: parts ? line => parts!.get(line.id) ?? 'me' : null,
       anchor: pickAnchor,
-      cues: new Map(cues.map(cue => [cue.lineId, cue.dots]))
+      cues: new Map(cues.map(cue => [cue.lineId, cue.dots])),
+      building: builder?.marks ?? null
     });
   };
   const lyricsHintText = () => {
@@ -775,7 +777,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       mic.setMonitor(levels.monitor / 100);
     },
     beep,
-    show: time => { if (player.state === 'stopped') { idleTime = Math.max(0, time - 0.5); updateClock(); } },
+    show: time => { if (player.state === 'stopped') { idleTime = Math.max(0, time); updateClock(); } },
+    openKaraoke: () => setView('karaoke'),
+    linesChanged: renderLyrics,
     changed: renderTransport
   });
   $('#buildSong').addEventListener('click', () => {
