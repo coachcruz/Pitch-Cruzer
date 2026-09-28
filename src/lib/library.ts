@@ -24,18 +24,40 @@ export interface StoredTake {
   offsetSeconds: number;
 }
 
+/**
+ * Song builder: the take you kept for one line of a song. Keyed by the line's start time (line ids
+ * change when the lyrics are redone; the moment in the song doesn't).
+ */
+export interface StoredBuildLine {
+  id: string;
+  songId: string;
+  start: number;
+  end: number;
+  text: string;
+  score: number;
+  /** The recorded voice (mono WAV) and the song moment its first sample belongs to. */
+  voice: Blob;
+  songTimeAtStart: number;
+  createdAt: number;
+}
+
 const DB_NAME = 'pitch-cruzer';
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function open(): Promise<IDBDatabase> {
   dbPromise ??= new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
+    const request = indexedDB.open(DB_NAME, 2);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains('songs')) db.createObjectStore('songs', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('takes')) db.createObjectStore('takes', { keyPath: 'id' }).createIndex('songId', 'songId');
+      if (!db.objectStoreNames.contains('builds')) db.createObjectStore('builds', { keyPath: 'id' }).createIndex('songId', 'songId');
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      // Another tab opening a newer version (after an update) must not wait on this one: step aside.
+      request.result.onversionchange = () => { request.result.close(); dbPromise = null; };
+      resolve(request.result);
+    };
     request.onerror = () => reject(request.error);
   });
   return dbPromise;
@@ -57,6 +79,7 @@ export const listSongs = () => run<StoredSong[]>('songs', 'readonly', s => s.get
 export async function deleteSong(id: string): Promise<void> {
   const takes = await listTakes(id);
   await Promise.all(takes.map(take => deleteTake(take.id)));
+  await clearBuild(id);
   await run('songs', 'readwrite', s => s.delete(id));
 }
 
@@ -115,4 +138,13 @@ export async function importSong(file: Blob): Promise<StoredSong> {
 /** Asks the browser not to clear saved songs when space runs low (no prompt in most browsers). */
 export function keepStoragePersistent(): void {
   void navigator.storage?.persist?.().catch(() => false);
+}
+
+export const buildLineId = (songId: string, start: number) => songId + ':' + Math.round(start * 100);
+export const saveBuildLine = (line: StoredBuildLine) => run('builds', 'readwrite', s => s.put(line)).then(() => undefined);
+export const listBuildLines = (songId: string) => run<StoredBuildLine[]>('builds', 'readonly', s => s.index('songId').getAll(songId))
+  .then(lines => lines.sort((a, b) => a.start - b.start));
+export async function clearBuild(songId: string): Promise<void> {
+  const lines = await listBuildLines(songId);
+  await Promise.all(lines.map(line => run('builds', 'readwrite', s => s.delete(line.id))));
 }

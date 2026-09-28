@@ -519,3 +519,44 @@ input[type='range'] { accent-color: var(--accent); }
 .videoSide .vu { margin-top: 10px; }
 .capName { display: grid; gap: 4px; margin: 8px 0; font-weight: 600; font-size: 0.9rem; }
 @media (max-width: 640px) { .videoStage { grid-template-columns: 1fr; } }
+
+/* Build my song: a side panel next to the staff (a sheet along the bottom on phones) */
+.stage.withBuilder { grid-template-columns: minmax(0, 1fr) 330px; }
+.stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr) 220px 330px; }
+.builder {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-y: auto; min-height: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+}
+.builder > * { flex-shrink: 0; }  /* the panel scrolls as a whole; nothing in it gets squeezed */
+.builder .bHead { display: flex; align-items: center; gap: 8px; }
+.builder .bHead h2 { margin: 0; font-size: 1rem; }
+.builder .bHead .hint { margin: 0; flex: 1; }
+.builder .bChips { display: flex; flex-wrap: wrap; gap: 4px; max-height: 76px; overflow-y: auto; }
+.bChip {
+  min-width: 28px; height: 26px; padding: 0 4px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--muted); font-size: 0.75rem; font-weight: 700; cursor: pointer;
+}
+.bChip.kept.good { background: color-mix(in srgb, var(--good) 25%, var(--surface-2)); color: var(--text); }
+.bChip.kept.close { background: color-mix(in srgb, var(--close) 25%, var(--surface-2)); color: var(--text); }
+.bChip.kept.off { background: color-mix(in srgb, var(--off) 25%, var(--surface-2)); color: var(--text); }
+.bChip.current { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); color: var(--text); }
+.builder .bLine { margin: 0; font-size: 1.25rem; font-weight: 700; line-height: 1.4; }
+.builder .bLine.highlight .bWord { transition: color 0.12s; color: var(--muted); }
+.builder .bLine.highlight .bWord.sung { color: var(--text); }
+.builder .bLine.highlight .bWord.now { color: var(--accent-2); }
+.builder .bOpts { display: flex; flex-wrap: wrap; gap: 6px; }
+.builder .chip.small { min-height: 30px; padding: 0 10px; font-size: 0.8rem; }
+.builder .bStatus { margin: 0; font-weight: 700; }
+.builder .bStatus.live { color: var(--off); }
+.builder .bResult { display: flex; gap: 12px; align-items: center; }
+.builder .bResult p { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
+.builder .bScore { flex: none; font-size: 1.8rem; font-weight: 800; line-height: 1; }
+.builder .bScore.good { color: var(--good); }
+.builder .bScore.close { color: var(--close); }
+.builder .bScore.off { color: var(--off); }
+.builder .bFoot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--border); padding-top: 10px; margin-top: auto; }
+.builder .bFoot audio { width: 100%; }
+@media (max-width: 760px) {
+  .stage.withBuilder, .stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr); }
+  .builder { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; max-height: 52vh; box-shadow: 0 8px 30px rgb(0 0 0 / 35%); }
+}

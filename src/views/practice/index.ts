@@ -19,6 +19,7 @@ import { floatingControls } from './controls';
 import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
+import { SongBuilder } from './builder';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -96,6 +97,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   let lastSource = -1;
   let idleTime = 0;
   let recording = false;
+  /** Build my song (line by line): created once the player and mic are ready. */
+  let builder: SongBuilder | null = null;
   let recordingOrigin = 0;
   let reviewPlaying = false;
   let frame = 0;
@@ -359,6 +362,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     renderSections();
     renderLyrics();
     updateClock();
+    // The builder goes line by line: pick up the new lines (kept takes stay, they're matched by time).
+    if (builder?.isOpen && !builder.active) void builder.open();
   };
 
   const setPicking = (on: boolean) => {
@@ -579,9 +584,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const active = player.state !== 'stopped';
     playButton.textContent = player.state === 'playing' ? '❚❚' : '▶';
     playButton.title = player.state === 'playing' ? 'Pause (Space)' : 'Play (Space)';
-    playButton.disabled = recording;
+    playButton.disabled = recording || Boolean(builder?.active);
     stopButton.disabled = !active;
-    recordButton.disabled = active && !recording;
+    recordButton.disabled = (active && !recording) || Boolean(builder?.active);
     recordButton.textContent = recording ? '■ Review' : '●';
     recordButton.title = recording ? 'Stop and see how you did' : 'Record yourself';
     recordButton.classList.toggle('live', recording);
@@ -662,6 +667,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const stopAll = () => player.stop(true);
 
   player.onEnded = () => {
+    if (builder?.playerEnded()) {
+      reviewPlaying = false;
+      lane.trail = liveTrail;
+      countdown.classList.add('hidden');
+      renderTransport();
+      return;
+    }
     if (recording) void finishRecording();
     idleTime = selectedRanges()[0].start;   // after a stop, Play starts from the top again
     reviewPlaying = false;
@@ -730,6 +742,35 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     changed: renderLyrics
   });
   $('#openTakes').addEventListener('click', () => review.open());
+
+  // ================================================================ build my song (line by line)
+  builder = new SongBuilder({
+    root, song, buffers, player, mic, levels,
+    enableMic,
+    forgiveOctave: () => forgiveOctave.checked,
+    isMine: line => !parts || parts.get(line.id) !== 'partner',
+    beforePlay: () => {
+      review.close();
+      reviewPlaying = false;
+      lane.trail = liveTrail;
+      liveTrail.length = 0;
+      lastSource = -1;
+    },
+    restoreMix: () => {
+      player.setLevel('lead', levels.lead / 100);
+      player.setLevel('music', levels.music / 100);
+      player.setLevel('voice', levels.voice / 100);
+      mic.setMonitor(levels.monitor / 100);
+    },
+    beep,
+    show: time => { if (player.state === 'stopped') { idleTime = Math.max(0, time - 0.5); updateClock(); } },
+    changed: renderTransport
+  });
+  $('#buildSong').addEventListener('click', () => {
+    if (recording) return;
+    if (player.state !== 'stopped') stopAll();
+    void builder!.open();
+  });
 
   // ================================================================ clock, up next, every frame
   const clock = $('#clock');
@@ -829,6 +870,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
     if (view === 'staff') lane.draw(now);
     else karaoke.update(now, playing);
+    builder?.update(now);
     updateUpNext(now);
     // Echo: say whose turn it is, right in the controls.
     const piece = player.state !== 'stopped' && player.timeline.hasTurns && !reviewPlaying ? player.timeline.pieceAt(player.timelineTime()) : null;
@@ -908,7 +950,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   loop();
 
   // A new version of the app waits (see lib/update) while you play, sing, record or have an unsaved take.
-  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId);
+  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId) || Boolean(builder?.busy);
 
   return () => {
     disposed = true;
