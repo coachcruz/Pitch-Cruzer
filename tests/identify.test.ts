@@ -35,7 +35,7 @@ describe('/api/identify', () => {
     const asked = groq(['whisper-large-v3', 'llama-guard-4-12b', 'tiny-1b', 'new-chat-70b', 'other-chat-32b'],
       model => (model === 'other-chat-32b' ? song('Hello') : gone()));
     expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone', model: 'other-chat-32b' });
-    expect(asked.slice(3)).toEqual(['new-chat-70b', 'other-chat-32b']);
+    expect(asked.slice(MODELS.length)).toEqual(['new-chat-70b', 'other-chat-32b']);
   });
 
   it('passes on a rate limit even when the models after it are gone', async () => {

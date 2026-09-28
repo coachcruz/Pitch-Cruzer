@@ -224,7 +224,8 @@ export function lyricsServices(lead: AudioBuffer, notes: NoteEvent[], options: L
       try {
         // Groq's free tier is rate-limited: a busy answer is waited out and asked again (a server error isn't: it won't pass).
         const response = await fetchWithRetry(() => fetch('/api/identify', {
-          method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(20000),
+          // Searching the web for the song takes 7–15 s.
+          method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(40000),
           body: JSON.stringify({ heard, hint })
         }), { retryServerErrors: false });
         if (!response.ok) {
