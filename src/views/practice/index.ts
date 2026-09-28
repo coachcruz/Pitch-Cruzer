@@ -20,6 +20,7 @@ import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
+import { announceMic, chosenMic, micPicker, rawMic } from '../../ui/micSetup';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -520,6 +521,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   mixToggle.addEventListener('click', () => {
     const open = settingsPanel.classList.toggle('hidden') === false;
     mixToggle.setAttribute('aria-expanded', String(open));
+    if (open) void picker.refresh();
   });
   forgiveOctave.addEventListener('change', () => {
     prefs.set('forgiveOctave', forgiveOctave.checked);
@@ -556,13 +558,20 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const renderMicButton = () => {
     micButton.setAttribute('aria-pressed', String(mic.active));
     micButton.classList.toggle('on', mic.active);
-    micButton.title = mic.active ? 'Microphone on — tap to turn off' : 'Microphone — see your voice on the staff';
+    micButton.title = mic.active ? 'Microphone on' + (mic.inputLabel ? ' (' + mic.inputLabel + ')' : '') + ' — tap to turn off' : 'Microphone — see your voice on the staff';
   };
+  // Which mic to listen to (⚙ → Microphone), and whether to ask for it without phone filters.
+  const micRaw = $<HTMLInputElement>('#micRaw');
+  micRaw.checked = rawMic();
+  const picker = micPicker($<HTMLSelectElement>('#micInput'), $('#micStatus'), mic, () => { if (mic.active) void enableMic(); else void picker.refresh(); });
+  micRaw.addEventListener('change', () => { prefs.set('micRaw', micRaw.checked); if (mic.active) void enableMic(); });
   const enableMic = async (): Promise<boolean> => {
     try {
-      await mic.start(speakers.checked);
+      await mic.start(speakers.checked, chosenMic(), micRaw.checked);
       mic.setMonitor(levels.monitor / 100);
       renderMicButton();
+      announceMic(mic);
+      void picker.refresh();
       return true;
     } catch {
       toast('Microphone blocked. Allow the mic for this site (padlock icon in the address bar) and try again.', 'error');

@@ -560,3 +560,9 @@ input[type='range'] { accent-color: var(--accent); }
   .stage.withBuilder, .stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr); }
   .builder { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; max-height: 52vh; box-shadow: 0 8px 30px rgb(0 0 0 / 35%); }
 }
+
+/* Microphone picker (practice settings) */
+.micRow { display: grid; gap: 4px; margin-top: 8px; }
+.micRow select { max-width: 100%; }
+#micStatus { margin: 0; }
+#micStatus.warn { color: var(--close); }
