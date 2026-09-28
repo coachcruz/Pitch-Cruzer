@@ -170,10 +170,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
   // ================================================================ timeline + parts
   // One thin timeline of the whole song: click to jump anywhere. Section names sit on it as plain
-  // labels. A part is chosen in ⋯ → Practice a part; it's lit on the timeline, and a chip in the
+  // labels. A part (and how to practice it: sing along or echo,
+  // how many times) is chosen from 🎵 in the controls; it's lit on the timeline, and a chip in the
   // controls goes back to the whole song.
   const pct = (time: number) => ((100 * time) / analysis.duration).toFixed(3) + '%';
   const partDialog = $<HTMLDialogElement>('#partDialog');
+  // 🎵 lights up when you're practicing anything other than the whole song, once, singing along.
+  const practiceBtn = $<HTMLButtonElement>('#practiceBtn');
+  const markPractice = () => practiceBtn.classList.toggle('on', Boolean(selected.size || custom) || echoMode() || repeats() !== 1);
   const renderSections = () => {
     const whole = !selected.size && !custom;
     $('#timelineMarks').innerHTML = analysis.sections.map(section =>
@@ -182,6 +186,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const chip = $('#partChip');
     chip.classList.toggle('hidden', whole);
     chip.textContent = labelForSelection() + ' ✕';
+    markPractice();
     $('#partList').innerHTML = analysis.sections.map(section => `<label class="check"><input type="checkbox" data-part="${section.id}" ${selected.has(section.id) ? 'checked' : ''}>
       <span><b>${escapeHtml(section.label)}</b> <small class="hint">${formatTime(section.start)}–${formatTime(section.end)}</small></span></label>`).join('');
   };
@@ -193,7 +198,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     selectionChanged();
   });
   $('#partChip').addEventListener('click', () => { if (!recording) wholeSong(); });
-  $('#choosePart').addEventListener('click', () => { renderSections(); partDialog.showModal(); });
+  practiceBtn.addEventListener('click', () => { closeSettings(); renderSections(); partDialog.showModal(); });
   $('#partWhole').addEventListener('click', () => { wholeSong(); partDialog.close(); });
   $('#partDone').addEventListener('click', () => partDialog.close());
   const timeline = $('#timeline');
@@ -538,7 +543,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   lane.showVoiceTypes = showVoices.checked;
   showVoices.addEventListener('change', () => { prefs.set('showVoices', showVoices.checked); lane.showVoiceTypes = showVoices.checked; });
   countIn.addEventListener('change', () => prefs.set('countIn', countIn.checked));
-  repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); updateClock(); });
+  repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); updateClock(); markPractice(); });
   const syncEchoModel = () => $('#echoModelWrap').classList.toggle('hidden', !echoMode());
   syncEchoModel();
   styleEl.addEventListener('change', () => {
@@ -610,6 +615,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     // Switching the mic mid-take would drop the rest of the recording: the mic settings wait until it's done.
     const taking = recording || Boolean(builder?.active);
     $<HTMLButtonElement>('#micCheckBtn').disabled = taking;
+    $<HTMLButtonElement>('#practiceBtn').disabled = taking;
   };
 
   const beep = (when: number, accent: boolean) => {
@@ -729,7 +735,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (recording) { stopAll(); return; }
     if (!(await enableMic())) return;
     if (!mic.canRecord) { toast('This browser can’t record here. Try Chrome, Edge or Safari.', 'error'); return; }
-    if (repeats() === 99) repeatsEl.value = '1';
+    if (repeats() === 99) { repeatsEl.value = '1'; markPractice(); }
     recording = true;
     review.clear();
     review.close();

@@ -324,7 +324,7 @@ input[type='range'] { accent-color: var(--accent); }
 .mixRow output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.88rem; }
 .duetRow { margin-top: 8px; }
 .toggles { display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-.practiceRow { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.practiceRow { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .miniSelect { height: 30px; min-height: 30px; padding: 0 8px; font-size: 0.82rem; border-radius: 8px; }
 .partList { display: grid; gap: 8px; margin: 10px 0 14px; max-height: 55vh; overflow-y: auto; }
 

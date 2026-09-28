@@ -32,7 +32,6 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <button id="moreBtn" class="iconBtn" aria-label="More options" aria-haspopup="menu" aria-expanded="false">⋯</button>
         <div id="moreMenu" class="popMenu hidden" role="menu">
           <button id="buildSong" class="menuItem" role="menuitem">🧩 Build my song (line by line)</button>
-          <button id="choosePart" class="menuItem" role="menuitem">Practice a part…</button>
           <button id="pickLines" class="menuItem" role="menuitem">Pick lines to practice</button>
           <button id="openTakes" class="menuItem" role="menuitem">Saved takes &amp; scores</button>
           <button id="fixLyrics" class="menuItem" role="menuitem">Fix lyrics</button>
@@ -76,6 +75,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <button id="record" class="cbtn record" title="Record yourself" aria-label="Record">●</button>
         <button id="mic" class="cbtn" title="Microphone — see your voice on the staff" aria-label="Microphone" aria-pressed="false">🎤</button>
         <span class="meters" title="Levels — your mic · the artist · the music" aria-hidden="true"><i data-meter="mic"></i><i data-meter="artist"></i><i data-meter="music"></i></span>
+        <button id="practiceBtn" class="cbtn" title="What to practice — part, repeats, sing along or echo" aria-label="What to practice">🎵</button>
         <button id="mixToggle" class="cbtn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
         <div class="viewSwitch" role="radiogroup" aria-label="View">
           <button data-view="staff" role="radio" aria-checked="true" title="Notes on a staff with the words above them">Staff</button>
@@ -118,11 +118,6 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
             <button id="micCheckBtn" class="btn small" type="button">🎤 Mic check &amp; settings</button>
             <p class="hint small">Which mic, headphones or speakers, and a quick check that it hears you.</p>
           </div>
-          <div class="practiceRow">
-            <label class="inline">Repeat <select id="repeats" class="miniSelect"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
-            <label class="inline">Practice <select id="practiceStyle" class="miniSelect"><option value="along">Sing along</option><option value="echo">Echo (listen, then sing it back)</option></select></label>
-            <label id="echoModelWrap" class="inline hidden">Who sings first <select id="echoModel" class="miniSelect"><option value="artist">The artist</option><option value="me">My best take</option></select></label>
-          </div>
         </div>
       </div>
     </div>
@@ -132,9 +127,14 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
       <div class="row end"><button id="micDialogDone" class="btn primary" type="button">Done</button></div>
     </dialog>
 
-    <dialog id="partDialog" class="dialog" aria-label="Practice a part">
-      <h2>Practice a part</h2>
-      <p class="hint small">Tick one or more parts — or go back to the whole song.</p>
+    <dialog id="partDialog" class="dialog" aria-label="What to practice">
+      <h2>What to practice</h2>
+      <div class="practiceRow">
+        <label class="inline">How <select id="practiceStyle" class="miniSelect"><option value="along">Sing along</option><option value="echo">Echo (listen, then sing it back)</option></select></label>
+        <label id="echoModelWrap" class="inline hidden">Who sings first <select id="echoModel" class="miniSelect"><option value="artist">The artist</option><option value="me">My best take</option></select></label>
+        <label class="inline">Repeat <select id="repeats" class="miniSelect"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
+      </div>
+      <p class="hint small">Which part: tick one or more — or the whole song.</p>
       <div id="partList" class="partList"></div>
       <div class="row end"><button id="partWhole" class="btn ghost" type="button">Whole song</button><button id="partDone" class="btn primary" type="button">Done</button></div>
     </dialog>
