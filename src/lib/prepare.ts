@@ -1,5 +1,5 @@
 import { buildLines, parseSyncedLyrics, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
-import { writeLyrics, type FoundLyrics, type LyricsResult, type LyricsServices } from './lyrics';
+import { pickLyrics, writeLyrics, type FoundLyrics, type LyricsCandidate, type LyricsResult, type LyricsServices } from './lyrics';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
 import { compressForUpload } from './mp3';
@@ -20,14 +20,14 @@ export type SongInput =
 /** Where the words come from: pasted by the user, looked up online, or (fallback) speech recognition. */
 export interface LyricsSource { pasted?: string; lookup?: string }
 
-/** Finds the real lyrics in LRCLIB (via /api/lyrics), preferring the result whose length matches. */
+/** Finds the real lyrics in LRCLIB (via /api/lyrics); which version is picked: see pickLyrics. */
 export async function findLyricsOnline(query: string, duration?: number): Promise<FoundLyrics | null> {
   try {
     const response = await fetch('/api/lyrics?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
     if (!response.ok) { diag('Lyrics lookup → HTTP ' + response.status, 'warn'); return null; }
-    const results = (await response.json()) as Array<{ title: string; artist: string; duration?: number; lyrics: string; synced?: string | null }>;
-    if (!results.length) { diag('Lyrics lookup: nothing found for “' + query + '”', 'warn'); return null; }
-    const best = [...results].sort((a, b) => (duration ? Math.abs((a.duration ?? 0) - duration) - Math.abs((b.duration ?? 0) - duration) : 0))[0];
+    const results = (await response.json()) as LyricsCandidate[];
+    const best = pickLyrics(results, query, duration);
+    if (!best) { diag('Lyrics lookup: nothing found for “' + query + '”', 'warn'); return null; }
     diag('Lyrics found online: ' + best.title + ' — ' + best.artist, 'ok');
     return { text: best.lyrics, synced: best.synced ? parseSyncedLyrics(best.synced) : null, label: best.title + ' — ' + best.artist };
   } catch {

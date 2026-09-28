@@ -114,3 +114,25 @@ describe('writing the lyrics', () => {
     expect(song.analysis.sections.map(section => section.kind)).toEqual(expect.arrayContaining(['verse', 'chorus']));
   });
 });
+
+describe('picking the version of the lyrics', () => {
+  // What the lyrics database really returns for "picture kid rock" (lengths and timings as listed).
+  const results = [
+    { title: 'Kid Rock - Picture feat. Sheryl Crow', artist: 'Kid Rock', duration: 301, lyrics: 'a', synced: null },
+    { title: 'Kid Rock - Picture feat. Sheryl Crow [Official Music Video]', artist: 'Kid Rock', duration: 301, lyrics: 'b', synced: null },
+    { title: 'Picture', artist: 'Kid Rock', duration: 299, lyrics: 'c', synced: '[00:10.00] c' },
+    { title: 'Picture', artist: 'Kid Rock', duration: 370, lyrics: 'd', synced: '[00:10.00] d' }
+  ];
+  it('prefers a version with line timings when its length is close', async () => {
+    const { pickLyrics } = await import('../src/lib/lyrics');
+    expect(pickLyrics(results, 'picture kid rock', 300)?.lyrics).toBe('c');
+  });
+  it('the long (video) version when the recording is that long', async () => {
+    const { pickLyrics } = await import('../src/lib/lyrics');
+    expect(pickLyrics(results, 'picture kid rock', 368)?.lyrics).toBe('d');
+  });
+  it('never a music-video/live version unless asked for', async () => {
+    const { pickLyrics } = await import('../src/lib/lyrics');
+    expect(pickLyrics(results.slice(0, 2), 'picture kid rock', 301)?.lyrics).toBe('a');
+  });
+});

@@ -39,6 +39,24 @@ export interface LyricsResult { source: LyricsSourceKind; label?: string; partia
 
 type Progress = (fraction: number, detail?: string) => void;
 
+/** One version of a song's lyrics from the lyrics database. */
+export interface LyricsCandidate { title: string; artist: string; duration?: number; lyrics: string; synced?: string | null }
+
+/**
+ * Which version of the lyrics to use. The database often has several: the album track, the music
+ * video's, a live or remixed one, with or without line timings. Preferred: the one whose length
+ * matches the recording, and one with line timings (they line up with the singer directly) even if
+ * a few seconds off; versions named as a video/live/remix/karaoke… only if that's what was asked for.
+ */
+export function pickLyrics(results: LyricsCandidate[], query: string, duration?: number): LyricsCandidate | null {
+  const special = /\b(official|music video|video|live|remix|karaoke|instrumental|acapella|a cappella|cover|sped up|slowed|demo|acoustic)\b/i;
+  const cost = (item: LyricsCandidate) =>
+    (duration && item.duration ? Math.min(60, Math.abs(item.duration - duration)) : 0)
+    - (item.synced ? 8 : 0)
+    + (special.test(item.title) && !special.test(query) ? 15 : 0);
+  return [...results].filter(item => item.lyrics?.trim()).sort((a, b) => cost(a) - cost(b))[0] ?? null;
+}
+
 /** Share of heard words (the distinctive ones) that are in these lyrics — "is this the song being sung?" */
 export function heardMatch(lyrics: string, heard: Array<{ text: string }>): number {
   const clean = (text: string) => text.toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/[^\p{L}\p{N}']/gu, '');
