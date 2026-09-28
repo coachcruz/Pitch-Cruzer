@@ -5,7 +5,8 @@ import { session } from '../session';
  * for days, still showing an old version after a new one is published. The page asks the server
  * which version is live — when you come back to the app, when you change screens, and every few
  * minutes — and reloads itself onto a new one, but never in the middle of something: while a song
- * is being prepared, its lyrics are being written, or the current screen says it's busy
+ * is being prepared, its lyrics are being written, a song couldn't be saved on the device (it lives only
+ * in this page until it is), or the current screen says it's busy
  * (`session.busy`: playing, recording…), the reload waits until that's done.
  */
 
@@ -29,7 +30,7 @@ export function keepUpToDate(): void {
   let checking = false;
   let retry: number | null = null;
 
-  const busy = () => session.lyricsJobs.size > 0 || (session.busy?.() ?? false);
+  const busy = () => session.lyricsJobs.size > 0 || (session.song !== null && !session.saved) || (session.busy?.() ?? false);
   const reloadWhenFree = () => {
     if (retry !== null) { window.clearTimeout(retry); retry = null; }
     if (!busy()) { location.reload(); return; }
