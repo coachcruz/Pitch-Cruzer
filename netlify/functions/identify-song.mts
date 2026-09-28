@@ -15,11 +15,12 @@ import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
-// Live tests: from memory alone these models don't name songs reliably, even from exact lyrics. The
-// gpt-oss models can search the web (Groq's built-in browser search) — they find a song from a line of
-// its lyrics the way a person would. The next model is tried if one is unavailable.
-export const MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
-const COMPARE = ['groq/compound', 'groq/compound-mini', 'llama-3.3-70b-versatile', 'moonshotai/kimi-k2-instruct'];
+// Live tests ("Picture", Kid Rock — from its exact lyrics and from misheard ones): gpt-oss with Groq's
+// built-in web search named it every time in 7–13 s; from memory alone, gpt-oss said "no idea" and
+// qwen3.8 / llama named other songs. So only the web-searching models are asked; the next one is tried
+// if one is unavailable.
+export const MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+const COMPARE = ['qwen/qwen3.8-27b', 'groq/compound', 'groq/compound-mini', 'llama-3.3-70b-versatile', 'moonshotai/kimi-k2-instruct'];
 const searches = (model: string) => model.startsWith('openai/gpt-oss') || model.startsWith('groq/compound');
 
 export default async (req: Request) => {
