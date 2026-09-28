@@ -9,6 +9,7 @@ import { pitchTrackFor, type SongBuffers } from '../../lib/prepare';
 import { scoreTake, type TakeScore } from '../../lib/score';
 import { el, escapeHtml, prefs, toast } from '../../ui/dom';
 import { safeName } from './text';
+import { roundTrip } from '../../lib/sync';
 
 /**
  * Build my song: Echo, line by line, into a finished recording. You pick a line in the Karaoke lyrics,
@@ -253,7 +254,7 @@ export class SongBuilder {
     this.phase = 'scoring';
     this.render();
     // What you sang at clock time T answers music you heard at T − output latency − input latency.
-    const latency = (player.ctx.outputLatency || 0) + (player.ctx.baseLatency || 0) + 0.02;
+    const latency = roundTrip(player.ctx);   // measured by the Sync check (Bluetooth!), or what the browser reports
     const voice = player.ctx.createBuffer(1, result.samples.length, result.sampleRate);
     voice.copyToChannel(result.samples, 0);
     const offset = result.startTime - this.recordOrigin - latency;

@@ -22,6 +22,7 @@ import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
 import { announceMic, chosenMic, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
 import { mountMicCheck } from '../../ui/micCheck';
+import { roundTrip } from '../../lib/sync';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -743,7 +744,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const result = mic.stopRecording();
     if (!result || result.samples.length < result.sampleRate * 0.5) { toast('No audio was recorded from the mic.', 'error'); return; }
     // What you sang at clock time T answers music you heard at T − output latency − input latency.
-    const latency = (player.ctx.outputLatency || 0) + (player.ctx.baseLatency || 0) + 0.02;
+    const latency = roundTrip(player.ctx);   // measured by the Sync check (Bluetooth!), or what the browser reports
     const voice = player.ctx.createBuffer(1, result.samples.length, result.sampleRate);
     voice.copyToChannel(result.samples, 0);
     await review.fromRecording(voice, result.startTime - recordingOrigin - latency, playbackRanges(), repeats(), labelForSelection());
@@ -865,6 +866,17 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (Math.abs(lane.errorAt(sung, target)) <= 0.5) lineStats.hits += 1;
   };
 
+  // The three level meters in the controls (silent: nothing is played to show them).
+  const meters = { mic: $('[data-meter="mic"]'), artist: $('[data-meter="artist"]'), music: $('[data-meter="music"]') };
+  const shown = { mic: 0, artist: 0, music: 0 };
+  const showLevels = (micLevel: number) => {
+    const now = { mic: micLevel, artist: player.level('artist'), music: player.level('music') };
+    for (const key of ['mic', 'artist', 'music'] as const) {
+      shown[key] = Math.max(now[key], shown[key] * 0.88);   // rise at once, fall gently
+      meters[key].style.setProperty('--lvl', Math.round(shown[key] * 100) + '%');
+    }
+  };
+
   const turnHint = $('#turnHint');
   const loop = () => {
     if (disposed) return;
@@ -876,9 +888,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const now = source ?? idleTime;
 
     let sung: number | null = null;
+    let micLevel = 0;
     lane.voice = null;
     if (mic.active) {
       const reading = mic.read();
+      micLevel = reading.level;
       liveVib.push(performance.now() / 1000, reading.midi);
       // Encouragement judges the center of any vibrato; the staff still draws the real wave.
       sung = reading.midi === null ? null : liveVib.center();
@@ -894,6 +908,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (view === 'staff') lane.draw(now);
     else karaoke.update(now, playing);
     builder?.update(now);
+    showLevels(micLevel);
     updateUpNext(now);
     // Echo: say whose turn it is, right in the controls.
     const piece = player.state !== 'stopped' && player.timeline.hasTurns && !reviewPlaying ? player.timeline.pieceAt(player.timelineTime()) : null;

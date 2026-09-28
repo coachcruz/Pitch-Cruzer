@@ -20,7 +20,7 @@ export function micWarning(mic: LiveMic): string {
     return 'Your device is filtering the mic (' + filtering.join(', ') + '), which squashes singing. '
       + 'On iPhone: while the mic is on, open Control Center → Mic Mode → Standard.';
   }
-  if (isBluetoothMic(label)) return 'This is a Bluetooth mic (' + label + '): it lags behind the music and sounds like a phone call. Plug in a wired or USB mic and pick it under Microphone.';
+  if (isBluetoothMic(label)) return 'This is a Bluetooth mic (' + label + '): it sounds like a phone call and lags behind the music. Run the Sync check (Mic check) so recordings line up, or pick a wired or USB mic.';
   if (mic.fellBack) return 'The mic you picked isn’t connected — using ' + (label || 'the default mic') + ' instead.';
   return '';
 }

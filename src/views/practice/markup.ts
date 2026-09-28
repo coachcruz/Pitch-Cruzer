@@ -75,6 +75,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <button id="stop" class="cbtn" title="Stop" aria-label="Stop" disabled>■</button>
         <button id="record" class="cbtn record" title="Record yourself" aria-label="Record">●</button>
         <button id="mic" class="cbtn" title="Microphone — see your voice on the staff" aria-label="Microphone" aria-pressed="false">🎤</button>
+        <span class="meters" title="Levels — your mic · the artist · the music" aria-hidden="true"><i data-meter="mic"></i><i data-meter="artist"></i><i data-meter="music"></i></span>
         <button id="mixToggle" class="cbtn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
         <div class="viewSwitch" role="radiogroup" aria-label="View">
           <button data-view="staff" role="radio" aria-checked="true" title="Notes on a staff with the words above them">Staff</button>

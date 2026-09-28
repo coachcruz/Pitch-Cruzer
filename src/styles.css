@@ -579,3 +579,14 @@ input[type='range'] { accent-color: var(--accent); }
 .micCheck .mcMsg.ok { color: var(--good); }
 .micCheck .mcMsg.warn { color: var(--close); }
 .micCheck select { max-width: 100%; }
+
+/* Level meters in the controls: your mic, the artist, the music */
+.meters { display: inline-flex; align-items: stretch; gap: 2px; height: 24px; margin: 0 4px; }
+.meters i { position: relative; width: 4px; background: var(--border); overflow: hidden; }
+.meters i::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 0%); background: var(--good); }
+.meters i[data-meter="mic"]::after { background: var(--voice); }
+.meters i[data-meter="artist"]::after { background: var(--accent-2); }
+.meters i[data-meter="music"]::after { background: var(--accent); }
+/* Sync check, in the Mic check */
+.micCheck .mcSync { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.micCheck .mcSyncState { margin: 0; }

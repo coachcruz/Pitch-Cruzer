@@ -2,6 +2,7 @@ import { LiveMic, listMics } from '../lib/mic';
 import { midiToNote } from '../lib/music';
 import { escapeHtml, prefs } from './dom';
 import { chosenMic, micErrorMessage, micWarning, onSpeakers, rawMic, silentMicMessage } from './micSetup';
+import { measureRoundTrip, saveSync, savedSync } from '../lib/sync';
 
 /**
  * Mic check: all the microphone settings in one place, with a live check that the mic hears you —
@@ -29,11 +30,26 @@ export function mountMicCheck(host: HTMLElement, changed: () => void = () => und
       <label class="inline">Microphone <select data-mc="input"><option value="">Automatic (the device picks)</option></select></label>
       <label class="check small"><input type="checkbox" data-mc="raw"> Singing mic <small>(ask the device for no filters like Voice Isolation — they squash singing)</small></label>
       <label class="check small"><input type="checkbox" data-mc="speakers"> I’m on speakers, not headphones <small>(headphones give the cleanest takes)</small></label>
+      <div class="mcSync">
+        <button class="btn" data-mc="sync">⏱ Sync check</button>
+        <span class="mcSyncState hint small"></span>
+        <button class="btn small hidden" data-mc="syncForget">Forget</button>
+      </div>
+      <p class="hint small">Bluetooth headphones play late. Clap along with 8 clicks and your recordings, scores and the staff are lined up for the delay.</p>
     </div>`;
   const $ = <T extends HTMLElement>(selector: string) => host.querySelector<T>(selector)!;
   const state = $('.mcState'), msg = $('.mcMsg'), meter = $<HTMLElement>('.mcMeter span'), note = $('.mcNote');
   const select = $<HTMLSelectElement>('[data-mc="input"]'), raw = $<HTMLInputElement>('[data-mc="raw"]'), speakers = $<HTMLInputElement>('[data-mc="speakers"]');
   const startButton = $<HTMLButtonElement>('[data-mc="start"]');
+  const syncButton = $<HTMLButtonElement>('[data-mc="sync"]'), syncState = $('.mcSyncState'), syncForget = $<HTMLButtonElement>('[data-mc="syncForget"]');
+  const showSync = () => {
+    const sync = savedSync();
+    const otherMic = sync && mic.active && mic.inputLabel && sync.mic && sync.mic !== mic.inputLabel;
+    syncState.textContent = !sync ? 'Not measured — using what the browser reports.'
+      : 'Sync: ' + sync.ms + ' ms' + (otherMic ? ' — measured with ' + sync.mic + '; check again for this mic.' : sync.mic ? ' (' + sync.mic + ')' : '');
+    syncForget.classList.toggle('hidden', !sync);
+  };
+  showSync();
   raw.checked = rawMic();
   speakers.checked = onSpeakers();
 
@@ -66,6 +82,7 @@ export function mountMicCheck(host: HTMLElement, changed: () => void = () => und
     const warning = micWarning(mic);
     say(warning || 'Sing or hum a note…', warning ? 'warn' : 'info');
     void fillMics();
+    showSync();
     cancelAnimationFrame(frame);
     loop();
   };
@@ -88,6 +105,40 @@ export function mountMicCheck(host: HTMLElement, changed: () => void = () => und
     }
   };
 
+  const click = (at: number, accent: boolean) => {
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.frequency.value = accent ? 1500 : 1000;
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.5, at + 0.004);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.08);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(at);
+    osc.stop(at + 0.1);
+  };
+  /** Plays 8 clicks, records the answers (claps, or the clicks heard back on speakers), measures the delay. */
+  const syncCheck = async () => {
+    if (!mic.active) await start();
+    if (!mic.active) return;
+    if (!mic.canRecord) { syncState.textContent = 'This browser can’t record here, so it can’t measure.'; return; }
+    syncButton.disabled = true;
+    syncState.textContent = 'Clap sharply on each click…';
+    if (ctx.state !== 'running') await ctx.resume();
+    mic.startRecording();
+    const first = ctx.currentTime + 1.2;
+    const clicks = Array.from({ length: 8 }, (_, k) => first + k * 0.6);
+    clicks.forEach((at, k) => click(at, k === 0));
+    await new Promise(resolve => window.setTimeout(resolve, (clicks[clicks.length - 1] - ctx.currentTime + 1.2) * 1000));
+    const recording = mic.stopRecording();
+    syncButton.disabled = false;
+    if (stopped) return;
+    const found = recording ? measureRoundTrip(recording.samples, recording.sampleRate, recording.startTime, clicks) : null;
+    if (found === null) { syncState.textContent = 'Couldn’t hear a steady answer to the clicks — clap sharply on each one and try again.'; return; }
+    saveSync({ ms: Math.round(found * 1000), mic: mic.inputLabel, at: Date.now() });
+    changed();
+    showSync();
+  };
+  syncButton.addEventListener('click', () => void syncCheck());
+  syncForget.addEventListener('click', () => { saveSync(null); changed(); showSync(); });
   startButton.addEventListener('click', () => void start());
   select.addEventListener('change', () => {
     const option = select.selectedOptions[0];
