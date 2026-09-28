@@ -109,15 +109,13 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
           <p id="duetHint" class="hint small hidden">Your partner’s lines keep the original singer; only your lines are scored. In Karaoke, tap You/Them on a line to switch it.</p>
           <div class="toggles">
             <label class="check"><input id="forgiveOctave" type="checkbox"> Forgive octave <small>(score the right note in any octave)</small></label>
-            <label class="check"><input id="speakers" type="checkbox"> I’m on speakers, not headphones</label>
-            <label class="check"><input id="micRaw" type="checkbox"> Singing mic <small>(ask the phone for no filters like Voice Isolation — they squash singing)</small></label>
             <label class="check"><input id="countIn" type="checkbox"> Count me in before recording</label>
             <label class="check"><input id="simpleView" type="checkbox"> Simple staff <small>(fewer labels)</small></label>
             <label class="check"><input id="showVoices" type="checkbox"> Show voice types <small>(bass, tenor, alto…)</small></label>
           </div>
           <div class="micRow">
-            <label class="inline">Microphone <select id="micInput" class="miniSelect"></select></label>
-            <p id="micStatus" class="hint small"></p>
+            <button id="micCheckBtn" class="btn small" type="button">🎤 Mic check &amp; settings</button>
+            <p class="hint small">Which mic, headphones or speakers, and a quick check that it hears you.</p>
           </div>
           <div class="practiceRow">
             <label class="inline">Repeat <select id="repeats" class="miniSelect"><option value="1">Once</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option><option value="99">Loop</option></select></label>
@@ -127,6 +125,11 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         </div>
       </div>
     </div>
+
+    <dialog id="micDialog" class="dialog" aria-label="Mic check">
+      <div id="micDialogBody"></div>
+      <div class="row end"><button id="micDialogDone" class="btn primary" type="button">Done</button></div>
+    </dialog>
 
     <dialog id="partDialog" class="dialog" aria-label="Practice a part">
       <h2>Practice a part</h2>

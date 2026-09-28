@@ -564,8 +564,18 @@ input[type='range'] { accent-color: var(--accent); }
   .stage.withBuilder .lyricsList { padding-bottom: 55vh; }   /* lines can scroll up above the sheet */
 }
 
-/* Microphone picker (practice settings) */
-.micRow { display: grid; gap: 4px; margin-top: 8px; }
-.micRow select { max-width: 100%; }
-#micStatus { margin: 0; }
-#micStatus.warn { color: var(--close); }
+/* Mic check (while a song is prepared, and from the practice settings) */
+.micRow { display: grid; gap: 4px; margin-top: 8px; justify-items: start; }
+.micRow .hint { margin: 0; }
+.prepMicCheck { margin-top: 12px; }
+.micCheck { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.micCheck .mcHead { display: flex; gap: 10px; align-items: baseline; }
+.micCheck .mcState { color: var(--muted); font-size: 0.85rem; }
+.micCheck .mcRow { display: flex; gap: 10px; align-items: center; }
+.micCheck .mcMeter { flex: 1; height: 10px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.micCheck .mcMeter span { display: block; height: 100%; width: 0; background: var(--good); transition: width 60ms linear; }
+.micCheck .mcNote { min-width: 3ch; font-weight: 800; }
+.micCheck .mcMsg { margin: 0; }
+.micCheck .mcMsg.ok { color: var(--good); }
+.micCheck .mcMsg.warn { color: var(--close); }
+.micCheck select { max-width: 100%; }

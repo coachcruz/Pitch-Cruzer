@@ -1,5 +1,5 @@
-import { isBluetoothMic, listMics, type LiveMic, type MicChoice } from '../lib/mic';
-import { escapeHtml, prefs, toast } from './dom';
+import { isBluetoothMic, type LiveMic, type MicChoice } from '../lib/mic';
+import { prefs, toast } from './dom';
 
 /**
  * Which microphone the app listens to, and telling you when the device gets in the way: an iPhone
@@ -36,29 +36,29 @@ export function announceMic(mic: LiveMic): void {
   else if (mic.inputLabel) toast('🎤 Listening through ' + mic.inputLabel);
 }
 
-/**
- * A "Microphone" picker: fills `select` with the device's mics, and shows in `status` which one is in
- * use and any warning. `changed` runs after a new mic is picked.
- */
-export function micPicker(select: HTMLSelectElement, status: HTMLElement, mic: LiveMic, changed: () => void) {
-  const refresh = async () => {
-    const mics = await listMics();
-    const chosen = chosenMic();
-    select.innerHTML = '<option value="">Automatic (the device picks)</option>'
-      + mics.map(item => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join('');
-    const match = chosen && (mics.find(item => item.id === chosen.id) ?? mics.find(item => item.label === chosen.label));
-    select.value = match ? match.id : '';
-    if (chosen && !match) select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(chosen.id)}" selected>${escapeHtml(chosen.label)} (not connected)</option>`);
-    const warning = mic.active ? micWarning(mic) : '';
-    status.textContent = mic.active ? 'In use: ' + (mic.inputLabel || 'microphone') + (warning ? ' — ' + warning : '')
-      : mics.length ? '' : 'Turn the mic on once to see your microphones here.';
-    status.classList.toggle('warn', Boolean(warning));
-  };
-  select.addEventListener('change', () => {
-    const option = select.selectedOptions[0];
-    prefs.set('micInput', select.value ? { id: select.value, label: option?.textContent?.replace(/ \(not connected\)$/, '') ?? '' } : null);
-    changed();
-  });
-  navigator.mediaDevices?.addEventListener?.('devicechange', () => void refresh());
-  return { refresh };
+
+/** Playing through speakers (not headphones): the mic then cancels the music's echo. */
+export const onSpeakers = (): boolean => prefs.get('speakers', false);
+
+const isMac = () => /Mac/.test(navigator.platform || navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent);
+
+/** Why the mic couldn't start, in plain words, with what to do about it. */
+export function micErrorMessage(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : '';
+  const macPrivacy = isMac() ? ' On a Mac, also check System Settings → Privacy & Security → Microphone: your browser must be switched on (then quit and reopen the browser).' : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'The microphone is blocked for this site. Allow it: click the icon left of the address (Safari: Settings for this website → Microphone → Allow).' + macPrivacy;
+  }
+  if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'No microphone was found. Plug one in, or check that the built-in one is switched on in your sound settings.';
+  if (name === 'NotReadableError' || name === 'AbortError') {
+    return 'The microphone is busy or blocked by the system. Close other apps that use it (Zoom, FaceTime, another tab) and try again.' + macPrivacy;
+  }
+  return 'The microphone couldn’t start.' + macPrivacy;
+}
+
+/** The mic is on but hears nothing at all: what to check. */
+export function silentMicMessage(): string {
+  return isMac()
+    ? 'The mic is on but hears nothing. On a Mac: System Settings → Sound → Input — pick the MacBook microphone and raise Input volume — and Privacy & Security → Microphone must allow your browser.'
+    : 'The mic is on but hears nothing. Check the mic isn’t muted, and that the right one is picked below.';
 }

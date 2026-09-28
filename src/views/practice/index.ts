@@ -20,7 +20,8 @@ import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
-import { announceMic, chosenMic, micPicker, rawMic } from '../../ui/micSetup';
+import { announceMic, chosenMic, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
+import { mountMicCheck } from '../../ui/micCheck';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -108,10 +109,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
   const levels = { lead: prefs.get('mix.lead', 100), music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100 };
   const forgiveOctave = $<HTMLInputElement>('#forgiveOctave');
-  const speakers = $<HTMLInputElement>('#speakers');
   const countIn = $<HTMLInputElement>('#countIn');
   forgiveOctave.checked = prefs.get('forgiveOctave', false);
-  speakers.checked = prefs.get('speakers', false);
   countIn.checked = prefs.get('countIn', true);
   lane.forgiveOctave = forgiveOctave.checked;
 
@@ -523,7 +522,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   mixToggle.addEventListener('click', () => {
     const open = settingsPanel.classList.toggle('hidden') === false;
     mixToggle.setAttribute('aria-expanded', String(open));
-    if (open) void picker.refresh();
   });
   forgiveOctave.addEventListener('change', () => {
     prefs.set('forgiveOctave', forgiveOctave.checked);
@@ -538,7 +536,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   showVoices.checked = prefs.get('showVoices', window.innerWidth >= 700);
   lane.showVoiceTypes = showVoices.checked;
   showVoices.addEventListener('change', () => { prefs.set('showVoices', showVoices.checked); lane.showVoiceTypes = showVoices.checked; });
-  speakers.addEventListener('change', () => { prefs.set('speakers', speakers.checked); if (mic.active) void enableMic(); });
   countIn.addEventListener('change', () => prefs.set('countIn', countIn.checked));
   repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); updateClock(); });
   const syncEchoModel = () => $('#echoModelWrap').classList.toggle('hidden', !echoMode());
@@ -562,25 +559,33 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     micButton.classList.toggle('on', mic.active);
     micButton.title = mic.active ? 'Microphone on' + (mic.inputLabel ? ' (' + mic.inputLabel + ')' : '') + ' — tap to turn off' : 'Microphone — see your voice on the staff';
   };
-  // Which mic to listen to (⚙ → Microphone), and whether to ask for it without phone filters.
-  const micRaw = $<HTMLInputElement>('#micRaw');
-  micRaw.checked = rawMic();
-  const picker = micPicker($<HTMLSelectElement>('#micInput'), $('#micStatus'), mic, () => { if (mic.active) void enableMic(); else void picker.refresh(); });
-  micRaw.addEventListener('change', () => { prefs.set('micRaw', micRaw.checked); if (mic.active) void enableMic(); });
+  // The mic settings (which mic, headphones or speakers, no phone filters) live in one place: ⚙ → Mic check.
   const enableMic = async (): Promise<boolean> => {
     try {
-      await mic.start(speakers.checked, chosenMic(), micRaw.checked);
+      await mic.start(onSpeakers(), chosenMic(), rawMic());
       mic.setMonitor(levels.monitor / 100);
       renderMicButton();
       announceMic(mic);
-      void picker.refresh();
       return true;
-    } catch {
-      toast('Microphone blocked. Allow the mic for this site (padlock icon in the address bar) and try again.', 'error');
+    } catch (error) {
+      toast(micErrorMessage(error), 'error');
       renderMicButton();
       return false;
     }
   };
+  const micDialog = $<HTMLDialogElement>('#micDialog');
+  let micCheck: { stop: () => void } | null = null;
+  $('#micCheckBtn').addEventListener('click', () => {
+    micCheck?.stop();
+    micCheck = mountMicCheck($('#micDialogBody'));
+    micDialog.showModal();
+  });
+  $('#micDialogDone').addEventListener('click', () => micDialog.close());
+  micDialog.addEventListener('close', () => {
+    micCheck?.stop();
+    micCheck = null;
+    if (mic.active) void enableMic();   // new settings take effect (the mic restarts only if they changed)
+  });
   micButton.addEventListener('click', () => {
     if (recording) return;
     if (mic.active) { mic.stop(); renderMicButton(); } else void enableMic();
@@ -603,7 +608,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     recordButton.classList.toggle('live', recording);
     // Switching the mic mid-take would drop the rest of the recording: the mic settings wait until it's done.
     const taking = recording || Boolean(builder?.active);
-    for (const id of ['#micInput', '#micRaw', '#speakers']) $<HTMLInputElement | HTMLSelectElement>(id).disabled = taking;
+    $<HTMLButtonElement>('#micCheckBtn').disabled = taking;
   };
 
   const beep = (when: number, accent: boolean) => {
@@ -729,7 +734,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     review.close();
     closeSettings();
     await startPlayback(true);
-    toast(speakers.checked ? 'Recording — sing along!' : 'Recording — sing along! (Headphones give the cleanest take.)');
+    toast(onSpeakers() ? 'Recording — sing along!' : 'Recording — sing along! (Headphones give the cleanest take.)');
   });
 
   const finishRecording = async () => {

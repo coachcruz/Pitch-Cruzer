@@ -10,6 +10,7 @@ import { showRecordingReview } from '../ui/recordingReview';
 import { cleanSongTitle, EmbeddedVideo, searchYouTube, youtubeId, youtubeSearchAvailable } from '../lib/youtube';
 import { LYRICS_READY, session } from '../session';
 import { el, escapeHtml, prefs, toast } from '../ui/dom';
+import { mountMicCheck } from '../ui/micCheck';
 
 type LalalState = 'checking' | 'ready' | 'missing' | 'offline' | 'error';
 let lalalState: LalalState = 'checking';
@@ -78,6 +79,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <div class="cardHead"><h2 id="progressTitle">Preparing your song…</h2><button id="cancelPrep" class="btn ghost small">Cancel</button></div>
     <ol id="stepList" class="stepList"></ol>
     <div id="prepError" class="errorBox hidden"></div>
+    <div id="prepMicCheck" class="prepMicCheck"></div>
     <details class="diag"><summary>Show details <span id="diagElapsed" class="mono"></span></summary>
       <ol id="diagLog" class="diagLog"></ol>
       <button id="diagCopy" class="chip ghost">Copy details</button>
@@ -114,6 +116,8 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const stepList = el(root, '#stepList');
   const prepError = el(root, '#prepError');
   let abort: AbortController | null = null;
+  let prepMicCheck: { stop: () => void } | null = null;
+  const stopMicCheck = () => { prepMicCheck?.stop(); prepMicCheck = null; };
   let disposed = false;
 
   // ------------------------------------------------ LALAL status
@@ -182,6 +186,8 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     abort = new AbortController();
     addCard.classList.add('busy');
     progressCard.classList.remove('hidden');
+    // While the song is prepared: make sure the mic hears you, so it's sorted before the song starts.
+    prepMicCheck ??= mountMicCheck(el(root, '#prepMicCheck'));
     prepError.classList.add('hidden');
     el(root, '#progressTitle').textContent = 'Preparing your song…';
     const states: Partial<Record<StepId, { fraction: number; detail?: string }>> = {};
@@ -241,7 +247,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       prepError.classList.remove('hidden');
       prepError.querySelector('[data-act="retry"]')?.addEventListener('click', () => void start(input));
       prepError.querySelector('[data-act="nosplit"]')?.addEventListener('click', () => void start(input, false));
-      prepError.querySelector('[data-act="close"]')?.addEventListener('click', () => progressCard.classList.add('hidden'));
+      prepError.querySelector('[data-act="close"]')?.addEventListener('click', () => { progressCard.classList.add('hidden'); stopMicCheck(); });
     } finally {
       addCard.classList.remove('busy');
     }
@@ -250,6 +256,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   el(root, '#cancelPrep').addEventListener('click', () => {
     abort?.abort();
     progressCard.classList.add('hidden');
+    stopMicCheck();
     addCard.classList.remove('busy');
   });
 
@@ -492,6 +499,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   return () => {
     disposed = true;
     abort?.abort();
+    stopMicCheck();
     window.clearInterval(elapsedTimer);
     window.clearInterval(recorderTick);
     stopDiag();
