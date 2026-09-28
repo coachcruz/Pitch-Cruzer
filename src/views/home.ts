@@ -65,7 +65,18 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
           <span id="vTime" class="mono">0:00</span>
         </div>
         <div class="vu" aria-hidden="true"><span id="vMeter"></span></div>
-        <p class="hint small">Plays from the start and stops by itself at the end. The first time, Chrome asks to share this tab — choose it with “Share tab audio” on.</p>
+        <div id="shareGuide" class="shareGuide hidden">
+          <p id="shareProblem" class="notice small hidden"></p>
+          <strong>The browser will now ask what to share:</strong>
+          <ol>
+            <li>Pick the <b>Chrome Tab</b> section (not Window or Entire Screen) and click <b>this tab</b>, Pitch Cruzer.</li>
+            <li>Turn on <b>Also share tab audio</b> at the bottom of that window.</li>
+            <li>Click <b>Share</b>. It only asks once while this page is open.</li>
+          </ol>
+          <div class="row"><button id="shareGo" class="btn primary">Got it — record</button><button id="shareCancel" class="btn ghost">Cancel</button></div>
+        </div>
+        <p id="noTabAudio" class="notice small hidden">This browser can’t record a tab’s sound — Safari, Firefox and phones can’t share it. To record this song, open Pitch Cruzer in Chrome or Edge on a computer. Or download the song and use 📁 Upload a file.</p>
+        <p class="hint small">Plays from the start and stops by itself at the end.</p>
       </div>
     </div>
 
@@ -305,11 +316,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const reviewHost = el(root, '#capReviewHost');
   const video = new EmbeddedVideo();
   const recorder = new PageRecorder();
+  const canRecordHere = PageRecorder.canShareTabAudio();
   let closeReview: (() => void) | null = null;
   let warned = false;
 
   const renderRecorder = () => {
-    vRecord.classList.toggle('hidden', recorder.recording);
+    vRecord.classList.toggle('hidden', recorder.recording || !canRecordHere);
     vStop.classList.toggle('hidden', !recorder.recording);
     vTime.textContent = recorder.recording ? '● ' + formatTime(recorder.seconds) : formatTime(video.time) + (video.duration ? ' / ' + formatTime(video.duration) : '');
     vMeter.style.width = Math.round(recorder.level() * 100) + '%';
@@ -338,14 +350,29 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     }
   };
 
+  // Sharing the tab's sound: said up front — what to pick in the browser's share window, and on
+  // browsers that can't share it at all, no Record button but what to do instead.
+  const shareGuide = el(root, '#shareGuide');
+  el(root, '#noTabAudio').classList.toggle('hidden', canRecordHere);
+  const showShareGuide = (problem = '') => {
+    el(root, '#shareProblem').textContent = problem;
+    el(root, '#shareProblem').classList.toggle('hidden', !problem);
+    shareGuide.classList.remove('hidden');
+    shareGuide.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
+  el(root, '#shareCancel').addEventListener('click', () => shareGuide.classList.add('hidden'));
+  el(root, '#shareGo').addEventListener('click', async () => {
+    shareGuide.classList.add('hidden');
+    try { await recorder.connect(); } catch (error) { showShareGuide(shareErrorMessage(error)); return; }
+    void recordVideo();
+  });
+
   /** Records this page while the player plays the song from the start; stops by itself at the end. */
   const recordVideo = async () => {
     closeReview?.();
     closeReview = null;
-    if (!recorder.connected) {
-      if (!PageRecorder.supported()) { toast('This browser can’t record here. Use Chrome or Edge on a computer — or download the song and upload the file.', 'error'); return; }
-      try { await recorder.connect(); } catch (error) { toast(shareErrorMessage(error), 'error'); return; }
-    }
+    if (!canRecordHere) return;
+    if (!recorder.connected) { showShareGuide(); return; }   // the share is opened from the guide's button
     recorder.start();
     warned = false;
     video.restart();
@@ -356,7 +383,12 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     const recording = recorder.stop();
     video.pause();
     renderRecorder();
-    if (!recording) { toast('Nothing audible was recorded. Keep “Share tab audio” on when Chrome asks.', 'error'); return; }
+    if (!recording) {
+      // Shared, but silent: another tab, or its sound was off. Start the share afresh next time.
+      recorder.close();
+      showShareGuide('That recording had no sound: the shared tab wasn’t this one, or “Also share tab audio” was off.');
+      return;
+    }
     closeReview = showRecordingReview(reviewHost, recording, {
       use: (wav, title) => {
         closeReview = null;

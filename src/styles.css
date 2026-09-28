@@ -590,3 +590,8 @@ input[type='range'] { accent-color: var(--accent); }
 /* Sync check, in the Mic check */
 .micCheck .mcSync { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .micCheck .mcSyncState { margin: 0; }
+
+/* Recording a song from a video: what to pick in the browser's share window (said before it opens) */
+.shareGuide { display: grid; gap: 6px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent); background: var(--surface-2); }
+.shareGuide ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 0.9rem; }
+.shareGuide .notice { margin: 0; }
