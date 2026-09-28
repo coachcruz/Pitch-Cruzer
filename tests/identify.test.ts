@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // The function reads its key through Netlify's global.
 (globalThis as unknown as { Netlify: unknown }).Netlify = { env: { get: () => 'test-key' } };
-const { default: identify } = await import('../netlify/functions/identify-song.mts');
+const { default: identify, MODELS } = await import('../netlify/functions/identify-song.mts');
 
 const HEARD = 'one two three four five six seven eight nine ten';
 const request = () => new Request('https://site/api/identify', { method: 'POST', body: JSON.stringify({ heard: HEARD }) });
@@ -26,25 +26,37 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('/api/identify', () => {
   it('uses the first listed model that works', async () => {
-    const asked = groq([], model => (model === 'llama-3.3-70b-versatile' ? song('Hello') : gone()));
-    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone' });
-    expect(asked).toEqual(['llama-3.3-70b-versatile']);
+    const asked = groq([], model => (model === MODELS[1] ? song('Hello') : gone()));
+    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone', model: MODELS[1] });
+    expect(asked).toEqual(MODELS.slice(0, 2));
   });
 
   it('when every listed model is retired, tries the chat models Groq has now, biggest first', async () => {
     const asked = groq(['whisper-large-v3', 'llama-guard-4-12b', 'tiny-1b', 'new-chat-70b', 'other-chat-32b'],
       model => (model === 'other-chat-32b' ? song('Hello') : gone()));
-    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone' });
-    expect(asked.slice(3)).toEqual(['new-chat-70b', 'other-chat-32b']);
+    expect(await (await identify(request())).json()).toEqual({ title: 'Hello', artist: 'Someone', model: 'other-chat-32b' });
+    expect(asked.slice(MODELS.length)).toEqual(['new-chat-70b', 'other-chat-32b']);
   });
 
   it('passes on a rate limit even when the models after it are gone', async () => {
-    const asked = groq(['new-chat-70b'], model => (model === 'llama-3.3-70b-versatile'
+    const asked = groq(['new-chat-70b'], model => (model === MODELS[0]
       ? new Response('{}', { status: 429, headers: { 'retry-after': '30' } }) : gone()));
     const response = await identify(request());
     expect(response.status).toBe(429);
     expect(response.headers.get('retry-after')).toBe('30');
-    expect(asked).toEqual(['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant']);
+    expect(asked).toEqual(MODELS);
+  });
+
+  it('?model= asks only that model (to compare them)', async () => {
+    const asked = groq([], () => song('Hello'));
+    const one = new Request('https://site/api/identify?model=llama-3.3-70b-versatile', { method: 'POST', body: JSON.stringify({ heard: HEARD }) });
+    expect((await (await identify(one)).json()).model).toBe('llama-3.3-70b-versatile');
+    expect(asked).toEqual(['llama-3.3-70b-versatile']);
+  });
+
+  it('picks the answer out of text (web-searching models answer in words)', async () => {
+    groq([], () => reply(200, { choices: [{ message: { content: 'I searched the web.\n```json\n{"title": "Picture", "artist": "Kid Rock"}\n```' } }] }));
+    expect(await (await identify(request())).json()).toMatchObject({ title: 'Picture', artist: 'Kid Rock' });
   });
 
   it('says what Groq answered when nothing works', async () => {
@@ -54,6 +66,6 @@ describe('/api/identify', () => {
     const body = await response.json();
     expect(body.error).toBe('Recognition service error 404');
     expect(body.detail).toContain('decommissioned');
-    expect(body.tried).toEqual(['llama-3.3-70b-versatile → 404', 'openai/gpt-oss-120b → 404', 'llama-3.1-8b-instant → 404']);
+    expect(body.tried).toEqual(MODELS.map(model => model + ' → 404'));
   });
 });

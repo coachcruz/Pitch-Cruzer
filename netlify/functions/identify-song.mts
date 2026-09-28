@@ -7,17 +7,27 @@ import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
  * having to find them. Speech recognition on singing is only roughly right, but a language model
  * recognises a song from rough lines the way a person would. Uses the same GROQ_API_KEY as /api/transcribe.
  *
- * POST { heard: string, hint?: string }  ←  { title, artist } or { title: null }
- * The caller double-checks the answer against what was heard before trusting it.
+ * POST { heard: string, hint?: string }  ←  { title, artist, model } (title null: not recognised)
+ * ?model=… asks only that model (one of MODELS or COMPARE — to compare them on real lyrics).
+ * GET  ← { models } — the chat models this Groq key can use right now.
+ * The caller double-checks the answer against the real lyrics before trusting it, so a best guess is
+ * asked for: a wrong guess costs nothing, a missed song means guessed lyrics.
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODELS_URL = 'https://api.groq.com/openai/v1/models';
-const MODELS = ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'llama-3.1-8b-instant'];
+// Live tests ("Picture", Kid Rock — from its exact lyrics and from misheard ones): gpt-oss with Groq's
+// built-in web search named it every time in 7–13 s; from memory alone, gpt-oss said "no idea" and
+// qwen3.8 / llama named other songs. So only the web-searching models are asked; the next one is tried
+// if one is unavailable.
+export const MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
+const COMPARE = ['qwen/qwen3.8-27b', 'groq/compound', 'groq/compound-mini', 'llama-3.3-70b-versatile', 'moonshotai/kimi-k2-instruct'];
+const searches = (model: string) => model.startsWith('openai/gpt-oss') || model.startsWith('groq/compound');
 
 export default async (req: Request) => {
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const key = env('GROQ_API_KEY');
   if (!key) return json({ error: 'GROQ_API_KEY is not configured', code: 'missing_key' }, 503);
+  if (req.method === 'GET') return json({ models: await currentModels(key, true) });
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const body = (await req.json().catch(() => ({}))) as { heard?: unknown; hint?: unknown };
   const heard = typeof body.heard === 'string' ? body.heard.slice(0, 2500).trim() : '';
   const hint = typeof body.hint === 'string' ? body.hint.slice(0, 200).trim() : '';
@@ -32,14 +42,19 @@ export default async (req: Request) => {
     body: JSON.stringify({
       model,
       temperature: 0,
-      max_tokens: 300,
-      response_format: { type: 'json_object' },
+      // Reasoning models think before they answer: room for that, kept short.
+      max_tokens: searches(model) ? 4000 : 1500,
+      ...(model.startsWith('openai/') ? { reasoning_effort: 'medium' } : {}),
+      // Web-searching models answer in text (JSON is picked out of it below).
+      ...(searches(model) ? {} : { response_format: { type: 'json_object' } }),
+      ...(model.startsWith('openai/gpt-oss') ? { tools: [{ type: 'browser_search' }], tool_choice: 'auto' } : {}),
       messages: [
         {
           role: 'system',
           content: 'You identify songs from their lyrics. The lyrics were written down by speech recognition from a sung vocal, so some words are misheard. '
-            + 'Answer only with JSON: {"title": string | null, "artist": string | null}. Use the official title and main artist of the released song. '
-            + 'If you do not clearly recognise a released song, answer {"title": null, "artist": null} — never guess.'
+            + (searches(model) ? 'Search the web for a few distinctive lines to find the song. ' : '')
+            + 'Answer with only JSON: {"title": string | null, "artist": string | null} — the official title and main artist of the released song. '
+            + 'Give your best guess: the answer is checked against the real lyrics afterwards. Answer {"title": null, "artist": null} only if you have no idea.'
         },
         { role: 'user', content: (hint ? 'File or video name (may be meaningless): ' + hint + '\n\n' : '') + 'Heard lyrics:\n' + heard }
       ]
@@ -60,7 +75,9 @@ export default async (req: Request) => {
     }
     return false;
   };
-  if (!(await tryModels(MODELS)) && !limited) await tryModels(await currentModels(key));
+  const only = new URL(req.url).searchParams.get('model');
+  if (only && (MODELS.includes(only) || COMPARE.includes(only))) await tryModels([only]);
+  else if (!(await tryModels(MODELS)) && !limited) await tryModels(await currentModels(key));
   const final = response as Response | null;
   // A model that was only busy beats one that's gone: the browser waits and asks again.
   if (limited && !final?.ok) return rateLimited(limited);
@@ -71,18 +88,22 @@ export default async (req: Request) => {
   }
   const result = (await final.json().catch(() => null)) as { choices?: Array<{ message?: { content?: string } }> } | null;
   let answer: { title?: unknown; artist?: unknown } = {};
-  try { answer = JSON.parse(result?.choices?.[0]?.message?.content ?? '{}'); } catch { /* not JSON: treat as unknown */ }
+  const content = result?.choices?.[0]?.message?.content ?? '';
+  // The JSON, even when it comes wrapped in text or a code block.
+  const found = content.match(/\{[^{}]*"title"[^{}]*\}/);
+  try { answer = JSON.parse(found ? found[0] : content || '{}'); } catch { /* not JSON: treat as unknown */ }
   const text = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim().slice(0, 120) : null);
-  return json({ title: text(answer.title), artist: text(answer.artist) });
+  return json({ title: text(answer.title), artist: text(answer.artist), model: tried[tried.length - 1]?.split(' → ')[0] ?? null });
 };
 
-/** Chat models Groq offers right now (not the listed ones, nor speech, safety or tiny models), biggest first. */
-async function currentModels(key: string): Promise<string[]> {
+/** Chat models Groq offers right now (not the listed ones, nor speech, safety or tiny models), biggest first; `all`: every model id. */
+async function currentModels(key: string, all = false): Promise<string[]> {
   const response = await fetch(GROQ_MODELS_URL, { headers: { Authorization: 'Bearer ' + key } }).catch(() => null);
   const list = response?.ok ? ((await response.json().catch(() => null)) as { data?: Array<{ id?: unknown; active?: unknown }> } | null) : null;
   const size = (id: string) => Number(/(\d+)b\b/i.exec(id)?.[1] ?? 0);
-  return (list?.data ?? [])
-    .map(model => (model.active === false ? '' : typeof model.id === 'string' ? model.id : ''))
+  const ids = (list?.data ?? []).map(model => (model.active === false ? '' : typeof model.id === 'string' ? model.id : '')).filter(Boolean);
+  if (all) return ids.sort();
+  return ids
     .filter(id => id && !MODELS.includes(id) && !/whisper|tts|guard|playai|orpheus|compound|distil|embed/i.test(id) && (size(id) === 0 || size(id) >= 8))
     .sort((a, b) => size(b) - size(a))
     .slice(0, 3);
