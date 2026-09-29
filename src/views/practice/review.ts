@@ -7,6 +7,7 @@ import type { TrailPoint } from '../../ui/lane';
 import { session } from '../../session';
 import { el, escapeHtml, prefs, toast } from '../../ui/dom';
 import { bestLine, lineText, safeName } from './text';
+import { visitId, visitStore } from '../../lib/visit';
 
 /** A take being reviewed: the recorded voice, where it sits against the song, and its score. */
 export interface Review {
@@ -20,6 +21,8 @@ export interface Review {
   label: string;
   savedId?: string;
   singer?: string;
+  /** Not saved yet, but kept on the device for this visit (until the window is closed): its take id. */
+  keptId?: string;
 }
 
 /** What the review needs from the practice screen. */
@@ -28,7 +31,8 @@ export interface ReviewHost {
   song: StoredSong;
   buffers: SongBuffers;
   player: Player;
-  levels: { lead: number; music: number; voice: number };
+  /** voice, takeLead, takeMusic: the listen-back mix (its own, apart from the guide you sang with). */
+  levels: { voice: number; takeLead: number; takeMusic: number };
   forgiveOctave: () => boolean;
   /** Which song moments are scored (duet: only your lines). */
   counts: (sourceTime: number) => boolean;
@@ -56,7 +60,7 @@ export class TakeReview {
   constructor(private host: ReviewHost) {
     this.dialog = el<HTMLDialogElement>(host.root, '#reviewDialog');
     this.panel = el(host.root, '#review');
-    this.dialog.addEventListener('close', () => { if (host.isPlayingTake()) host.stop(); });
+    this.dialog.addEventListener('close', () => { if (host.isPlayingTake()) host.stop(); visitStore.set('reviewTake', null); });
     el(host.root, '#reviewDialogClose').addEventListener('click', () => this.dialog.close());
   }
 
@@ -75,11 +79,50 @@ export class TakeReview {
     this.panel.classList.add('hidden');
   }
 
-  /** Scores a fresh recording and shows it. */
+  /** Scores a fresh recording and shows it — and keeps it for this visit, even before it's saved. */
   async fromRecording(voice: AudioBuffer, offset: number, ranges: Range[], repeats: number, label: string): Promise<void> {
     this.panel.innerHTML = '<p>Scoring your take…</p>';
     this.open(true);
     await this.build(voice, offset, ranges, repeats, label);
+    await this.keepForVisit();
+  }
+
+  /**
+   * Your take stays until you close the window, not just while this page is in memory: switching tabs
+   * or apps, locking the phone or the page being reloaded (phones reclaim background pages) keeps it.
+   */
+  private kept: StoredTake | null = null;
+  private async keepForVisit(): Promise<void> {
+    const review = this.current;
+    if (!review || review.savedId) return;
+    try {
+      if (!session.saved) { await saveSong(this.host.song); session.saved = true; }
+      const take: StoredTake = this.kept && this.kept.id === review.keptId
+        ? { ...this.kept, score: review.score.score, offsetSeconds: review.offset }
+        : {
+          id: review.keptId ?? crypto.randomUUID(), songId: this.host.song.id, singer: prefs.get('singer', '') || 'Me',
+          createdAt: Date.now(), score: review.score.score, label: review.label,
+          voice: encodeWav([review.voice.getChannelData(0)], review.voice.sampleRate), sampleRate: review.voice.sampleRate,
+          segments: review.ranges, offsetSeconds: review.offset, visit: visitId()
+        };
+      await saveTake(take);
+      this.kept = take;
+      review.keptId = take.id;
+      if (this.dialog.open) visitStore.set('reviewTake', take.id);
+      void this.renderTakes();
+    } catch { /* storage full: the take stays on screen, it just isn't kept past this page */ }
+  }
+
+  /** After the page was reloaded (a phone reclaiming it, an update): open the take that was being reviewed. */
+  async restoreAfterReload(): Promise<void> {
+    const id = visitStore.get('reviewTake');
+    if (!id || this.current) return;
+    const take = (await listTakes(this.host.song.id).catch(() => [] as StoredTake[])).find(item => item.id === id);
+    if (!take) { visitStore.set('reviewTake', null); return; }
+    const voice = await decodeAudio(await take.voice.arrayBuffer());
+    this.panel.innerHTML = '<p>Opening your take…</p>';
+    this.open(true);
+    await this.build(voice, take.offsetSeconds, take.segments, 1, take.label, take);
   }
 
   /** Re-scores the current take (after changing octave forgiveness, sync or duet parts). */
@@ -88,6 +131,7 @@ export class TakeReview {
     this.current.score = this.score(this.current.offset, this.current.timeline);
     this.render();
     this.host.changed();
+    if (this.current.keptId) void this.keepForVisit();
   }
 
   refreshPlayButton(): void {
@@ -103,7 +147,13 @@ export class TakeReview {
   private async build(voice: AudioBuffer, offset: number, ranges: Range[], repeats: number, label: string, saved?: StoredTake): Promise<void> {
     const timeline = new Timeline(ranges, repeats);
     this.track = await pitchTrackFor(voice);
-    this.current = { voice, offset, baseOffset: saved ? saved.offsetSeconds : offset, ranges, repeats, timeline, score: this.score(offset, timeline), label, savedId: saved?.id, singer: saved?.singer };
+    const keptOnly = saved?.visit !== undefined;   // a take kept for this visit, not saved yet
+    this.current = {
+      voice, offset, baseOffset: saved ? saved.offsetSeconds : offset, ranges, repeats, timeline, score: this.score(offset, timeline), label,
+      savedId: keptOnly ? undefined : saved?.id, keptId: keptOnly ? saved!.id : undefined, singer: keptOnly ? undefined : saved?.singer
+    };
+    this.kept = keptOnly ? saved! : null;
+    if (this.dialog.open && (saved?.id)) visitStore.set('reviewTake', saved.id);
     this.render();
     this.host.changed();
   }
@@ -117,6 +167,8 @@ export class TakeReview {
     const cents = s.meanCents === null ? '—' : (Math.abs(s.meanCents) < 10 ? 'centered' : Math.abs(Math.round(s.meanCents)) + '¢ ' + (s.meanCents < 0 ? 'flat' : 'sharp'));
     const best = bestLine(s);
     const syncMs = Math.round((review.offset - review.baseOffset) * 1000);
+    const separated = host.song.analysis.separated;
+    const hasMusic = Boolean(host.buffers.backing || host.buffers.instrumental);
     this.panel.innerHTML = `
       <div class="cardHead"><h2>Your take · ${escapeHtml(review.label)}</h2><button id="reviewDiscard" class="btn ghost small">${review.savedId ? 'Done' : 'Discard'}</button></div>
       <div class="scoreRow">
@@ -135,6 +187,8 @@ export class TakeReview {
       <div class="row wrap">
         <button id="reviewPlay" class="btn primary">▶ Listen to my take</button>
         <label class="inline">My voice <input id="voiceLevel" type="range" min="0" max="150" value="${host.levels.voice}"></label>
+        ${separated ? `<label class="inline" title="The original singer, only in the listen-back and the mix — your recording is just you">Singer <input id="takeLead" type="range" min="0" max="100" value="${host.levels.takeLead}"></label>` : ''}
+        ${hasMusic ? `<label class="inline">Music <input id="takeMusic" type="range" min="0" max="100" value="${host.levels.takeMusic}"></label>` : ''}
         <label class="inline" title="If your voice sounds early or late against the music, nudge it here">Sync <input id="syncOffset" type="range" min="-300" max="300" step="10" value="${syncMs}"><output id="syncOut">${syncMs} ms</output></label>
       </div>
       <div class="row wrap">
@@ -159,6 +213,7 @@ export class TakeReview {
     el(panel, '#reviewDiscard').addEventListener('click', () => {
       if (!review.savedId && !confirm('Discard this take without saving it?')) return;
       if (host.isPlayingTake()) host.stop();
+      if (review.keptId && !review.savedId) void deleteTake(review.keptId).then(() => this.renderTakes());
       this.clear();
       host.showTrail(null);
       host.changed();
@@ -174,6 +229,16 @@ export class TakeReview {
       host.levels.voice = Number(voiceLevel.value);
       if (host.isPlayingTake()) host.player.setLevel('voice', host.levels.voice / 100);
     });
+    const bindTakeLevel = (id: string, key: 'takeLead' | 'takeMusic', stem: 'lead' | 'music') => {
+      const input = panel.querySelector<HTMLInputElement>('#' + id);
+      input?.addEventListener('input', () => {
+        host.levels[key] = Number(input.value);
+        prefs.set('mix.' + key, host.levels[key]);
+        if (host.isPlayingTake()) host.player.setLevel(stem, host.levels[key] / 100);
+      });
+    };
+    bindTakeLevel('takeLead', 'takeLead', 'lead');
+    bindTakeLevel('takeMusic', 'takeMusic', 'music');
     const sync = el<HTMLInputElement>(panel, '#syncOffset');
     sync.addEventListener('input', () => { el(panel, '#syncOut').textContent = sync.value + ' ms'; });
     sync.addEventListener('change', () => {
@@ -183,7 +248,7 @@ export class TakeReview {
     });
     el(panel, '#downloadMix').addEventListener('click', async () => {
       toast('Mixing your take…');
-      const blob = await mixdown(host.buffers, review.timeline, { lead: host.levels.lead / 100, music: host.levels.music / 100, voice: host.levels.voice / 100 }, review.voice, review.offset);
+      const blob = await mixdown(host.buffers, review.timeline, { lead: separated ? host.levels.takeLead / 100 : 1, music: host.levels.takeMusic / 100, voice: host.levels.voice / 100 }, review.voice, review.offset);
       downloadBlob(blob, safeName(host.song.title + ' - ' + (el<HTMLInputElement>(panel, '#singerName').value || 'my take')) + '.wav');
     });
     el(panel, '#downloadVoice').addEventListener('click', () => {
@@ -195,7 +260,7 @@ export class TakeReview {
       try {
         if (!session.saved) { await saveSong(host.song); session.saved = true; }
         const take: StoredTake = {
-          id: review.savedId ?? crypto.randomUUID(),
+          id: review.savedId ?? review.keptId ?? crypto.randomUUID(),
           songId: host.song.id,
           singer,
           createdAt: Date.now(),
@@ -208,6 +273,8 @@ export class TakeReview {
         };
         await saveTake(take);
         review.savedId = take.id;
+        review.keptId = undefined;
+        this.kept = null;
         review.singer = singer;
         toast('Take saved for ' + singer + '.');
         this.render();
@@ -247,7 +314,7 @@ export class TakeReview {
     if (!takes.length) { list.innerHTML = '<p class="empty">Save a take to start your leaderboard — pass the mic around!</p>'; return; }
     list.innerHTML = '<ol class="board">' + takes.map((take, index) => `<li>
       <span class="rank">${index === 0 ? '🏆' : index + 1}</span>
-      <span class="who"><b>${escapeHtml(take.singer)}</b><small>${escapeHtml(take.label)} · ${new Date(take.createdAt).toLocaleDateString()}</small></span>
+      <span class="who"><b>${escapeHtml(take.singer)}</b><small>${escapeHtml(take.label)} · ${take.visit ? 'not saved yet — kept until you close the window' : new Date(take.createdAt).toLocaleDateString()}</small></span>
       <span class="pts">${take.score}</span>
       <button class="btn ghost small" data-open-take="${take.id}">Open</button>
       <button class="btn ghost small" data-delete-take="${take.id}" aria-label="Delete take">✕</button></li>`).join('') + '</ol>';

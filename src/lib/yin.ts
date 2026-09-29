@@ -46,7 +46,18 @@ export function yin(
   }
   if (lag < 0) return null;
 
-  // Octave check: if the waveform repeats far more cleanly at twice the period, the true pitch is an
+  // Octave-up check: noise (a breathy voice, a separated vocal's artifacts) or a high note's short,
+  // coarsely sampled period can lift the true period's dip just over the threshold, so the first dip
+  // under it is the period twice as long — the note an octave too low. If half the period is a real dip
+  // nearly as clean, that's the note.
+  const half = Math.round(lag / 2);
+  if (half - 2 >= minLag) {
+    let best = half;
+    for (let tau = half - 2; tau <= half + 2; tau += 1) if (cmnd[tau] < cmnd[best]) best = tau;
+    if (cmnd[best] < cmnd[lag] * 1.6 + 0.05 && cmnd[best] <= cmnd[best - 1] && cmnd[best] <= cmnd[best + 1]) lag = best;
+  }
+
+  // Octave-down check: if the waveform repeats far more cleanly at twice the period, the true pitch is an
   // octave lower. This fixes vowels whose resonance boosts the 2nd harmonic (read an octave high) and
   // catches subharmonic (period-doubled) singing. In a full mix, chords also repeat every few cycles,
   // so there it only applies above the normal voice floor (see minHz).
@@ -55,7 +66,7 @@ export function yin(
   if (sampleRate / lag < 800 && (subharmonics || sampleRate / doubled >= 65) && doubled + 2 <= maxLag && cmnd[lag] > 0.05) {
     let best = doubled;
     for (let tau = doubled - 2; tau <= doubled + 2; tau += 1) if (cmnd[tau] < cmnd[best]) best = tau;
-    if (cmnd[best] < cmnd[lag] * 0.4) lag = best;
+    if (cmnd[best] < cmnd[lag] * 0.15) lag = best;   // much cleaner, not just a bit: 0.4 pulled real notes down an octave
   }
 
   let refined = lag;

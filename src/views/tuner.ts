@@ -3,6 +3,7 @@ import { LiveVibrato, vibratoLabel } from '../lib/vibrato';
 import { midiToFrequency, midiToNote, NOTE_NAMES, voiceTypeNames, voiceTypesFor } from '../lib/music';
 import { el, prefs, toast } from '../ui/dom';
 import { session } from '../session';
+import { announceMic, chosenMic, micErrorMessage, rawMic } from '../ui/micSetup';
 
 /** A simple, friendly tuner: sing a note and see it, or pick a target and match it. */
 export function renderTuner(root: HTMLElement): () => void {
@@ -136,8 +137,8 @@ export function renderTuner(root: HTMLElement): () => void {
   };
   wGo.addEventListener('click', async () => {
     if (!mic.active) {
-      try { await mic.start(false); micButton.textContent = '■ Stop mic'; }
-      catch { toast('Microphone blocked. Allow the mic for this site and try again.', 'error'); return; }
+      try { await mic.start(false, chosenMic(), rawMic()); announceMic(mic); micButton.textContent = '■ Stop mic'; }
+      catch (error) { toast(micErrorMessage(error), 'error'); return; }
     }
     let start = Number(wStart.value);
     if (wStart.value === 'range') start = low !== null && high !== null && high - low >= 5 ? Math.round((low + high) / 2) - 6 : 48;
@@ -188,10 +189,11 @@ export function renderTuner(root: HTMLElement): () => void {
   micButton.addEventListener('click', async () => {
     if (mic.active) { mic.stop(); micButton.textContent = '🎤 Start mic'; note.textContent = '—'; hz.textContent = 'Sing any note'; return; }
     try {
-      await mic.start(false);
+      await mic.start(false, chosenMic(), rawMic());
+      announceMic(mic);
       micButton.textContent = '■ Stop mic';
-    } catch {
-      toast('Microphone blocked. Allow the mic for this site and try again.', 'error');
+    } catch (error) {
+      toast(micErrorMessage(error), 'error');
     }
   });
   const playTone = async (midi: number, seconds = 1.2) => {

@@ -20,6 +20,9 @@ import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
+import { announceMic, chosenMic, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
+import { mountMicCheck } from '../../ui/micCheck';
+import { roundTrip } from '../../lib/sync';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -105,12 +108,15 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   let disposed = false;
   let parts: Map<string, Part> | null = duetParts(analysis);
 
-  const levels = { lead: prefs.get('mix.lead', 100), music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100 };
+  const levels = {
+    lead: prefs.get('mix.lead', 100), music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100,
+    // Listening back to a take has its own mix: the singer you sang with as a guide is off by default,
+    // since the take is your voice (it was never in your recording — only the player's copy of it).
+    takeLead: prefs.get('mix.takeLead', 0), takeMusic: prefs.get('mix.takeMusic', 100)
+  };
   const forgiveOctave = $<HTMLInputElement>('#forgiveOctave');
-  const speakers = $<HTMLInputElement>('#speakers');
   const countIn = $<HTMLInputElement>('#countIn');
   forgiveOctave.checked = prefs.get('forgiveOctave', false);
-  speakers.checked = prefs.get('speakers', false);
   countIn.checked = prefs.get('countIn', true);
   lane.forgiveOctave = forgiveOctave.checked;
 
@@ -169,10 +175,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
   // ================================================================ timeline + parts
   // One thin timeline of the whole song: click to jump anywhere. Section names sit on it as plain
-  // labels. A part is chosen in ⋯ → Practice a part; it's lit on the timeline, and a chip in the
+  // labels. A part (and how to practice it: sing along or echo,
+  // how many times) is chosen from 🎵 in the controls; it's lit on the timeline, and a chip in the
   // controls goes back to the whole song.
   const pct = (time: number) => ((100 * time) / analysis.duration).toFixed(3) + '%';
   const partDialog = $<HTMLDialogElement>('#partDialog');
+  // 🎵 lights up when you're practicing anything other than the whole song, once, singing along.
+  const practiceBtn = $<HTMLButtonElement>('#practiceBtn');
+  const markPractice = () => practiceBtn.classList.toggle('on', Boolean(selected.size || custom) || echoMode() || repeats() !== 1);
   const renderSections = () => {
     const whole = !selected.size && !custom;
     $('#timelineMarks').innerHTML = analysis.sections.map(section =>
@@ -181,6 +191,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const chip = $('#partChip');
     chip.classList.toggle('hidden', whole);
     chip.textContent = labelForSelection() + ' ✕';
+    markPractice();
     $('#partList').innerHTML = analysis.sections.map(section => `<label class="check"><input type="checkbox" data-part="${section.id}" ${selected.has(section.id) ? 'checked' : ''}>
       <span><b>${escapeHtml(section.label)}</b> <small class="hint">${formatTime(section.start)}–${formatTime(section.end)}</small></span></label>`).join('');
   };
@@ -192,7 +203,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     selectionChanged();
   });
   $('#partChip').addEventListener('click', () => { if (!recording) wholeSong(); });
-  $('#choosePart').addEventListener('click', () => { renderSections(); partDialog.showModal(); });
+  practiceBtn.addEventListener('click', () => { closeSettings(); renderSections(); partDialog.showModal(); });
   $('#partWhole').addEventListener('click', () => { wholeSong(); partDialog.close(); });
   $('#partDone').addEventListener('click', () => partDialog.close());
   const timeline = $('#timeline');
@@ -300,6 +311,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   let view: View = prefs.get<string>('view', 'staff') === 'karaoke' ? 'karaoke' : 'staff';
   const karaoke = new Karaoke($('#lyricsList'), analysis, {
     tap: line => {
+      if (builder?.isOpen) { if (!builder.pick(line)) toast('That line isn’t one you sing here — pick a line with words.'); return; }
       if (pickingLines) { pickLine(line); return; }
       if (recording) return;
       if (!inSelection(line.start)) wholeSong();
@@ -329,7 +341,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       scores: current ? new Map(current.score.lines.map(item => [item.line.id, item.percent])) : null,
       singer: parts ? line => parts!.get(line.id) ?? 'me' : null,
       anchor: pickAnchor,
-      cues: new Map(cues.map(cue => [cue.lineId, cue.dots]))
+      cues: new Map(cues.map(cue => [cue.lineId, cue.dots])),
+      building: builder?.marks ?? null
     });
   };
   const lyricsHintText = () => {
@@ -428,8 +441,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       const progress = (_step: string, fraction: number, detail?: string) => {
         if (!disposed) redoStatus.textContent = Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
       };
-      // Kept lyrics are only re-timed; otherwise they're looked up by the song's name, then heard/recognised.
-      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined },
+      // Kept lyrics are only re-timed; otherwise the singer is listened to, and lyrics found by name or by
+      // recognising the song are used only if they match what's sung.
+      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined, listen: true },
         lyricsServices(buffers.lead, analysis.notes, options, progress), fraction => progress('lyrics', fraction));
       if (result.source === 'kept') { redoStatus.textContent = 'Couldn’t hear clear words — your current lyrics were kept.'; return; }
       lyricsChanged();
@@ -534,9 +548,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   showVoices.checked = prefs.get('showVoices', window.innerWidth >= 700);
   lane.showVoiceTypes = showVoices.checked;
   showVoices.addEventListener('change', () => { prefs.set('showVoices', showVoices.checked); lane.showVoiceTypes = showVoices.checked; });
-  speakers.addEventListener('change', () => { prefs.set('speakers', speakers.checked); if (mic.active) void enableMic(); });
   countIn.addEventListener('change', () => prefs.set('countIn', countIn.checked));
-  repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); updateClock(); });
+  repeatsEl.addEventListener('change', () => { prefs.set('repeats', repeats()); updateClock(); markPractice(); });
   const syncEchoModel = () => $('#echoModelWrap').classList.toggle('hidden', !echoMode());
   syncEchoModel();
   styleEl.addEventListener('change', () => {
@@ -556,20 +569,35 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const renderMicButton = () => {
     micButton.setAttribute('aria-pressed', String(mic.active));
     micButton.classList.toggle('on', mic.active);
-    micButton.title = mic.active ? 'Microphone on — tap to turn off' : 'Microphone — see your voice on the staff';
+    micButton.title = mic.active ? 'Microphone on' + (mic.inputLabel ? ' (' + mic.inputLabel + ')' : '') + ' — tap to turn off' : 'Microphone — see your voice on the staff';
   };
+  // The mic settings (which mic, headphones or speakers, no phone filters) live in one place: ⚙ → Mic check.
   const enableMic = async (): Promise<boolean> => {
     try {
-      await mic.start(speakers.checked);
+      await mic.start(onSpeakers(), chosenMic(), rawMic());
       mic.setMonitor(levels.monitor / 100);
       renderMicButton();
+      announceMic(mic);
       return true;
-    } catch {
-      toast('Microphone blocked. Allow the mic for this site (padlock icon in the address bar) and try again.', 'error');
+    } catch (error) {
+      toast(micErrorMessage(error), 'error');
       renderMicButton();
       return false;
     }
   };
+  const micDialog = $<HTMLDialogElement>('#micDialog');
+  let micCheck: { stop: () => void } | null = null;
+  $('#micCheckBtn').addEventListener('click', () => {
+    micCheck?.stop();
+    micCheck = mountMicCheck($('#micDialogBody'));
+    micDialog.showModal();
+  });
+  $('#micDialogDone').addEventListener('click', () => micDialog.close());
+  micDialog.addEventListener('close', () => {
+    micCheck?.stop();
+    micCheck = null;
+    if (mic.active) void enableMic();   // new settings take effect (the mic restarts only if they changed)
+  });
   micButton.addEventListener('click', () => {
     if (recording) return;
     if (mic.active) { mic.stop(); renderMicButton(); } else void enableMic();
@@ -590,6 +618,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     recordButton.textContent = recording ? '■ Review' : '●';
     recordButton.title = recording ? 'Stop and see how you did' : 'Record yourself';
     recordButton.classList.toggle('live', recording);
+    // Switching the mic mid-take would drop the rest of the recording: the mic settings wait until it's done.
+    const taking = recording || Boolean(builder?.active);
+    $<HTMLButtonElement>('#micCheckBtn').disabled = taking;
+    $<HTMLButtonElement>('#practiceBtn').disabled = taking;
   };
 
   const beep = (when: number, accent: boolean) => {
@@ -646,6 +678,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const useCountIn = withRecording && countIn.checked;
     const model = await echoModelVoice();
     player.setLevel('voice', model ? levels.voice / 100 : 0);
+    player.setLevel('lead', levels.lead / 100);
+    player.setLevel('music', levels.music / 100);
     if (withRecording) mic.startRecording();
     const origin = await player.play(playbackRanges(), repeats(), {
       from, leadIn: useCountIn ? 1.9 : 0.12, model, partner: partnerRanges(analysis, parts)
@@ -661,6 +695,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     reviewPlaying = true;
     lane.trail = take.score.trail;
     player.setLevel('voice', levels.voice / 100);
+    player.setLevel('lead', analysis.separated ? levels.takeLead / 100 : 1);
+    player.setLevel('music', levels.takeMusic / 100);
     await player.play(take.ranges, take.repeats, { from, voice: { buffer: take.voice, offset: take.offset }, partner: partnerRanges(analysis, parts) });
     renderTransport();
   };
@@ -709,13 +745,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (recording) { stopAll(); return; }
     if (!(await enableMic())) return;
     if (!mic.canRecord) { toast('This browser can’t record here. Try Chrome, Edge or Safari.', 'error'); return; }
-    if (repeats() === 99) repeatsEl.value = '1';
+    if (repeats() === 99) { repeatsEl.value = '1'; markPractice(); }
     recording = true;
     review.clear();
     review.close();
     closeSettings();
     await startPlayback(true);
-    toast(speakers.checked ? 'Recording — sing along!' : 'Recording — sing along! (Headphones give the cleanest take.)');
+    toast(onSpeakers() ? 'Recording — sing along!' : 'Recording — sing along! (Headphones give the cleanest take.)');
   });
 
   const finishRecording = async () => {
@@ -724,7 +760,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const result = mic.stopRecording();
     if (!result || result.samples.length < result.sampleRate * 0.5) { toast('No audio was recorded from the mic.', 'error'); return; }
     // What you sang at clock time T answers music you heard at T − output latency − input latency.
-    const latency = (player.ctx.outputLatency || 0) + (player.ctx.baseLatency || 0) + 0.02;
+    const latency = roundTrip(player.ctx);   // measured by the Sync check (Bluetooth!), or what the browser reports
     const voice = player.ctx.createBuffer(1, result.samples.length, result.sampleRate);
     voice.copyToChannel(result.samples, 0);
     await review.fromRecording(voice, result.startTime - recordingOrigin - latency, playbackRanges(), repeats(), labelForSelection());
@@ -742,6 +778,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     changed: renderLyrics
   });
   $('#openTakes').addEventListener('click', () => review.open());
+  // The page was reloaded while a take was open (a phone reclaiming it, an update): open it again.
+  void review.restoreAfterReload();
 
   // ================================================================ build my song (line by line)
   builder = new SongBuilder({
@@ -763,7 +801,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       mic.setMonitor(levels.monitor / 100);
     },
     beep,
-    show: time => { if (player.state === 'stopped') { idleTime = Math.max(0, time - 0.5); updateClock(); } },
+    show: time => { if (player.state === 'stopped') { idleTime = Math.max(0, time); updateClock(); } },
+    openKaraoke: () => setView('karaoke'),
+    linesChanged: renderLyrics,
     changed: renderTransport
   });
   $('#buildSong').addEventListener('click', () => {
@@ -842,6 +882,17 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (Math.abs(lane.errorAt(sung, target)) <= 0.5) lineStats.hits += 1;
   };
 
+  // The three level meters in the controls (silent: nothing is played to show them).
+  const meters = { mic: $('[data-meter="mic"]'), artist: $('[data-meter="artist"]'), music: $('[data-meter="music"]') };
+  const shown = { mic: 0, artist: 0, music: 0 };
+  const showLevels = (micLevel: number) => {
+    const now = { mic: micLevel, artist: player.level('artist'), music: player.level('music') };
+    for (const key of ['mic', 'artist', 'music'] as const) {
+      shown[key] = Math.max(now[key], shown[key] * 0.88);   // rise at once, fall gently
+      meters[key].style.setProperty('--lvl', Math.round(shown[key] * 100) + '%');
+    }
+  };
+
   const turnHint = $('#turnHint');
   const loop = () => {
     if (disposed) return;
@@ -853,9 +904,11 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     const now = source ?? idleTime;
 
     let sung: number | null = null;
+    let micLevel = 0;
     lane.voice = null;
     if (mic.active) {
       const reading = mic.read();
+      micLevel = reading.level;
       liveVib.push(performance.now() / 1000, reading.midi);
       // Encouragement judges the center of any vibrato; the staff still draws the real wave.
       sung = reading.midi === null ? null : liveVib.center();
@@ -871,6 +924,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     if (view === 'staff') lane.draw(now);
     else karaoke.update(now, playing);
     builder?.update(now);
+    showLevels(micLevel);
     updateUpNext(now);
     // Echo: say whose turn it is, right in the controls.
     const piece = player.state !== 'stopped' && player.timeline.hasTurns && !reviewPlaying ? player.timeline.pieceAt(player.timelineTime()) : null;
@@ -950,7 +1004,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   loop();
 
   // A new version of the app waits (see lib/update) while you play, sing, record or have an unsaved take.
-  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId) || Boolean(builder?.busy);
+  session.busy = () => player.state !== 'stopped' || recording || mic.active || Boolean(review.current && !review.current.savedId && !review.current.keptId) || Boolean(builder?.busy);
 
   return () => {
     disposed = true;

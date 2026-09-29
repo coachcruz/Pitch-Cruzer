@@ -66,9 +66,20 @@ function sungWords(result: ServerResult, offset: number, notes: NoteEvent[], lan
   const sungSeconds = (start: number, end: number) => notes.reduce((sum, note) => sum + Math.max(0, Math.min(note.end, end) - Math.max(note.start, start)), 0);
   const silent = result.segments.filter(segment => segment.noSpeech > 0.6 && segment.logProb < -0.8
     && sungSeconds(offset + segment.start, offset + segment.end) < 0.2 * (segment.end - segment.start));
-  return result.words
+  // Whisper's order is the sung order, but its word times can overlap ("is aching Can" with "Can"
+  // stamped a little before "aching"): starts are made to follow that order, so sorting by time later
+  // can't swap words.
+  let previous = 0;
+  const ordered = result.words.map(word => {
+    const start = Math.max(word.start, previous);
+    previous = start;
+    return { ...word, start, end: Math.max(word.end, start) };
+  });
+  return ordered
     .filter(word => !silent.some(segment => word.start >= segment.start && word.end <= segment.end))
     .filter(word => !/^[[(♪]|^(thank you|thanks for watching|subtitles by)/i.test(word.text))
+    // One word stretched over many seconds is made up (seen: "a" lasting 23 s across a verse).
+    .filter(word => word.end - word.start <= 8)
     .map(word => ({ text: word.text, start: offset + word.start, end: offset + Math.max(word.end, word.start + 0.08), lang }))
     .filter(word => notes.some(note => note.end > word.start - 0.5 && note.start < word.end + 0.5));
 }

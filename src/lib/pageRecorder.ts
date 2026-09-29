@@ -46,6 +46,18 @@ export class PageRecorder {
     return Boolean(navigator.mediaDevices?.getDisplayMedia) && 'AudioContext' in window;
   }
 
+  /**
+   * Can this browser share a tab's sound? Only Chrome, Edge and other Chromium browsers on a computer.
+   * Safari (Mac or iPhone), Firefox and phones can open a share but never with the tab's sound — so
+   * they're told up front instead of finding out from a silent recording.
+   */
+  static canShareTabAudio(): boolean {
+    if (!PageRecorder.supported()) return false;
+    const data = (navigator as { userAgentData?: { mobile?: boolean; brands?: Array<{ brand: string }> } }).userAgentData;
+    if (data) return !data.mobile && (data.brands ?? []).some(item => /Chromium|Google Chrome|Microsoft Edge/.test(item.brand));
+    return /Chrome\/|Edg\//.test(navigator.userAgent) && !/Mobile|Android|iPhone|iPad/.test(navigator.userAgent);
+  }
+
   get connected(): boolean {
     return this.stream !== null && this.stream.getAudioTracks().some(track => track.readyState === 'live');
   }
@@ -61,7 +73,7 @@ export class PageRecorder {
     const track = stream.getAudioTracks()[0];
     if (!track) {
       stream.getTracks().forEach(item => item.stop());
-      throw new Error('No audio was shared. Choose “This tab” and keep “Share tab audio” switched on.');
+      throw new Error('That share had no sound: “Also share tab audio” was off, or a window or screen was picked instead of this tab.');
     }
     const ctx = new AudioContext();
     await ctx.resume();

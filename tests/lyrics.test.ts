@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { writeLyrics, type FoundLyrics, type LyricsServices } from '../src/lib/lyrics';
+import { buildLines, joinWords } from '../src/lib/analysis';
 import { makeSong, SONG } from './fixtures';
 
 const WRONG_SONG = 'Baby shark doo doo doo\nMommy shark doo doo doo\nDaddy shark doo doo doo';
@@ -112,6 +113,44 @@ describe('writing the lyrics', () => {
     const song = makeSong(SONG);
     await writeLyrics(song.analysis, { own: song.text }, services(song));
     expect(song.analysis.sections.map(section => section.kind)).toEqual(expect.arrayContaining(['verse', 'chorus']));
+  });
+});
+
+describe('redoing the lyrics', () => {
+  it('always listens first, even when timed lyrics are found by name', async () => {
+    const song = makeSong(SONG);
+    const firstOfLine = song.truth.filter((w, i) => i === 0 || song.truth[i - 1].line !== w.line);
+    const lines = SONG.filter(line => line.trim() && !/^\[/.test(line));
+    const synced = lines.map((text, i) => ({ time: firstOfLine[i].start, text }));
+    const fake = services(song, { lookups: { 'Amen Road': { text: lines.join('\n'), synced, label: 'Amen Road — Band' } } });
+    const result = await writeLyrics(song.analysis, { lookup: 'Amen Road', listen: true }, fake);
+    expect(fake.hear).toHaveBeenCalled();
+    expect(result.source).toBe('found');   // they match what's sung, so the real lyrics are used
+  });
+
+  it('writes down what was heard when the lyrics found by name are another song', async () => {
+    const song = makeSong(SONG);
+    const fake = services(song, { lookups: { 'IMG 1234': { text: WRONG_SONG, synced: [{ time: 1, text: 'Baby shark doo doo doo' }], label: 'Baby Shark — Pinkfong' } } });
+    const result = await writeLyrics(song.analysis, { lookup: 'IMG 1234', listen: true }, fake);
+    expect(result.source).toBe('heard');
+    expect(sungText(song)).not.toMatch(/shark/i);
+  });
+});
+
+describe('heard words into lines', () => {
+  // Heard by Whisper (via /api/transcribe) in a CC-BY a cappella (ccMixter 13596, “StandingBehindYou” by
+  // nickleus). Each word is stretched over the pause after it, so only the punctuation shows the phrases.
+  const HEARD = [["Standing", 0.22, 0.82], ["behind", 0.82, 1.72], ["you,", 1.72, 3.04], ["looking", 3.04, 4.04], ["in", 4.04, 4.78], ["the", 4.78, 5.04], ["mirror,", 5.04, 7.22], ["my", 7.22, 7.58], ["hands", 7.58, 8.16], ["holding", 8.16, 9.08], ["the", 9.08, 10.06], ["one", 10.06, 10.56], ["I", 10.56, 11.04], ["hold", 11.04, 11.48], ["dear.", 11.48, 12.66], ["The", 12.26, 14], ["shapes", 14, 14.62], ["of", 14.62, 15.06], ["your", 15.06, 15.38], ["body", 15.38, 16.62], ["enticing", 16.62, 18.12], ["my", 18.12, 18.7], ["mind,", 18.7, 20.64], ["words", 20.64, 21.3], ["can't", 21.3, 21.78], ["define", 21.78, 22.52], ["how", 22.52, 23.7], ["you", 23.7, 24.08], ["seem", 24.08, 24.56], ["to", 24.56, 24.92], ["stop", 24.92, 25.46], ["times.", 25.46, 27.1], ["I", 28.26, 28.48], ["don't", 28.48, 29.1], ["wanna", 29.1, 29.38], ["go,", 29.38, 30.98], ["but", 30.98, 31.12], ["time", 31.12, 31.78], ["it", 31.78, 32.04], ["takes", 32.04, 32.5], ["on", 32.5, 33.38], ["And", 33.38, 34.7], ["draws", 34.7, 35.24], ["me", 35.24, 35.66], ["away,", 35.66, 37.42], ["oh", 37.42, 37.78], ["I", 37.78, 38.16], ["wish", 38.16, 38.68], ["I", 38.68, 39], ["could", 39, 39.36], ["stay", 39.36, 39.86]].map(([text, start, end]) => ({ text: text as string, start: start as number, end: end as number }));
+
+  it('breaks lines where the singer ends a phrase, not in the middle of one', () => {
+    const lines = buildLines(HEARD, []).map(line => joinWords(line.words));
+    expect(lines).toContain('my hands holding the one I hold dear.');
+    expect(lines).toContain('The shapes of your body enticing my mind,');
+    expect(lines.some(line => /my$|The$|words$/.test(line))).toBe(false);
+  });
+
+  it('writes Chinese and Japanese without spaces, other words with them', () => {
+    expect(joinWords([{ text: '私' }, { text: 'の' }, { text: '哀れな' }, { text: 'heart' }, { text: 'ok' }])).toBe('私の哀れな heart ok');
   });
 });
 

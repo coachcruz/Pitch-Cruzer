@@ -35,33 +35,6 @@
   background: var(--bg);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f5f6fb;
-    --surface: #ffffff;
-    --surface-2: #eef0f7;
-    --border: #d9dcea;
-    --text: #151827;
-    --muted: #5c6480;
-    --accent: #5b4ae6;
-    --lane-bg: #f0f1f9;
-    --lane-note: #c9c4ff;
-    --lane-note-text: #2a2170;
-    --lane-past: #e0def5;
-    --band-b: rgba(20, 24, 60, 0.015);
-    --conveyor: #ffffff;
-    --thread: rgba(40, 40, 100, 0.18);
-    --breath: #0d9488;
-    --staff: rgba(40, 44, 90, 0.35);
-    --treble-a: rgba(110, 140, 195, 0.16);
-    --treble-b: rgba(110, 140, 195, 0.06);
-    --bass-a: rgba(52, 60, 125, 0.22);
-    --bass-b: rgba(52, 60, 125, 0.13);
-    --shadow: 0 6px 20px rgba(20, 24, 60, 0.08);
-    color-scheme: light;
-  }
-}
-
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); }
 body { min-height: 100vh; }
@@ -324,7 +297,7 @@ input[type='range'] { accent-color: var(--accent); }
 .mixRow output { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 0.88rem; }
 .duetRow { margin-top: 8px; }
 .toggles { display: grid; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-.practiceRow { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.practiceRow { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .miniSelect { height: 30px; min-height: 30px; padding: 0 8px; font-size: 0.82rem; border-radius: 8px; }
 .partList { display: grid; gap: 8px; margin: 10px 0 14px; max-height: 55vh; overflow-y: auto; }
 
@@ -520,43 +493,86 @@ input[type='range'] { accent-color: var(--accent); }
 .capName { display: grid; gap: 4px; margin: 8px 0; font-weight: 600; font-size: 0.9rem; }
 @media (max-width: 640px) { .videoStage { grid-template-columns: 1fr; } }
 
-/* Build my song: a side panel next to the staff (a sheet along the bottom on phones) */
-.stage.withBuilder { grid-template-columns: minmax(0, 1fr) 330px; }
-.stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr) 220px 330px; }
+/* Build my song: a plain side panel next to the lyrics (a sheet along the bottom on phones). Square
+   corners throughout, flat buttons, ordinary checkboxes. */
+.stage.withBuilder { grid-template-columns: minmax(0, 1fr) 340px; }
+.stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr) 220px 340px; }
 .builder {
-  display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-y: auto; min-height: 0;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  display: flex; flex-direction: column; gap: 12px; padding: 14px; overflow-y: auto; min-height: 0; align-self: start; max-height: 100%;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 0;
 }
 .builder > * { flex-shrink: 0; }  /* the panel scrolls as a whole; nothing in it gets squeezed */
-.builder .bHead { display: flex; align-items: center; gap: 8px; }
-.builder .bHead h2 { margin: 0; font-size: 1rem; }
-.builder .bHead .hint { margin: 0; flex: 1; }
-.builder .bChips { display: flex; flex-wrap: wrap; gap: 4px; max-height: 76px; overflow-y: auto; }
-.bChip {
-  min-width: 28px; height: 26px; padding: 0 4px; border-radius: 7px; border: 1px solid var(--border);
-  background: var(--surface-2); color: var(--muted); font-size: 0.75rem; font-weight: 700; cursor: pointer;
-}
-.bChip.kept.good { background: color-mix(in srgb, var(--good) 25%, var(--surface-2)); color: var(--text); }
-.bChip.kept.close { background: color-mix(in srgb, var(--close) 25%, var(--surface-2)); color: var(--text); }
-.bChip.kept.off { background: color-mix(in srgb, var(--off) 25%, var(--surface-2)); color: var(--text); }
-.bChip.current { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); color: var(--text); }
-.builder .bLine { margin: 0; font-size: 1.25rem; font-weight: 700; line-height: 1.4; }
-.builder .bLine.highlight .bWord { transition: color 0.12s; color: var(--muted); }
-.builder .bLine.highlight .bWord.sung { color: var(--text); }
+/* The builder has its own buttons: the floating play bar (Play and Record are off while building) goes away. */
+.stage.withBuilder .controls { display: none; }
+.builder .btn { border-radius: 0; min-height: 40px; padding: 0 12px; font-size: 0.92rem; box-shadow: none; }
+.builder .btn:active:not(:disabled) { transform: none; }
+.builder .btn.ghost { background: transparent; border: 1px solid var(--border); }
+.builder .bHead { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.builder .bHead h2 { margin: 0; font-size: 1rem; white-space: nowrap; }
+.builder .bClose { min-height: 32px; padding: 0 10px; }
+.builder .bMeta { margin: 0; color: var(--muted); font-size: 0.82rem; }
+.builder .bProgress { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.builder .bStrip { display: flex; gap: 2px; }
+.builder .bStrip i { flex: 1; height: 6px; background: var(--surface-2); }
+.builder .bStrip i.kept { background: var(--good); }
+.builder .bStrip i.now { outline: 2px solid var(--accent); outline-offset: 1px; }
+.builder .bNav { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.builder .bNav .btn { min-height: 30px; width: 40px; padding: 0; }
+.builder .bLine { margin: 0; font-size: 1.35rem; font-weight: 700; line-height: 1.35; color: var(--text); }
+.builder .bLine.highlight .bWord { transition: color 0.12s; }
 .builder .bLine.highlight .bWord.now { color: var(--accent-2); }
-.builder .bOpts { display: flex; flex-wrap: wrap; gap: 6px; }
-.builder .chip.small { min-height: 30px; padding: 0 10px; font-size: 0.8rem; }
+.builder .bGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.builder .bGrid.one { grid-template-columns: 1fr; }
+.builder .bOpts { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-top: 10px; border-top: 1px solid var(--border); }
+.builder .bOpts .check { align-items: center; gap: 6px; }
+.builder .bOpts .check input { margin-top: 0; border-radius: 0; }
 .builder .bStatus { margin: 0; font-weight: 700; }
 .builder .bStatus.live { color: var(--off); }
-.builder .bResult { display: flex; gap: 12px; align-items: center; }
+.builder .bResult { display: flex; gap: 14px; align-items: center; }
 .builder .bResult p { margin: 2px 0 0; color: var(--muted); font-size: 0.9rem; }
-.builder .bScore { flex: none; font-size: 1.8rem; font-weight: 800; line-height: 1; }
+.builder .bScore { flex: none; font-size: 1.9rem; font-weight: 800; line-height: 1; }
 .builder .bScore.good { color: var(--good); }
 .builder .bScore.close { color: var(--close); }
 .builder .bScore.off { color: var(--off); }
-.builder .bFoot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; border-top: 1px solid var(--border); padding-top: 10px; margin-top: auto; }
+.builder .bFoot { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .builder .bFoot audio { width: 100%; }
+/* In the lyrics: the line being built, and kept lines with their score. */
+.lyricLine.building .lineText { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 3px; text-underline-offset: 10px; }
+.lyricLine .keptScore { font-size: 0.72rem; font-weight: 800; color: var(--good); margin-left: 8px; white-space: nowrap; }
 @media (max-width: 760px) {
   .stage.withBuilder, .stage.withBuilder.withUpNext { grid-template-columns: minmax(0, 1fr); }
-  .builder { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 30; max-height: 52vh; box-shadow: 0 8px 30px rgb(0 0 0 / 35%); }
+  .builder { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; max-height: 55vh; box-shadow: 0 -6px 24px rgb(0 0 0 / 30%); }
+  .stage.withBuilder .lyricsList { padding-bottom: 55vh; }   /* lines can scroll up above the sheet */
 }
+
+/* Mic check (while a song is prepared, and from the practice settings) */
+.micRow { display: grid; gap: 4px; margin-top: 8px; justify-items: start; }
+.micRow .hint { margin: 0; }
+.prepMicCheck { margin-top: 12px; }
+.micCheck { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.micCheck .mcHead { display: flex; gap: 10px; align-items: baseline; }
+.micCheck .mcState { color: var(--muted); font-size: 0.85rem; }
+.micCheck .mcRow { display: flex; gap: 10px; align-items: center; }
+.micCheck .mcMeter { flex: 1; height: 10px; background: var(--bg); border: 1px solid var(--border); overflow: hidden; }
+.micCheck .mcMeter span { display: block; height: 100%; width: 0; background: var(--good); transition: width 60ms linear; }
+.micCheck .mcNote { min-width: 3ch; font-weight: 800; }
+.micCheck .mcMsg { margin: 0; }
+.micCheck .mcMsg.ok { color: var(--good); }
+.micCheck .mcMsg.warn { color: var(--close); }
+.micCheck select { max-width: 100%; }
+
+/* Level meters in the controls: your mic, the artist, the music */
+.meters { display: inline-flex; align-items: stretch; gap: 2px; height: 24px; margin: 0 4px; }
+.meters i { position: relative; width: 4px; background: var(--border); overflow: hidden; }
+.meters i::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 0%); background: var(--good); }
+.meters i[data-meter="mic"]::after { background: var(--voice); }
+.meters i[data-meter="artist"]::after { background: var(--accent-2); }
+.meters i[data-meter="music"]::after { background: var(--accent); }
+/* Sync check, in the Mic check */
+.micCheck .mcSync { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.micCheck .mcSyncState { margin: 0; }
+
+/* Recording a song from a video: what to pick in the browser's share window (said before it opens) */
+.shareGuide { display: grid; gap: 6px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--accent); background: var(--surface-2); }
+.shareGuide ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 0.9rem; }
+.shareGuide .notice { margin: 0; }

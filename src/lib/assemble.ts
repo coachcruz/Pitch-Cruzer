@@ -1,3 +1,4 @@
+import type { LyricLine } from './analysis';
 import type { TakeScore } from './score';
 
 /**
@@ -98,4 +99,52 @@ export function lineFeedback(score: TakeScore): { headline: string; note: string
   if (score.steadiness !== null && score.steadiness < 50) return { headline, note: 'You’re finding the notes — now hold them steadier, with a slow, even breath.' };
   if (s >= 70) return { headline, note: 'Solid. Keep it, or try once more for the finishing touch.' };
   return { headline, note: 'Listen to the line once more, then sing it again following the highlighted words.' };
+}
+
+/**
+ * One turn at a line: what plays, from when to when. The cue is the end of the line before — its
+ * last two words, sung by the artist — so you come in right where the song comes back to you, as in
+ * the song itself (and never over a stretch where the artist is still singing). With no line close
+ * before (the first line, or after a long instrumental) the music, or three beeps, count you in.
+ */
+export interface TurnPlan {
+  /** Song time the turn starts playing from. */
+  start: number;
+  /** Your line: the artist is heard until here, then it's your turn. */
+  lineStart: number;
+  end: number;
+  /** Where the artist's cue (the previous line's last words) starts, or null for a count-in. */
+  cueFrom: number | null;
+}
+
+const CUE_WORDS = 2;
+const MAX_CUE_WAIT = 5;    // s: a cue further back than this (an instrumental between) isn't a cue
+const COUNT_IN = 2;        // s of count-in before a line with no cue
+const AFTER_LINE = 0.6;    // s after the line, for its last word's tail
+
+const sungWords = (line: LyricLine) => line.words.filter(word => !word.aside && word.text !== '♪');
+
+export function turnPlan(lines: LyricLine[], line: LyricLine, duration: number): TurnPlan {
+  const end = Math.min(duration, line.end + AFTER_LINE);
+  const before = lines.filter(item => item !== line && item.start < line.start && sungWords(item).length)
+    .sort((a, b) => a.start - b.start).pop();
+  // Only words sung before your line starts: where lines overlap, the artist's words over yours aren't a cue.
+  const words = before ? sungWords(before).filter(word => word.end <= line.start + 0.05) : [];
+  const cueFrom = words.length ? words[Math.max(0, words.length - CUE_WORDS)].start : null;
+  if (cueFrom !== null && cueFrom < line.start && line.start - cueFrom <= MAX_CUE_WAIT) {
+    return { start: Math.max(0, cueFrom - 0.15), lineStart: line.start, end, cueFrom };
+  }
+  return { start: Math.max(0, line.start - COUNT_IN), lineStart: line.start, end, cueFrom: null };
+}
+
+/**
+ * What "Put my song together" makes: the whole song (intro and outro too) once every line is kept;
+ * before that, only the stretch you've sung — from a moment before your first kept line to a moment
+ * after your last — faded in and out, rather than minutes of music with nobody singing.
+ */
+export function assembleSpan(kept: Array<{ start: number; end: number }>, lineCount: number, duration: number): { start: number; end: number; whole: boolean } {
+  if (!kept.length) return { start: 0, end: 0, whole: false };
+  if (kept.length >= lineCount) return { start: 0, end: duration, whole: true };
+  const first = Math.min(...kept.map(line => line.start)), last = Math.max(...kept.map(line => line.end));
+  return { start: Math.max(0, first - 2), end: Math.min(duration, last + 2.5), whole: false };
 }

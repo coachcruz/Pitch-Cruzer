@@ -1,4 +1,4 @@
-import type { LyricLine, Syllable } from '../../lib/analysis';
+import { joinWords, type LyricLine, type Syllable } from '../../lib/analysis';
 import { midiToFrequency, midiToNote } from '../../lib/music';
 import type { TakeScore } from '../../lib/score';
 import { escapeHtml } from '../../ui/dom';
@@ -12,14 +12,14 @@ function noteLabel(syllable: Syllable): string {
 
 /** A lyric line as HTML: each syllable with its note above it and its timing in data attributes. */
 export function syllablesHtml(line: LyricLine): string {
-  return line.words.map(word => word.aside ? `<span class="word aside">${escapeHtml(word.text)}</span>` : '<span class="word">' + word.syllables.map((syllable, index) => {
+  return joinWords(line.words, word => word.aside ? `<span class="word aside">${escapeHtml(word.text)}</span>` : '<span class="word">' + word.syllables.map((syllable, index) => {
     const hz = syllable.midi === null ? '' : ` title="${midiToNote(syllable.midi)} · ${midiToFrequency(Math.round(syllable.midi)).toFixed(0)} Hz"`;
     const joiner = index < word.syllables.length - 1 ? '<b class="hy">-</b>' : '';
     return `<span class="syl" data-s="${syllable.start.toFixed(3)}" data-e="${syllable.end.toFixed(3)}"${hz}><i>${escapeHtml(noteLabel(syllable))}</i><span class="t">${escapeHtml(syllable.text)}${joiner}</span></span>`;
-  }).join('') + '</span>').join(' ');
+  }).join('') + '</span>');
 }
 
-export const lineText = (line: LyricLine) => line.words.map(word => word.text).join(' ');
+export const lineText = (line: LyricLine) => joinWords(line.words);
 
 /** The line you sang best (self-modelling: replaying yourself at your best builds confidence). */
 export function bestLine(score: TakeScore) {

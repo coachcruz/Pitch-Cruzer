@@ -1,4 +1,5 @@
 import type { SongBuffers } from './prepare';
+import { outputDelay } from './sync';
 
 /** A stretch of the song. `turn: true` = Echo practice: the singer's turn, played silently. */
 export interface Range { start: number; end: number; turn?: boolean }
@@ -84,10 +85,42 @@ export class Player {
     const gain = () => { const node = this.ctx.createGain(); node.connect(this.ctx.destination); return node; };
     this.gains = { lead: gain(), music: gain(), voice: gain() };
     this.partnerLead = gain();
+    // Silent taps for the level meters: the artist (both singer paths) and the music.
+    const tap = (...sources: AudioNode[]) => {
+      const analyser = this.ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      for (const source of sources) source.connect(analyser);
+      return analyser;
+    };
+    this.taps = { artist: tap(this.gains.lead, this.partnerLead), music: tap(this.gains.music) };
+  }
+
+  private taps: { artist: AnalyserNode; music: AnalyserNode };
+  private tapBuffer = new Float32Array(1024);
+
+  /** How loud the artist or the music is right now, 0..1 (for the level meters). */
+  level(which: 'artist' | 'music'): number {
+    if (this.state !== 'playing') return 0;
+    this.taps[which].getFloatTimeDomainData(this.tapBuffer);
+    let sum = 0;
+    for (const sample of this.tapBuffer) sum += sample * sample;
+    return Math.min(1, Math.sqrt(sum / this.tapBuffer.length) * 4);
   }
 
   setLevel(stem: StemName, value: number): void {
-    this.gains[stem].gain.setTargetAtTime(Math.max(0, value), this.ctx.currentTime, 0.02);
+    const gain = this.gains[stem].gain;
+    gain.cancelScheduledValues(this.ctx.currentTime);   // a change planned ahead (see handOver) gives way
+    gain.setTargetAtTime(Math.max(0, value), this.ctx.currentTime, 0.02);
+  }
+
+  /** Plays `stem` at full level until clock time `at`, then fades it out (50 ms): the artist hands over to you. */
+  handOver(stem: StemName, at: number): void {
+    const gain = this.gains[stem].gain;
+    const now = this.ctx.currentTime;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(1, now);
+    gain.setValueAtTime(1, Math.max(now, at - 0.05));
+    gain.linearRampToValueAtTime(0, Math.max(now + 0.01, at));
   }
 
   /**
@@ -182,8 +215,8 @@ export class Player {
    */
   timelineTime(): number {
     if (this.state === 'stopped') return 0;
-    const delay = (this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0);
-    return this.ctx.currentTime - delay - this.originAt;
+    // Bluetooth headphones can be a quarter second late — measured by the Sync check when the browser can't say.
+    return this.ctx.currentTime - outputDelay(this.ctx) - this.originAt;
   }
 
   /** Where in the original song the timeline position `t` is (null during lead-in/after the end). */

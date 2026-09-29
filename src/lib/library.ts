@@ -22,6 +22,8 @@ export interface StoredTake {
   sampleRate: number;
   segments: Range[];
   offsetSeconds: number;
+  /** A take not saved yet: kept only for this visit (see lib/visit), thrown out once its window is closed. */
+  visit?: string;
 }
 
 /**
@@ -88,6 +90,12 @@ export const deleteTake = (id: string) => run('takes', 'readwrite', s => s.delet
 export const listTakes = (songId: string) => run<StoredTake[]>('takes', 'readonly', s => s.index('songId').getAll(songId))
   .then(takes => takes.sort((a, b) => b.score - a.score));
 
+/** Throws out the unsaved takes of visits whose window has been closed (run when the app starts). */
+export async function forgetClosedVisits(open: Set<string>): Promise<void> {
+  const takes = await run<StoredTake[]>('takes', 'readonly', s => s.getAll());
+  await Promise.all(takes.filter(take => take.visit && !open.has(take.visit)).map(take => deleteTake(take.id)));
+}
+
 // ---------------------------------------------------------------- song files (download / import)
 // A ".pitchcruzer" file holds everything about a song — its separated tracks, notes, lyrics, sections
 // and saved takes — so it can be kept anywhere and opened again on any device without re-preparing.
@@ -102,7 +110,7 @@ interface SongFileHeader {
 }
 
 export async function exportSong(song: StoredSong): Promise<Blob> {
-  const takes = await listTakes(song.id).catch(() => [] as StoredTake[]);
+  const takes = (await listTakes(song.id).catch(() => [] as StoredTake[])).filter(take => !take.visit);   // saved takes only
   const stemEntries = (Object.entries(song.stems) as Array<[keyof StoredSong['stems'], Blob | undefined]>).filter((entry): entry is [keyof StoredSong['stems'], Blob] => Boolean(entry[1]));
   const { stems: _stems, ...info } = song;
   const header: SongFileHeader = {

@@ -32,6 +32,8 @@ export interface LyricsRequest {
   own?: string;
   /** The song's name, to look its lyrics up by. */
   lookup?: string;
+  /** Always listen to the singer first (Redo lyrics): lyrics found by name are used only if they match what's sung. */
+  listen?: boolean;
 }
 
 export type LyricsSourceKind = 'own' | 'found' | 'recognized' | 'heard' | 'kept' | 'none';
@@ -95,7 +97,7 @@ export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest
 
   // 1–2. Lyrics we already have, or can look up by name.
   let found = !own && request.lookup ? await services.lookup(request.lookup) : null;
-  if (found?.synced) {
+  if (found?.synced && !request.listen) {
     const aligned = alignSyncedLyrics(analysis, found.synced);
     if (aligned) {
       useText(found.text, aligned.lines);
@@ -128,6 +130,16 @@ export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest
     if (match < MATCH) {
       diag('Lyrics: “' + found.label + '” doesn’t match what’s sung (' + Math.round(match * 100) + '%) — ignoring it', 'warn');
       found = null;
+    }
+  }
+
+  // Redo: timed lyrics found by name, now checked against what was heard.
+  if (found?.synced && request.listen && heard.length >= ENOUGH_HEARD) {
+    const aligned = alignSyncedLyrics(analysis, found.synced);
+    if (aligned) {
+      useText(found.text, aligned.lines);
+      diag('Lyrics: timed lyrics from ' + found.label + ' match what’s sung', 'ok');
+      return settle({ source: 'found', label: found.label });
     }
   }
 
