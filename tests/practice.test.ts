@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { lyricBreaths, applyTypedLyrics } from '../src/lib/analysis';
-import { countInCues, estimateBeat } from '../src/lib/beat';
+import { countInCues, estimateBeat, beatNeedsEstimate, BEAT_VERSION } from '../src/lib/beat';
 import { makeSong, SONG } from './fixtures';
 
 /** A drum track: accented beats (and an optional off-beat hi-hat), as an AudioBuffer look-alike. */
@@ -29,6 +29,12 @@ describe('beat', () => {
   it('does not count a fast song at half speed (the dots would start far too early)', () => {
     const beat = estimateBeat(drums(136, 4, 0.2, { halfTimeAccent: true }))!;
     expect(60 / beat.period).toBeCloseTo(136, 0);
+  });
+  it('a beat once saved as "none found" is estimated again (the dots come back)', () => {
+    expect(beatNeedsEstimate(undefined)).toBe(true);
+    expect(beatNeedsEstimate(null)).toBe(true);   // detection failed before — retry it
+    expect(beatNeedsEstimate({ period: 0.5, phase: 0, meter: 4, version: BEAT_VERSION - 1 })).toBe(true);
+    expect(beatNeedsEstimate({ period: 0.5, phase: 0, meter: 4, version: BEAT_VERSION })).toBe(false);
   });
 });
 

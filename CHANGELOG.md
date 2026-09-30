@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-09-30 — Take playback, count-in dots, and Redo-lyrics reattempt fixes
+
+Three reported defects fixed:
+
+- **Take review no longer ducks the music.** The live mic stayed open while a saved take
+  played back, and on phones the active capture session could make the system duck the
+  background music and the original singer under the take's voice. The mic is now paused
+  for the take's playback and brought back afterward exactly as it was. If you toggle the
+  mic yourself mid-take, your choice wins — no auto-restore.
+- **Count-in dots come back.** A song whose beat detection once saved "none found" never
+  retried, so its silent count-in dots never appeared no matter how the detector improved.
+  A saved miss is now re-estimated, so every song gets its adaptive count-in (3 dots for
+  3/4, 4 for 4/4).
+- **Redo lyrics is now a true reattempt.** It used to listen from scratch and lead with
+  language detection. Now the first listen's words guide the second: they're passed to the
+  transcription as context so it mainly goes after what was missed or misheard, and
+  anything the fresh pass still misses but the first pass caught (over real singing) is
+  kept. Language detection is unchanged.
+
 ## 2026-09-30 — Practice UI consolidation: Voices, EQ, duets, section coaching
 
 The three level meters in the floating controls (mic · singer · music) are now buttons.

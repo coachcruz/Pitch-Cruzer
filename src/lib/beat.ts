@@ -11,6 +11,15 @@ export interface Beat { period: number; phase: number; meter: 3 | 4; version?: n
 /** Bump when the detector changes so beats saved by an older version are found again. */
 export const BEAT_VERSION = 2;
 
+/**
+ * Whether the saved beat needs (re-)estimation: never estimated, previously found nothing, or from
+ * an older detector. A saved "none found" must be retried — otherwise a song that once failed
+ * detection would never get its count-in dots, no matter how the detector improves.
+ */
+export function beatNeedsEstimate(saved: Beat | null | undefined): boolean {
+  return saved?.version !== BEAT_VERSION;
+}
+
 const RATE = 100; // onset curve samples per second
 
 function onsetCurve(buffer: AudioBuffer): Float32Array {
