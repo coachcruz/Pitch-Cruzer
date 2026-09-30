@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { env, json } from '../lib/http.mts';
+import { gate } from '../lib/gate.mts';
 
 /**
  * Song search on YouTube (YouTube Data API v3) so a song can be found, played and recorded without
@@ -17,6 +18,8 @@ interface SearchItem {
 }
 
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'youtube-search', limit: 30 });
+  if (blocked) return blocked;
   const key = env('YOUTUBE_API_KEY');
   const query = new URL(req.url).searchParams.get('q')?.trim();
   if (!query) return json({ available: Boolean(key) });

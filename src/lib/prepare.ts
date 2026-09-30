@@ -18,12 +18,13 @@ export type SongInput =
   | { kind: 'recording'; blob: Blob; name: string };
 
 /** Where the words come from: pasted by the user, looked up online, or (fallback) speech recognition. */
+import { apiFetch } from './api';
 export interface LyricsSource { pasted?: string; lookup?: string }
 
 /** Finds the real lyrics in LRCLIB (via /api/lyrics); which version is picked: see pickLyrics. */
 export async function findLyricsOnline(query: string, duration?: number): Promise<FoundLyrics | null> {
   try {
-    const response = await fetch('/api/lyrics?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
+    const response = await apiFetch('/api/lyrics?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
     if (!response.ok) { diag('Lyrics lookup → HTTP ' + response.status, 'warn'); return null; }
     const results = (await response.json()) as LyricsCandidate[];
     const best = pickLyrics(results, query, duration);
@@ -223,7 +224,7 @@ export function lyricsServices(lead: AudioBuffer, notes: NoteEvent[], options: L
     identify: async (heard, hint) => {
       try {
         // Groq's free tier is rate-limited: a busy answer is waited out and asked again (a server error isn't: it won't pass).
-        const response = await fetchWithRetry(() => fetch('/api/identify', {
+        const response = await fetchWithRetry(() => apiFetch('/api/identify', {
           // Searching the web for the song takes 7–15 s.
           method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(40000),
           body: JSON.stringify({ heard, hint })

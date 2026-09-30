@@ -1,5 +1,6 @@
 import type { Config } from '@netlify/functions';
 import { json } from '../lib/http.mts';
+import { gate } from '../lib/gate.mts';
 
 /**
  * Looks up real lyrics in LRCLIB (free, open lyrics database — https://lrclib.net) so songs don't
@@ -7,6 +8,8 @@ import { json } from '../lib/http.mts';
  * each line's start, so a song can be timed without transcribing it at all.
  */
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'lyrics-search', limit: 60 });
+  if (blocked) return blocked;
   const query = new URL(req.url).searchParams.get('q')?.trim();
   if (!query || query.length < 2) return json({ error: 'q is required' }, 400);
   const response = await fetch('https://lrclib.net/api/search?q=' + encodeURIComponent(query.slice(0, 200)), {

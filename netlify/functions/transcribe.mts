@@ -1,6 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { env, json } from '../lib/http.mts';
 import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
+import { gate } from '../lib/gate.mts';
 
 /**
  * Server-side lyrics transcription with Whisper Large v3 Turbo (via Groq) — far more accurate on sung
@@ -21,6 +22,8 @@ interface GroqResult {
 }
 
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'transcribe', limit: 30 });
+  if (blocked) return blocked;
   const key = env('GROQ_API_KEY');
   if (req.method === 'GET') return json({ available: Boolean(key) });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
