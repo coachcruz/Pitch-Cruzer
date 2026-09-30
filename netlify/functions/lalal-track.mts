@@ -1,8 +1,11 @@
 import type { Config } from '@netlify/functions';
 import { json } from '../lib/http.mts';
+import { gate } from '../lib/gate.mts';
 
 /** Streams a separated track from LALAL.AI's download host (only) when the browser can't fetch it directly. */
 export default async (req: Request) => {
+  const blocked = await gate(req);
+  if (blocked) return blocked;
   if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
   const urlValue = new URL(req.url).searchParams.get('url');
   if (!urlValue) return json({ error: 'url is required' }, 400);

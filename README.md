@@ -21,6 +21,12 @@ npm run build
 Set the environment variable **`LALAL_API_KEY`** on Netlify (Site settings → Environment variables) and redeploy.
 Without it the app still works using the full mix ("Continue without separating"), but the singer can't be turned down.
 
+**Protect the paid endpoints.** Set **`PITCH_CRUZER_APP_KEY`** (Netlify functions) to a long random string, and
+**`VITE_PITCH_CRUZER_APP_KEY`** (frontend build) to the same value. Every `/api/*` function rejects requests
+without the matching `x-app-key` header, and the endpoints that spend money (LALAL.AI splits, Groq, YouTube
+search) are additionally limited per IP per day. Without `PITCH_CRUZER_APP_KEY` the API answers 503 — set it
+before deploying. For local `netlify dev`, put both in a `.env` file.
+
 ## How it's built
 
 | Part | Where |

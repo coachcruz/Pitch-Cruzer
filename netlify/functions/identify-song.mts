@@ -1,6 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { env, json } from '../lib/http.mts';
 import { groqFetch, isRateLimited, rateLimited } from '../lib/groq.mts';
+import { gate } from '../lib/gate.mts';
 
 /**
  * Names the song from the words heard in it, so its real lyrics can be fetched without the user
@@ -24,6 +25,8 @@ const COMPARE = ['qwen/qwen3.8-27b', 'groq/compound', 'groq/compound-mini', 'lla
 const searches = (model: string) => model.startsWith('openai/gpt-oss') || model.startsWith('groq/compound');
 
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'identify-song', limit: 30 });
+  if (blocked) return blocked;
   const key = env('GROQ_API_KEY');
   if (!key) return json({ error: 'GROQ_API_KEY is not configured', code: 'missing_key' }, 503);
   if (req.method === 'GET') return json({ models: await currentModels(key, true) });

@@ -2,13 +2,14 @@
  * Find a song on YouTube and play it inside the app (YouTube's official embedded player), so it can
  * be played, paused, restarted and recorded without leaving the page.
  */
+import { apiFetch } from './api';
 export interface VideoResult { id: string; title: string; channel: string; thumbnail: string }
 
 let searchAvailable: Promise<boolean> | null = null;
 
 /** Is in-app YouTube search set up (YOUTUBE_API_KEY on Netlify)? */
 export function youtubeSearchAvailable(): Promise<boolean> {
-  searchAvailable ??= fetch('/api/youtube', { signal: AbortSignal.timeout(8000) })
+  searchAvailable ??= apiFetch('/api/youtube', { signal: AbortSignal.timeout(8000) })
     .then(response => (response.ok ? response.json() : { available: false }))
     .then((body: { available?: boolean }) => Boolean(body.available))
     .catch(() => false);
@@ -16,7 +17,7 @@ export function youtubeSearchAvailable(): Promise<boolean> {
 }
 
 export async function searchYouTube(query: string): Promise<VideoResult[]> {
-  const response = await fetch('/api/youtube?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
+  const response = await apiFetch('/api/youtube?q=' + encodeURIComponent(query), { signal: AbortSignal.timeout(15000) });
   if (!response.ok) throw new Error('YouTube search is unavailable right now.');
   return response.json();
 }

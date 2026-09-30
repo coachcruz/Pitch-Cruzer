@@ -1,4 +1,5 @@
 /** Browser-side client for the Netlify functions that talk to LALAL.AI. */
+import { appKeyHeader } from './api';
 import { diag } from './diag';
 // Netlify base64-encodes binary request bodies (+33%), so ~4.5 MB is the real limit per request.
 const CHUNK_BYTES = 3 * 1024 * 1024;
@@ -15,7 +16,11 @@ async function requestJson<T>(url: string, init: RequestInit, timeoutSeconds = 9
   const took = () => ((performance.now() - began) / 1000).toFixed(1) + 's';
   try {
     // Never wait forever: a hung request would freeze the progress screen.
-    response = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutSeconds * 1000) });
+    response = await fetch(url, {
+      ...init,
+      headers: { ...appKeyHeader(), ...(init.headers as Record<string, string> | undefined) },
+      signal: AbortSignal.timeout(timeoutSeconds * 1000),
+    });
   } catch (error) {
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
     diag(name + ' → ' + (timedOut ? 'no answer after ' + timeoutSeconds + 's' : 'network error'), 'error');
@@ -123,7 +128,10 @@ export async function downloadTrack(url: string): Promise<Blob> {
     }
     diag('Direct track download → HTTP ' + direct.status + ', trying the proxy', 'warn');
   } catch { diag('Direct track download blocked, using the proxy', 'info'); }
-  const proxied = await fetch('/api/lalal/track?url=' + encodeURIComponent(url), { signal: AbortSignal.timeout(120_000) })
+  const proxied = await fetch('/api/lalal/track?url=' + encodeURIComponent(url), {
+    headers: appKeyHeader(),
+    signal: AbortSignal.timeout(120_000),
+  })
     .catch(() => { throw new LalalError('Downloading a separated track timed out.'); });
   diag('/api/lalal/track → HTTP ' + proxied.status, proxied.ok ? 'ok' : 'error');
   if (!proxied.ok) throw new LalalError('Could not download a separated track.');

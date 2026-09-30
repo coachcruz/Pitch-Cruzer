@@ -1,6 +1,7 @@
 import type { Config } from '@netlify/functions';
 import { json } from '../lib/http.mts';
 import { MAX_UPLOAD_BYTES, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal } from '../lib/lalal.mts';
+import { gate } from '../lib/gate.mts';
 
 /**
  * Imports a song from a link and sends it straight to LALAL.AI (server to server, so no size limit
@@ -90,6 +91,8 @@ async function fetchPublic(url: string, headers: Record<string, string> = {}, ho
 }
 
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'import-link', limit: 10 });
+  if (blocked) return blocked;
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const key = lalalKey();
   if (!key) return missingKey();

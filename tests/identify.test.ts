@@ -5,7 +5,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 const { default: identify, MODELS } = await import('../netlify/functions/identify-song.mts');
 
 const HEARD = 'one two three four five six seven eight nine ten';
-const request = () => new Request('https://site/api/identify', { method: 'POST', body: JSON.stringify({ heard: HEARD }) });
+const request = () => new Request('https://site/api/identify', {
+  method: 'POST',
+  headers: { 'x-app-key': 'test-key' }, // must match the mocked PITCH_CRUZER_APP_KEY
+  body: JSON.stringify({ heard: HEARD }),
+});
 const reply = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
 const song = (title: string) => reply(200, { choices: [{ message: { content: JSON.stringify({ title, artist: 'Someone' }) } }] });
 const gone = () => reply(404, { error: { message: 'The model has been decommissioned' } });
@@ -49,7 +53,11 @@ describe('/api/identify', () => {
 
   it('?model= asks only that model (to compare them)', async () => {
     const asked = groq([], () => song('Hello'));
-    const one = new Request('https://site/api/identify?model=llama-3.3-70b-versatile', { method: 'POST', body: JSON.stringify({ heard: HEARD }) });
+    const one = new Request('https://site/api/identify?model=llama-3.3-70b-versatile', {
+      method: 'POST',
+      headers: { 'x-app-key': 'test-key' },
+      body: JSON.stringify({ heard: HEARD }),
+    });
     expect((await (await identify(one)).json()).model).toBe('llama-3.3-70b-versatile');
     expect(asked).toEqual(['llama-3.3-70b-versatile']);
   });

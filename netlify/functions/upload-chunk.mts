@@ -2,12 +2,15 @@ import type { Config } from '@netlify/functions';
 import { getStore } from '@netlify/blobs';
 import { json } from '../lib/http.mts';
 import { MAX_CHUNK_BYTES, MAX_CHUNKS, UPLOAD_STORE, isValidUploadId } from '../lib/lalal.mts';
+import { gate } from '../lib/gate.mts';
 
 /**
  * Stores one piece of a song file. Netlify functions reject request bodies over
  * ~6 MB, so the browser sends songs in 4 MB chunks that /api/lalal/upload stitches together.
  */
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'upload-chunk', limit: 200 });
+  if (blocked) return blocked;
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const params = new URL(req.url).searchParams;
   const uploadId = params.get('upload');

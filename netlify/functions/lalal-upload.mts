@@ -2,9 +2,12 @@ import type { Config } from '@netlify/functions';
 import { getStore } from '@netlify/blobs';
 import { json } from '../lib/http.mts';
 import { MAX_CHUNKS, MAX_UPLOAD_BYTES, UPLOAD_STORE, isValidUploadId, lalalKey, missingKey, relay, safeFilename, uploadBytesToLalal } from '../lib/lalal.mts';
+import { gate } from '../lib/gate.mts';
 
 /** Reassembles the chunks stored by /api/upload/chunk and forwards the file to LALAL.AI. */
 export default async (req: Request) => {
+  const blocked = await gate(req, { quota: 'lalal-upload', limit: 10 });
+  if (blocked) return blocked;
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
   const key = lalalKey();
   if (!key) return missingKey();
