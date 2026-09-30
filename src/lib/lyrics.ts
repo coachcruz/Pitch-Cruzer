@@ -1,4 +1,4 @@
-import { alignSyncedLyrics, applyTypedLyrics, buildLines, buildSections, type SongAnalysis, type SyncedLine } from './analysis';
+import { alignSyncedLyrics, applyTypedLyrics, buildLines, buildSections, type NoteEvent, type SongAnalysis, type SyncedLine } from './analysis';
 import { diag } from './diag';
 import type { TimedWord } from './transcribe.worker';
 
@@ -19,8 +19,12 @@ export interface FoundLyrics { text: string; synced: SyncedLine[] | null; label:
 
 /** The outside services the lyrics come from (replaced by fakes in tests). */
 export interface LyricsServices {
-  /** Listens to the singer. Throws if it can't. */
-  hear(): Promise<{ words: TimedWord[]; partial: boolean }>;
+  /**
+   * Listens to the singer. Throws if it can't. `prompt` is the previous attempt's words (a
+   * reattempt only): context so the second listen catches what the first missed, not a script —
+   * the singer is still what's transcribed.
+   */
+  hear(prompt?: string): Promise<{ words: TimedWord[]; partial: boolean }>;
   /** Lyrics by song name/artist, or null. */
   lookup(query: string): Promise<FoundLyrics | null>;
   /** Names the song from rough heard words, or null if it isn't a song it knows. */
@@ -34,6 +38,11 @@ export interface LyricsRequest {
   lookup?: string;
   /** Always listen to the singer first (Redo lyrics): lyrics found by name are used only if they match what's sung. */
   listen?: boolean;
+  /**
+   * This is a reattempt (Redo lyrics): the previous listen's words guide the new one, so it mainly
+   * goes after what the first pass missed or got wrong instead of starting from nothing.
+   */
+  reattempt?: boolean;
 }
 
 export type LyricsSourceKind = 'own' | 'found' | 'recognized' | 'heard' | 'kept' | 'none';
@@ -82,6 +91,23 @@ const ENOUGH_HEARD = 15;  // fewer heard words than this can't check or recognis
 
 const hasSungWords = (analysis: SongAnalysis) => analysis.lines.some(line => line.words.some(word => word.text !== '♪' && !word.aside));
 
+/**
+ * A reattempt builds on the first listen instead of replacing it. The fresh words are the primary
+ * result (a clean second listen can clarify misheard words), but where the new pass heard nothing
+ * and the first pass caught words over actual singing, those words are kept — the redo mainly goes
+ * after what was missed the first time through, and never loses ground.
+ */
+export function mergeHeard(previous: TimedWord[], fresh: TimedWord[], notes: NoteEvent[]): TimedWord[] {
+  if (!previous.length) return fresh;
+  if (!fresh.length) return previous;
+  const sungAt = (time: number) => notes.some(note => note.start <= time + 0.3 && note.end >= time - 0.3);
+  const kept = previous.filter(word => {
+    const covered = fresh.some(next => next.start < word.end + 0.2 && next.end > word.start - 0.2);
+    return !covered && sungAt((word.start + word.end) / 2);
+  });
+  return inOrder([...fresh, ...kept]);
+}
+
 export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest, services: LyricsServices, progress: Progress = () => undefined): Promise<LyricsResult> {
   const own = request.own?.trim() ?? '';
   const settle = (result: LyricsResult): LyricsResult => {
@@ -112,11 +138,16 @@ export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest
   let heard: TimedWord[] = [];
   let partial = false;
   let hearingFailed = false;
+  // A reattempt listens with the first pass in mind: its words are the prompt, so the second
+  // listen mainly goes after what was missed or misheard rather than starting from nothing.
+  const previousHeard = request.reattempt ? analysis.heard ?? [] : [];
+  const prompt = previousHeard.length ? previousHeard.map(word => word.text).join(' ') : undefined;
   try {
-    const result = await services.hear();
+    const result = await services.hear(prompt);
     heard = inOrder(result.words);
     partial = result.partial;
-    diag('Lyrics: heard ' + heard.length + ' words' + (partial ? ' (partial)' : ''), heard.length ? 'ok' : 'warn');
+    if (request.reattempt) heard = mergeHeard(previousHeard, heard, analysis.notes);
+    diag('Lyrics: heard ' + heard.length + ' words' + (partial ? ' (partial)' : '') + (request.reattempt ? ' (reattempt)' : ''), heard.length ? 'ok' : 'warn');
   } catch (error) {
     hearingFailed = true;
     diag('Lyrics: listening failed — ' + (error instanceof Error ? error.message : String(error)), 'error');

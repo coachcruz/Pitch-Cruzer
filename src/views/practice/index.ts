@@ -1,7 +1,7 @@
 import { alignSyncedLyrics, applyTypedLyrics, buildLines, lyricBreaths, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
 import { decodeAudio, downloadBlob } from '../../lib/audio';
 import { diagEntries, onDiag } from '../../lib/diag';
-import { BEAT_VERSION, countInCues, estimateBeat } from '../../lib/beat';
+import { beatNeedsEstimate, countInCues, estimateBeat } from '../../lib/beat';
 import { duetNames, duetParts, partnerRanges, type Part } from '../../lib/duet';
 import { exportSong, getSong, listTakes, saveSong, type StoredSong, type StoredTake } from '../../lib/library';
 import { LiveMic, listMics, type MicChoice } from '../../lib/mic';
@@ -88,7 +88,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     .map(word => ({ text: word.text, start: word.start, end: word.end, midi: word.syllables.find(syllable => syllable.midi !== null)?.midi ?? null }));
   const lane = new PitchLane($<HTMLCanvasElement>('#lane'), analysis.notes, laneWords(), analysis.range, lyricBreaths(analysis.lines, analysis.notes));
   // The song's beat (found once from the music, then saved) drives the silent count-in dots.
-  const beatIsNew = analysis.beat === undefined || (analysis.beat !== null && analysis.beat.version !== BEAT_VERSION);
+  const beatIsNew = beatNeedsEstimate(analysis.beat);
   if (beatIsNew) analysis.beat = estimateBeat(buffers.instrumental ?? buffers.lead);
   let cues = analysis.beat ? countInCues(analysis.lines, analysis.beat, analysis.notes) : [];
   lane.cues = cues;
@@ -105,6 +105,19 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   let builder: SongBuilder | null = null;
   let recordingOrigin = 0;
   let reviewPlaying = false;
+  /**
+   * The live mic stays open while a saved take plays back: on phones the capture session can make
+   * the system duck the music and the singer under the take's voice. So the mic is paused for the
+   * take's playback and brought back afterward, exactly as it was.
+   */
+  let micPausedForTake = false;
+  const setReviewPlaying = (playing: boolean) => {
+    if (reviewPlaying && !playing && micPausedForTake) {
+      micPausedForTake = false;
+      void enableMic().then(() => { renderMicButton(); renderVoicesMic(); });
+    }
+    reviewPlaying = playing;
+  };
   let frame = 0;
   let disposed = false;
   let parts: Map<string, Part> | null = duetParts(analysis);
@@ -467,8 +480,9 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
         if (!disposed) redoStatus.textContent = Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
       };
       // Kept lyrics are only re-timed; otherwise the singer is listened to, and lyrics found by name or by
-      // recognising the song are used only if they match what's sung.
-      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined, listen: true },
+      // recognising the song are used only if they match what's sung. A redo without kept lyrics is a
+      // reattempt: the first listen's words guide the second, which mainly goes after what was missed.
+      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined, listen: true, reattempt: true },
         lyricsServices(buffers.lead, analysis.notes, options, progress), fraction => progress('lyrics', fraction));
       if (result.source === 'kept') { redoStatus.textContent = 'Couldn’t hear clear words — your current lyrics were kept.'; return; }
       lyricsChanged();
@@ -671,6 +685,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   });
   micButton.addEventListener('click', () => {
     if (recording) return;
+    micPausedForTake = false;   // the user is driving the mic now, not the take playback
     if (mic.active) { mic.stop(); renderMicButton(); renderVoicesMic(); } else void enableMic();
   });
 
@@ -720,6 +735,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   $('#voicesDone').addEventListener('click', () => voicesDialog.close());
   voicesMicToggle.addEventListener('click', () => {
     if (recording) return;
+    micPausedForTake = false;   // the user is driving the mic now, not the take playback
     if (mic.active) { mic.stop(); renderMicButton(); renderVoicesMic(); renderMic2(); }
     else void enableMic().then(() => { renderVoicesMic(); renderMic2(); });
   });
@@ -822,7 +838,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   };
 
   const startPlayback = async (withRecording: boolean, from = 0) => {
-    reviewPlaying = false;
+    setReviewPlaying(false);
     lane.trail = liveTrail;
     liveTrail.length = 0;
     lastSource = -1;
@@ -843,7 +859,10 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     renderTransport();
   };
   const playTake = async (take: Review, from: number) => {
-    reviewPlaying = true;
+    // Pause the live mic for the take's playback (see setReviewPlaying): an open capture session
+    // lets the phone duck the music and the singer under the take's voice.
+    if (mic.active) { micPausedForTake = true; mic.stop(); renderMicButton(); renderVoicesMic(); }
+    setReviewPlaying(true);
     lane.trail = take.score.trail;
     player.setLevel('voice', levels.voice / 100);
     player.setLevel('lead', analysis.separated ? levels.takeLead / 100 : 1);
@@ -855,7 +874,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
   player.onEnded = () => {
     if (builder?.playerEnded()) {
-      reviewPlaying = false;
+      setReviewPlaying(false);
       lane.trail = liveTrail;
       countdown.classList.add('hidden');
       renderTransport();
@@ -863,7 +882,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
     if (recording) void finishRecording();
     idleTime = selectedRanges()[0].start;   // after a stop, Play starts from the top again
-    reviewPlaying = false;
+    setReviewPlaying(false);
     lane.trail = liveTrail;
     countdown.classList.add('hidden');
     renderTransport();
@@ -940,7 +959,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     isMine: line => !parts || parts.get(line.id) !== 'partner',
     beforePlay: () => {
       review.close();
-      reviewPlaying = false;
+      setReviewPlaying(false);
       lane.trail = liveTrail;
       liveTrail.length = 0;
       lastSource = -1;

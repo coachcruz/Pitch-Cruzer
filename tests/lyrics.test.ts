@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { writeLyrics, type FoundLyrics, type LyricsServices } from '../src/lib/lyrics';
+import { writeLyrics, mergeHeard, type FoundLyrics, type LyricsServices } from '../src/lib/lyrics';
 import { buildLines, joinWords } from '../src/lib/analysis';
 import { makeSong, SONG } from './fixtures';
 
@@ -173,5 +173,74 @@ describe('picking the version of the lyrics', () => {
   it('never a music-video/live version unless asked for', async () => {
     const { pickLyrics } = await import('../src/lib/lyrics');
     expect(pickLyrics(results.slice(0, 2), 'picture kid rock', 301)?.lyrics).toBe('a');
+  });
+});
+
+describe('reattempting the lyrics (Redo listens with the first pass in mind)', () => {
+  const notes = [
+    { start: 10, end: 12, midi: 60 },
+    { start: 13, end: 15, midi: 62 },
+    { start: 30, end: 32, midi: 64 },   // singing with no fresh words — a missed word lives here
+  ];
+
+  it('mergeHeard: fresh words win where they overlap the first pass', () => {
+    const previous = [{ text: 'rook', start: 10.1, end: 10.4 }];
+    const fresh = [{ text: 'rock', start: 10.1, end: 10.4 }];
+    const merged = mergeHeard(previous, fresh, notes);
+    expect(merged.map(w => w.text)).toEqual(['rock']);
+  });
+
+  it('mergeHeard: first-pass words the fresh pass missed are kept over singing', () => {
+    const previous = [
+      { text: 'hello', start: 10.1, end: 10.4 },
+      { text: 'missed', start: 30.1, end: 30.5 },
+    ];
+    const fresh = [{ text: 'hello', start: 10.1, end: 10.4 }];
+    const merged = mergeHeard(previous, fresh, notes);
+    expect(merged.map(w => w.text)).toEqual(['hello', 'missed']);
+  });
+
+  it('mergeHeard: first-pass words in silence are not resurrected', () => {
+    const previous = [{ text: 'hallucination', start: 50.1, end: 50.5 }];  // no notes here
+    const fresh = [{ text: 'hello', start: 10.1, end: 10.4 }];
+    const merged = mergeHeard(previous, fresh, notes);
+    expect(merged.map(w => w.text)).toEqual(['hello']);
+  });
+
+  it('mergeHeard: empty sides pass through', () => {
+    const fresh = [{ text: 'hello', start: 10.1, end: 10.4 }];
+    expect(mergeHeard([], fresh, notes)).toEqual(fresh);
+    const previous = [{ text: 'hello', start: 10.1, end: 10.4 }];
+    expect(mergeHeard(previous, [], notes)).toEqual(previous);
+  });
+
+  it('a reattempt passes the first listen’s words to the second listen as its prompt', async () => {
+    const song = makeSong(SONG);
+    song.analysis.heard = [
+      { text: 'kid', start: 15.1, end: 15.3 },
+      { text: 'rock', start: 15.4, end: 15.7 },
+    ];
+    const fake = services(song, { heard: [] });
+    await writeLyrics(song.analysis, { listen: true, reattempt: true }, fake);
+    expect(fake.hear).toHaveBeenCalledWith('kid rock');
+  });
+
+  it('without reattempt, the second listen gets no prompt', async () => {
+    const song = makeSong(SONG);
+    song.analysis.heard = [{ text: 'kid', start: 15.1, end: 15.3 }];
+    const fake = services(song, { heard: [] });
+    await writeLyrics(song.analysis, { listen: true }, fake);
+    expect(fake.hear).toHaveBeenCalledWith(undefined);
+  });
+
+  it('a reattempt keeps first-pass words the fresh listen missed, over the singing', async () => {
+    const song = makeSong(SONG);
+    // The first pass caught the opening word; the fresh pass hears nothing at all.
+    const firstWord = song.truth[0];
+    song.analysis.heard = [{ text: firstWord.text, start: firstWord.start, end: firstWord.end }];
+    const fake = services(song, { heard: [] });
+    const result = await writeLyrics(song.analysis, { listen: true, reattempt: true }, fake);
+    expect(result.source).toBe('heard');
+    expect(sungText(song)).toContain(firstWord.text);
   });
 });
