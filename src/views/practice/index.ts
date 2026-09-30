@@ -2,9 +2,9 @@ import { alignSyncedLyrics, applyTypedLyrics, buildLines, lyricBreaths, buildSec
 import { decodeAudio, downloadBlob } from '../../lib/audio';
 import { diagEntries, onDiag } from '../../lib/diag';
 import { BEAT_VERSION, countInCues, estimateBeat } from '../../lib/beat';
-import { duetParts, partnerRanges, type Part } from '../../lib/duet';
+import { duetNames, duetParts, partnerRanges, type Part } from '../../lib/duet';
 import { exportSong, getSong, listTakes, saveSong, type StoredSong, type StoredTake } from '../../lib/library';
-import { LiveMic } from '../../lib/mic';
+import { LiveMic, listMics, type MicChoice } from '../../lib/mic';
 import { formatTime, midiToFrequency, midiToNote, octaveOf } from '../../lib/music';
 import { Player, Timeline, type Range } from '../../lib/player';
 import { decodeStems, findLyricsOnline, LANGUAGE_CHOICES, lyricsOptionsFrom, LYRICS_DONE, lyricsServices, recheckNotes, type SongBuffers } from '../../lib/prepare';
@@ -23,6 +23,7 @@ import { SongBuilder } from './builder';
 import { announceMic, chosenMic, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
 import { mountMicCheck } from '../../ui/micCheck';
 import { roundTrip } from '../../lib/sync';
+import { sectionCoaching } from '../../lib/score';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -110,10 +111,12 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
 
   const levels = {
     lead: prefs.get('mix.lead', 100), music: prefs.get('mix.music', 100), monitor: prefs.get('mix.monitor', 0), voice: 100,
+    bass: prefs.get('mix.bass', 0), treble: prefs.get('mix.treble', 0),
     // Listening back to a take has its own mix: the singer you sang with as a guide is off by default,
     // since the take is your voice (it was never in your recording — only the player's copy of it).
     takeLead: prefs.get('mix.takeLead', 0), takeMusic: prefs.get('mix.takeMusic', 100)
   };
+  player.setEQ(levels.bass, levels.treble);
   const forgiveOctave = $<HTMLInputElement>('#forgiveOctave');
   const countIn = $<HTMLInputElement>('#countIn');
   forgiveOctave.checked = prefs.get('forgiveOctave', false);
@@ -340,11 +343,33 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       inSelection,
       scores: current ? new Map(current.score.lines.map(item => [item.line.id, item.percent])) : null,
       singer: parts ? line => parts!.get(line.id) ?? 'me' : null,
+      singerNames: parts ? duetNames(analysis) : null,
+      onSectionCoach: sectionId => openSectionCoach(sectionId),
       anchor: pickAnchor,
       cues: new Map(cues.map(cue => [cue.lineId, cue.dots])),
       building: builder?.marks ?? null
     });
   };
+  // ================================================================ section coaching (tap a karaoke line's %)
+  const coachDialog = $<HTMLDialogElement>('#coachDialog');
+  const openSectionCoach = (sectionId: string) => {
+    const take = review.current;
+    if (!take) return;
+    const report = sectionCoaching(take.score, analysis.sections, analysis.lines)
+      .find(item => item.sectionId === sectionId);
+    if (!report || report.score === null) { toast('No scored singing in that section yet.'); return; }
+    const pct = (value: number | null) => value === null ? '—' : value + '%';
+    $('#coachBody').innerHTML = `
+      <h2>${escapeHtml(report.label)}</h2>
+      <p class="coachScore"><strong>${pct(report.score)}</strong> <span class="hint small">section score · ${pct(report.coverage)} of the notes heard</span></p>
+      ${report.strengths.length ? `<h3>Going well</h3><ul>${report.strengths.map(text => `<li>${escapeHtml(text)}</li>`).join('')}</ul>` : ''}
+      ${report.weaknesses.length ? `<h3>Work on</h3><ul>${report.weaknesses.map(text => `<li>${escapeHtml(text)}</li>`).join('')}</ul>` : ''}
+      ${report.wordNotes.length ? `<h3>Listen closer</h3><ul>${report.wordNotes.map(note =>
+        `<li><strong>${escapeHtml(note.word)}</strong> — ${note.direction === 'flat' ? 'under' : 'over'} the note by ~${Math.abs(note.cents)}¢ <span class="hint">(${escapeHtml(note.lineText)})</span>. ${escapeHtml(note.tip)}</li>`).join('')}</ul>` : ''}
+      <p class="hint small">Word tips are coaching suggestions from the pitch measured — not a diagnosis of your mouth or throat.</p>`;
+    coachDialog.showModal();
+  };
+  $('#coachDone').addEventListener('click', () => coachDialog.close());
   const lyricsHintText = () => {
     if (session.lyricsJobs.has(song.id)) return '✍️ Writing the lyrics in the background — start practicing, they’ll appear when ready.';
     if (analysis.lyricsPending) return 'The lyrics were interrupted before they finished — use ⋯ → Redo lyrics.';
@@ -492,10 +517,27 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   // ================================================================ duet
   const duetMode = $<HTMLSelectElement>('#duetMode');
   duetMode.value = analysis.duet?.mine ?? '';
+  const nameMe = $<HTMLInputElement>('#duetNameMe');
+  const namePartner = $<HTMLInputElement>('#duetNamePartner');
+  const syncDuetNames = () => {
+    const names = duetNames(analysis);
+    if (document.activeElement !== nameMe) nameMe.value = names.me;
+    if (document.activeElement !== namePartner) namePartner.value = names.partner;
+    $('#duetNames').classList.toggle('hidden', !analysis.duet);
+  };
+  const saveDuetNames = () => {
+    if (!analysis.duet) return;
+    analysis.duet.names = { me: nameMe.value.trim() || 'Singer One', partner: namePartner.value.trim() || 'Singer Two' };
+    void persist();
+    renderLyrics();
+  };
+  nameMe.addEventListener('change', saveDuetNames);
+  namePartner.addEventListener('change', saveDuetNames);
   const duetChanged = () => {
     parts = duetParts(analysis);
     lane.partner = partnerRanges(analysis, parts);
     $('#duetHint').classList.toggle('hidden', !parts);
+    syncDuetNames();
     void persist();
     renderLyrics();
     review.rescore();
@@ -505,12 +547,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
   };
   duetMode.addEventListener('change', () => {
-    analysis.duet = duetMode.value ? { mine: duetMode.value as 'low' | 'high', overrides: analysis.duet?.overrides ?? {} } : undefined;
+    analysis.duet = duetMode.value ? { mine: duetMode.value as 'low' | 'high', overrides: analysis.duet?.overrides ?? {}, names: analysis.duet?.names } : undefined;
     duetChanged();
-    if (analysis.duet) toast('Duet on — your partner’s lines keep the original singer. Tap You/Them in Karaoke to fix any line.');
+    if (analysis.duet) toast('Duet on — your partner’s lines keep the original singer. In Karaoke, tap the name on a line to switch it.');
   });
   lane.partner = partnerRanges(analysis, parts);
   $('#duetHint').classList.toggle('hidden', !parts);
+  syncDuetNames();
 
   // ================================================================ settings
   const bindSlider = (id: string, key: 'lead' | 'music' | 'monitor', apply: (value: number) => void) => {
@@ -530,6 +573,22 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const setLead = bindSlider('mixLead', 'lead', value => player.setLevel('lead', value));
   bindSlider('mixMusic', 'music', value => player.setLevel('music', value));
   bindSlider('mixMonitor', 'monitor', value => mic.setMonitor(value));
+  // Bass/treble EQ on the background track, in dB.
+  const bindEQ = (id: string, key: 'bass' | 'treble') => {
+    const input = $<HTMLInputElement>('#' + id);
+    const out = $<HTMLOutputElement>('#' + id + 'Out');
+    const set = (value: number) => {
+      levels[key] = value;
+      input.value = String(value);
+      out.textContent = (value > 0 ? '+' : '') + value + ' dB';
+      player.setEQ(levels.bass, levels.treble);
+      prefs.set('mix.' + key, value);
+    };
+    input.addEventListener('input', () => set(Number(input.value)));
+    set(levels[key]);
+  };
+  bindEQ('mixBass', 'bass');
+  bindEQ('mixTreble', 'treble');
   root.querySelectorAll<HTMLButtonElement>('[data-lead]').forEach(button => button.addEventListener('click', () => setLead(Number(button.dataset.lead))));
   mixToggle.addEventListener('click', () => {
     const open = settingsPanel.classList.toggle('hidden') === false;
@@ -571,17 +630,29 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     micButton.classList.toggle('on', mic.active);
     micButton.title = mic.active ? 'Microphone on' + (mic.inputLabel ? ' (' + mic.inputLabel + ')' : '') + ' — tap to turn off' : 'Microphone — see your voice on the staff';
   };
+  /** The mic tab's on/off button mirrors the pill's mic button (defined here so enableMic can reach it). */
+  const renderVoicesMic = () => {
+    const toggle = $('#voicesMicToggle');
+    if (!toggle) return;
+    toggle.setAttribute('aria-pressed', String(mic.active));
+    toggle.textContent = mic.active ? '🎤 Turn mic off' : '🎤 Turn mic on';
+    toggle.classList.toggle('on', mic.active);
+  };
   // The mic settings (which mic, headphones or speakers, no phone filters) live in one place: ⚙ → Mic check.
   const enableMic = async (): Promise<boolean> => {
     try {
       await mic.start(onSpeakers(), chosenMic(), rawMic());
       mic.setMonitor(levels.monitor / 100);
+      const second = prefs.get<MicChoice | null>('micInput2', null);
+      if (second && !mic.secondActive) await mic.addSecondMic(second).catch(() => undefined);
       renderMicButton();
+      renderVoicesMic();
       announceMic(mic);
       return true;
     } catch (error) {
       toast(micErrorMessage(error), 'error');
       renderMicButton();
+      renderVoicesMic();
       return false;
     }
   };
@@ -600,7 +671,87 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   });
   micButton.addEventListener('click', () => {
     if (recording) return;
-    if (mic.active) { mic.stop(); renderMicButton(); } else void enableMic();
+    if (mic.active) { mic.stop(); renderMicButton(); renderVoicesMic(); } else void enableMic();
+  });
+
+  // ================================================================ voices — the meters open these panels
+  const voicesDialog = $<HTMLDialogElement>('#voicesDialog');
+  const showVTab = (tab: string) => {
+    root.querySelectorAll<HTMLButtonElement>('[data-vtab]').forEach(button => {
+      const active = button.dataset.vtab === tab;
+      button.setAttribute('aria-selected', String(active));
+      button.classList.toggle('active', active);
+    });
+    root.querySelectorAll<HTMLElement>('[data-vpane]').forEach(pane => {
+      pane.classList.toggle('hidden', pane.dataset.vpane !== tab);
+    });
+  };
+  root.querySelectorAll<HTMLButtonElement>('[data-vtab]').forEach(button =>
+    button.addEventListener('click', () => showVTab(button.dataset.vtab ?? 'mic')));
+  const voicesMicToggle = $<HTMLButtonElement>('#voicesMicToggle');
+  const micSelect = $<HTMLSelectElement>('#voicesMicSelect');
+  const mic2Select = $<HTMLSelectElement>('#voicesMic2Select');
+  const mic2Btn = $<HTMLButtonElement>('#voicesMic2Btn');
+  const mic2State = $('#voicesMic2State');
+  const fillMicSelect = async (select: HTMLSelectElement, current: MicChoice | null, placeholder: string) => {
+    const mics = await listMics().catch(() => []);
+    select.innerHTML = `<option value="">${escapeHtml(placeholder)}</option>`
+      + mics.map(mic => `<option value="${escapeHtml(mic.id)}">${escapeHtml(mic.label)}</option>`).join('');
+    const match = current && (mics.find(item => item.id === current.id) ?? mics.find(item => item.label === current.label));
+    select.value = match ? match.id : '';
+  };
+  const renderMic2 = () => {
+    mic2Btn.textContent = mic.secondActive ? 'Remove second mic' : 'Add second mic';
+    mic2Btn.disabled = recording || Boolean(builder?.active);
+    mic2State.textContent = mic.secondActive
+      ? 'Second mic live: ' + mic.secondLabel + ' — both mics are heard together.'
+      : '';
+  };
+  const openVoices = (tab: string) => {
+    showVTab(tab);
+    renderVoicesMic();
+    renderMic2();
+    void fillMicSelect(micSelect, chosenMic(), 'Automatic (the device picks)');
+    void fillMicSelect(mic2Select, prefs.get<MicChoice | null>('micInput2', null), 'Pick a mic…');
+    voicesDialog.showModal();
+  };
+  root.querySelectorAll<HTMLButtonElement>('[data-voice]').forEach(button =>
+    button.addEventListener('click', () => openVoices(button.dataset.voice ?? 'mic')));
+  $('#voicesDone').addEventListener('click', () => voicesDialog.close());
+  voicesMicToggle.addEventListener('click', () => {
+    if (recording) return;
+    if (mic.active) { mic.stop(); renderMicButton(); renderVoicesMic(); renderMic2(); }
+    else void enableMic().then(() => { renderVoicesMic(); renderMic2(); });
+  });
+  micSelect.addEventListener('change', () => {
+    const option = micSelect.selectedOptions[0];
+    prefs.set('micInput', micSelect.value ? { id: micSelect.value, label: option?.textContent ?? '' } : null);
+    if (mic.active) void enableMic().then(() => { renderVoicesMic(); renderMic2(); });
+  });
+  mic2Btn.addEventListener('click', async () => {
+    if (recording || builder?.active) return;
+    if (mic.secondActive) {
+      mic.removeSecondMic();
+      prefs.set('micInput2', null);
+      renderMic2();
+      return;
+    }
+    if (!mic.active) { toast('Turn the first mic on first.'); return; }
+    const option = mic2Select.selectedOptions[0];
+    const choice = mic2Select.value ? { id: mic2Select.value, label: option?.textContent ?? '' } : null;
+    try {
+      await mic.addSecondMic(choice);
+      prefs.set('micInput2', choice);
+      if (mic.secondLabel && mic.secondLabel === mic.inputLabel) toast('Both mics hear the same device — pick a different second mic if you have one.');
+    } catch (error) {
+      toast('Couldn’t open a second mic here — most phones only allow one mic at a time.', 'error');
+    }
+    renderMic2();
+  });
+  $('#duetAssign').addEventListener('click', () => {
+    voicesDialog.close();
+    setView('karaoke');
+    toast('Tap the name on any line to switch who sings it.');
   });
 
   // ================================================================ playback + recording

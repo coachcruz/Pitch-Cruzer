@@ -1,4 +1,4 @@
-import type { LyricLine, NoteEvent, PitchTrack } from './analysis';
+import type { LyricLine, NoteEvent, PitchTrack, Section, Word } from './analysis';
 import { encodeWav } from './audio';
 import { foldToOctave } from './music';
 import { splitByRanges, type Range, type Timeline } from './player';
@@ -6,6 +6,8 @@ import { analyzeVibrato, centerTrack, summarizeVibrato, type VibratoSummary } fr
 import type { SongBuffers } from './prepare';
 
 export interface LineScore { line: LyricLine; percent: number; meanCents: number | null; frames: number }
+/** Signed mean pitch error of one sung word (cents, sung minus target), for word-level coaching. */
+export interface WordScore { lineId: string; text: string; meanCents: number }
 export interface TakeScore {
   score: number;
   onPitchWhenSinging: number;
@@ -15,6 +17,8 @@ export interface TakeScore {
   steadiness: number | null;
   vibrato: VibratoSummary;
   lines: LineScore[];
+  /** Only words with at least 3 voiced frames and a measurable error. */
+  words: WordScore[];
   trail: Array<{ t: number; midi: number }>;
 }
 
@@ -25,6 +29,15 @@ function noteAt(notes: NoteEvent[], time: number): NoteEvent | null {
     if (time < notes[mid].start) hi = mid - 1;
     else if (time >= notes[mid].end) lo = mid + 1;
     else return notes[mid];
+  }
+  return null;
+}
+
+/** The sung (non-aside) word sounding at `time`, if any. */
+function wordAt(line: LyricLine, time: number): Word | null {
+  for (const word of line.words) {
+    if (word.aside) continue;
+    if (time >= word.start && time < word.end) return word;
   }
   return null;
 }
@@ -48,6 +61,7 @@ export function scoreTake(
   let targetFrames = 0, voicedFrames = 0, points = 0, hits = 0;
   const errors: number[] = [];
   const perLine = new Map<LyricLine, { frames: number; points: number; errors: number[] }>();
+  const perWord = new Map<Word, { lineId: string; text: string; voiced: number; errors: number[] }>();
   const perNote = new Map<NoteEvent, number[]>();
   const perNoteRaw = new Map<NoteEvent, number[]>();
   // Judge the CENTER of any vibrato (average over ~one cycle), not each instant of the swing.
@@ -95,6 +109,15 @@ export function scoreTake(
       perNote.set(target, held);
     }
     if (bucket) { bucket.points += value; if (Math.abs(error) <= 2) bucket.errors.push(error * 100); }
+    if (line) {
+      const word = wordAt(line, source);
+      if (word) {
+        const entry = perWord.get(word) ?? { lineId: line.id, text: word.text, voiced: 0, errors: [] as number[] };
+        perWord.set(word, entry);
+        entry.voiced += 1;
+        if (Math.abs(error) <= 2) entry.errors.push(error * 100);
+      }
+    }
   }
 
   const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
@@ -126,6 +149,9 @@ export function scoreTake(
       .filter(([, bucket]) => bucket.frames >= 5)
       .map(([line, bucket]) => ({ line, frames: bucket.frames, percent: Math.round((100 * bucket.points) / bucket.frames), meanCents: mean(bucket.errors) }))
       .sort((a, b) => a.line.start - b.line.start),
+    words: [...perWord.values()]
+      .filter(entry => entry.voiced >= 3 && entry.errors.length > 0)
+      .map((entry): WordScore => ({ lineId: entry.lineId, text: entry.text, meanCents: mean(entry.errors)! })),
     trail
   };
 }
@@ -137,6 +163,99 @@ export function coachingTip(score: TakeScore): string {
   if (score.meanCents !== null && score.meanCents > 25) return 'You tend to sing a bit sharp (over the note). Relax and let the note settle rather than pushing.';
   if (score.onPitchWhenSinging >= 75) return 'Great pitch! Try turning the artist down further, or record the next section.';
   return 'Loop the lines marked in red with the artist at “Guide” level, then try again.';
+}
+
+export interface WordNote { word: string; lineText: string; cents: number; direction: 'flat' | 'sharp'; tip: string }
+export interface SectionCoaching {
+  sectionId: string; label: string;
+  score: number | null; coverage: number | null;
+  strengths: string[]; weaknesses: string[]; wordNotes: WordNote[];
+}
+
+/**
+ * A one-line vowel-shaping suggestion for a word, from a rough guess at its stressed vowel
+ * (the last vowel cluster — the vowel most often sustained when a word is sung). This is
+ * heuristic coaching language, never a measurement of the singer's mouth.
+ */
+function vowelTip(word: string): string {
+  const clusters = word.toLowerCase().match(/[aeiouy]+/g) ?? [];
+  const vowel = clusters.length ? clusters[clusters.length - 1] : '';
+  if (/ee|ea|ei|ie|ey/i.test(vowel) || vowel === 'i' || vowel === 'y') return 'Try a narrower "ee" — lips spread, sound placed forward.';
+  if (/oo|ou|ew|ue/i.test(vowel) || vowel === 'u') return 'Try a narrow, forward "oo" — lips gently pursed, never tight.';
+  if (/oa|oe|ow/i.test(vowel) || vowel === 'o') return 'Try a tall, round "oh" — keep the lips from clamping shut.';
+  if (vowel.includes('a')) return 'Try dropping the jaw on the "ah" — keep the space in the throat open.';
+  return 'Try a relaxed jaw on the "eh" — loose, neither spread nor pushed.';
+}
+
+/**
+ * Per-section coaching for a scored take: a frame-weighted score, an approximate coverage,
+ * plain-language strengths and weaknesses, and up to three words worth a closer listen.
+ *
+ * Coverage is an approximation: a line's heard share is estimated from the share of its words
+ * that carried enough voice to measure (at least 3 voiced frames), weighted by each line's
+ * target frames. Brief fragments count as unheard, so it can read slightly low.
+ */
+export function sectionCoaching(take: TakeScore, sections: Section[], lines: LyricLine[]): SectionCoaching[] {
+  const lineWords = new Map<string, string[]>();
+  for (const line of lines) lineWords.set(line.id, line.words.filter(word => !word.aside).map(word => word.text));
+  const wordsByLine = new Map<string, WordScore[]>();
+  for (const word of take.words) {
+    const list = wordsByLine.get(word.lineId) ?? [];
+    list.push(word);
+    wordsByLine.set(word.lineId, list);
+  }
+
+  return sections.map(section => {
+    const none: SectionCoaching = {
+      sectionId: section.id, label: section.label,
+      score: null, coverage: null, strengths: [], weaknesses: [], wordNotes: []
+    };
+    const scored = take.lines.filter(item => item.line.start >= section.start && item.line.start < section.end);
+    if (!scored.length) return none;
+
+    const frames = scored.reduce((n, item) => n + item.frames, 0);
+    const score = Math.round(scored.reduce((n, item) => n + item.percent * item.frames, 0) / frames);
+    const coverage = Math.round(100 * scored.reduce((n, item) => {
+      const total = lineWords.get(item.line.id)?.length ?? 0;
+      return total ? n + item.frames * ((wordsByLine.get(item.line.id)?.length ?? 0) / total) : n;
+    }, 0) / frames);
+    const centsFrames = scored.reduce((n, item) => n + (item.meanCents === null ? 0 : item.frames), 0);
+    const cents = centsFrames
+      ? scored.reduce((n, item) => n + (item.meanCents ?? 0) * item.frames, 0) / centsFrames
+      : 0;
+
+    const strengths: string[] = [];
+    const weaknesses: string[] = [];
+    if (score >= 85) strengths.push('Pitch locked in across the section.');
+    else if (score >= 70) strengths.push('Holding pitch well through the section.');
+    if (centsFrames > 0 && Math.abs(cents) < 12) strengths.push('Centered on the notes — no steady flat or sharp drift.');
+    if (coverage >= 80) strengths.push('Sang out confidently — voice heard on almost every note.');
+    if (centsFrames > 0 && cents <= -20) weaknesses.push(`Tending flat by ~${Math.round(-cents)}¢ — think “up” on the long notes.`);
+    if (centsFrames > 0 && cents >= 20) weaknesses.push(`Tending sharp by ~${Math.round(cents)}¢ — relax and let the notes settle.`);
+    if (coverage < 60) weaknesses.push('Voice dropping out in places — sing out more through the section.');
+    if (score < 55) weaknesses.push('Several notes missed — loop the weakest lines with the artist as a guide.');
+    if (score >= 70 && !strengths.length) strengths.push('Steady overall — keep doing what you are doing.');
+    if (score < 70 && !weaknesses.length) weaknesses.push('Inconsistent — some lines land, others drift; loop the low-scoring lines.');
+
+    const wordNotes: WordNote[] = scored
+      .flatMap(item => (wordsByLine.get(item.line.id) ?? []).map(word => ({
+        word: word.text,
+        lineText: (lineWords.get(item.line.id) ?? []).join(' '),
+        cents: Math.round(word.meanCents),
+        direction: (word.meanCents < 0 ? 'flat' : 'sharp') as 'flat' | 'sharp',
+        tip: vowelTip(word.text)
+      })))
+      .filter(note => Math.abs(note.cents) >= 20)
+      .sort((a, b) => Math.abs(b.cents) - Math.abs(a.cents))
+      .slice(0, 3);
+
+    return {
+      sectionId: section.id, label: section.label,
+      score, coverage,
+      strengths: strengths.slice(0, 3), weaknesses: weaknesses.slice(0, 3),
+      wordNotes
+    };
+  });
 }
 
 /** Renders song stems + the singer's voice to a stereo WAV, using the current mix levels. */

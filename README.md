@@ -44,3 +44,12 @@ Lyrics: Whisper runs per sung phrase and detects the language of each one (limit
 
 Notes: streaming services (YouTube, Spotify, Apple Music) don't allow downloads, so those songs are captured by recording the tab while it plays (Chrome/Edge desktop).
 Uploads are sent in 4 MB chunks because Netlify functions reject request bodies over ~6 MB.
+
+## What's new
+
+See [CHANGELOG.md](CHANGELOG.md). Highlights: the three level meters in the floating
+controls open the Voices panel (🎤 Mic — device choice, optional second mic, monitor;
+🎙 Singer — Mute/Guide/Full, duet mode with editable Singer One / Singer Two names;
+🎶 Music — volume plus bass/treble EQ). Tapping a karaoke line's % opens coaching for
+that whole section. Section detection no longer over-segments untagged songs into
+Verse 1–13.

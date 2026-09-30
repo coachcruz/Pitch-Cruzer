@@ -74,7 +74,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <button id="stop" class="cbtn" title="Stop" aria-label="Stop" disabled>■</button>
         <button id="record" class="cbtn record" title="Record yourself" aria-label="Record">●</button>
         <button id="mic" class="cbtn" title="Microphone — see your voice on the staff" aria-label="Microphone" aria-pressed="false">🎤</button>
-        <span class="meters" title="Levels — your mic · the artist · the music" aria-hidden="true"><i data-meter="mic"></i><i data-meter="artist"></i><i data-meter="music"></i></span>
+        <span class="meters" role="group" aria-label="Levels — your mic, the artist, the music. Open each one's controls."><button class="meter" data-voice="mic" aria-label="Mic level — open mic controls"><i data-meter="mic"></i></button><button class="meter" data-voice="singer" aria-label="Artist level — open singer controls"><i data-meter="artist"></i></button><button class="meter" data-voice="music" aria-label="Music level — open music controls"><i data-meter="music"></i></button></span>
         <button id="practiceBtn" class="cbtn" title="What to practice — part, repeats, sing along or echo" aria-label="What to practice">🎵</button>
         <button id="mixToggle" class="cbtn" title="Settings" aria-label="Settings" aria-expanded="false">⚙</button>
         <div class="viewSwitch" role="radiogroup" aria-label="View">
@@ -86,37 +86,11 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <button id="partChip" class="partChip hidden" title="Back to the whole song"></button>
 
         <div id="mixPanel" class="mixPanel hidden">
-          <div class="mixRow">
-            <label for="mixLead">Singer</label>
-            <input id="mixLead" type="range" min="0" max="100" step="1">
-            <output id="mixLeadOut"></output>
-            <div class="presets"><button class="chip" data-lead="0">Mute</button><button class="chip" data-lead="30">Guide</button><button class="chip" data-lead="100">Full</button></div>
-          </div>
-          <div class="mixRow ${hasMusic ? '' : 'disabled'}">
-            <label for="mixMusic">Music</label>
-            <input id="mixMusic" type="range" min="0" max="100" step="1" ${hasMusic ? '' : 'disabled'}>
-            <output id="mixMusicOut"></output>
-          </div>
-          <div class="mixRow">
-            <label for="mixMonitor">Hear my mic</label>
-            <input id="mixMonitor" type="range" min="0" max="100" step="1">
-            <output id="mixMonitorOut"></output>
-          </div>
-          ${analysis.separated ? '' : '<p class="notice small">This song was prepared without vocal separation, so the singer can’t be turned down separately.</p>'}
-          <label class="inline duetRow">Duet <select id="duetMode">
-            <option value="">Off — I sing everything</option>
-            <option value="low">I sing the lower voice</option>
-            <option value="high">I sing the higher voice</option></select></label>
-          <p id="duetHint" class="hint small hidden">Your partner’s lines keep the original singer; only your lines are scored. In Karaoke, tap You/Them on a line to switch it.</p>
           <div class="toggles">
             <label class="check"><input id="forgiveOctave" type="checkbox"> Forgive octave <small>(score the right note in any octave)</small></label>
             <label class="check"><input id="countIn" type="checkbox"> Count me in before recording</label>
             <label class="check"><input id="simpleView" type="checkbox"> Simple staff <small>(fewer labels)</small></label>
             <label class="check"><input id="showVoices" type="checkbox"> Show voice types <small>(bass, tenor, alto…)</small></label>
-          </div>
-          <div class="micRow">
-            <button id="micCheckBtn" class="btn small" type="button">🎤 Mic check &amp; settings</button>
-            <p class="hint small">Which mic, headphones or speakers, and a quick check that it hears you.</p>
           </div>
         </div>
       </div>
@@ -139,6 +113,71 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
       <div class="row end"><button id="partWhole" class="btn ghost" type="button">Whole song</button><button id="partDone" class="btn primary" type="button">Done</button></div>
     </dialog>
 
+    <dialog id="voicesDialog" class="dialog" aria-label="Voices">
+      <div class="vtabs" role="tablist" aria-label="Voice controls">
+        <button class="vtab" data-vtab="mic" role="tab" aria-selected="true" type="button">🎤 Mic</button>
+        <button class="vtab" data-vtab="singer" role="tab" aria-selected="false" type="button">🎙 Singer</button>
+        <button class="vtab" data-vtab="music" role="tab" aria-selected="false" type="button">🎶 Music</button>
+      </div>
+      <section class="vpane" data-vpane="mic" role="tabpanel" aria-label="Microphone">
+        <div class="vrow">
+          <button id="voicesMicToggle" class="btn" type="button" aria-pressed="false">🎤 Turn mic on</button>
+          <button id="micCheckBtn" class="btn small" type="button">Mic check &amp; settings</button>
+        </div>
+        <label class="inline">Microphone <select id="voicesMicSelect" class="miniSelect"><option value="">Automatic (the device picks)</option></select></label>
+        <div class="vrow">
+          <label class="inline">Second mic <select id="voicesMic2Select" class="miniSelect"><option value="">Pick a mic…</option></select></label>
+          <button id="voicesMic2Btn" class="btn small" type="button">Add second mic</button>
+        </div>
+        <p id="voicesMic2State" class="hint small"></p>
+        <div class="mixRow">
+          <label for="mixMonitor">Hear my mic</label>
+          <input id="mixMonitor" type="range" min="0" max="100" step="1">
+          <output id="mixMonitorOut"></output>
+        </div>
+        <p class="hint small">Two mics at once works on a computer (wired + Bluetooth, or two Bluetooth). Most phones only allow one mic — there, take turns and save a take each.</p>
+      </section>
+      <section class="vpane hidden" data-vpane="singer" role="tabpanel" aria-label="Singer">
+        <div class="mixRow">
+          <label for="mixLead">Singer</label>
+          <input id="mixLead" type="range" min="0" max="100" step="1">
+          <output id="mixLeadOut"></output>
+          <div class="presets"><button class="chip" data-lead="0" type="button">Mute</button><button class="chip" data-lead="30" type="button">Guide</button><button class="chip" data-lead="100" type="button">Full</button></div>
+        </div>
+        ${analysis.separated ? '' : '<p class="notice small">This song was prepared without vocal separation, so the singer can’t be turned down separately.</p>'}
+        <h3>Sing with a partner</h3>
+        <label class="inline">I sing <select id="duetMode" class="miniSelect">
+          <option value="">Off — everything</option>
+          <option value="low">The lower voice</option>
+          <option value="high">The higher voice</option></select></label>
+        <div id="duetNames" class="vrow hidden">
+          <label class="inline">Singer One (you) <input id="duetNameMe" class="textInput" maxlength="24" autocomplete="off"></label>
+          <label class="inline">Singer Two (partner) <input id="duetNamePartner" class="textInput" maxlength="24" autocomplete="off"></label>
+        </div>
+        <p id="duetHint" class="hint small hidden">Your partner’s lines keep the original singer; only your lines are scored. In Karaoke, tap the name on a line to switch it.</p>
+        <div class="row"><button id="duetAssign" class="btn small" type="button">Assign lines in Karaoke</button></div>
+      </section>
+      <section class="vpane hidden" data-vpane="music" role="tabpanel" aria-label="Music">
+        <div class="mixRow ${hasMusic ? '' : 'disabled'}">
+          <label for="mixMusic">Music</label>
+          <input id="mixMusic" type="range" min="0" max="100" step="1" ${hasMusic ? '' : 'disabled'}>
+          <output id="mixMusicOut"></output>
+        </div>
+        <div class="mixRow ${hasMusic ? '' : 'disabled'}">
+          <label for="mixBass">Bass</label>
+          <input id="mixBass" type="range" min="-12" max="12" step="1" ${hasMusic ? '' : 'disabled'}>
+          <output id="mixBassOut"></output>
+        </div>
+        <div class="mixRow ${hasMusic ? '' : 'disabled'}">
+          <label for="mixTreble">Treble</label>
+          <input id="mixTreble" type="range" min="-12" max="12" step="1" ${hasMusic ? '' : 'disabled'}>
+          <output id="mixTrebleOut"></output>
+        </div>
+        <p class="hint small">Bass and treble shape the background track only — the singer and your mic are untouched.</p>
+      </section>
+      <div class="row end"><button id="voicesDone" class="btn primary" type="button">Done</button></div>
+    </dialog>
+
     <dialog id="sectionsDialog" class="dialog" aria-label="Rename sections">
       <h2>Rename sections</h2>
       <p class="hint small">If a section was guessed wrong, pick what it really is.</p>
@@ -150,6 +189,11 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
       <section id="review" class="review hidden" aria-live="polite"></section>
       <div class="takesBlock"><h3>Takes &amp; scores</h3><div id="takesList"></div></div>
       <div class="row end"><button id="reviewDialogClose" class="btn ghost">Close</button></div>
+    </dialog>
+
+    <dialog id="coachDialog" class="dialog" aria-label="Section coaching">
+      <div id="coachBody"></div>
+      <div class="row end"><button id="coachDone" class="btn primary" type="button">Done</button></div>
     </dialog>
 
     <dialog id="detailsDialog" class="dialog wide" aria-label="Details">

@@ -33,6 +33,9 @@ export class LiveMic {
   private raw = true;
   /** The chosen mic couldn't be opened, so the device's default was used. */
   fellBack = false;
+  /** Duet: a second live mic. Its audio joins the level meter, the "hear myself" monitor and the recording. */
+  private secondStream: MediaStream | null = null;
+  private secondSource: MediaStreamAudioSourceNode | null = null;
 
   constructor(private ctx: AudioContext) {}
 
@@ -89,6 +92,42 @@ export class LiveMic {
 
   /** The name of the mic in use. */
   get inputLabel(): string { return this.stream?.getAudioTracks()[0]?.label ?? ''; }
+
+  /** A second mic is live (duets). */
+  get secondActive(): boolean { return this.secondStream !== null; }
+  /** The name of the second mic, if one is live. */
+  get secondLabel(): string { return this.secondStream?.getAudioTracks()[0]?.label ?? ''; }
+
+  /**
+   * Opens a second mic (wired + Bluetooth, or two Bluetooth) so both singers are heard.
+   * The two signals are mixed: the level meter, the monitor and the recording hear both.
+   * Pitch tracking follows the mix (whoever is loudest), so per-singer scoring still comes
+   * from the duet line assignment, not from the mics. Most phones expose only one input
+   * route — there the second open fails and this throws, leaving the first mic untouched.
+   */
+  async addSecondMic(choice: MicChoice | null = null): Promise<void> {
+    if (!this.stream || !this.analyser || !this.monitor) throw new Error('Start the first mic before adding a second.');
+    this.removeSecondMic();
+    const audio: MediaTrackConstraints = {
+      echoCancellation: this.echoCancel, noiseSuppression: false, autoGainControl: false, channelCount: 1
+    };
+    const mics = choice ? await listMics() : [];
+    const id = choice ? (mics.find(mic => mic.id === choice.id) ?? mics.find(mic => mic.label === choice.label))?.id : undefined;
+    this.secondStream = await navigator.mediaDevices.getUserMedia(
+      { audio: id ? { ...audio, deviceId: { exact: id } } : audio, video: false });
+    this.secondSource = this.ctx.createMediaStreamSource(this.secondStream);
+    this.secondSource.connect(this.analyser);
+    this.secondSource.connect(this.monitor);
+    if (this.recorder) this.secondSource.connect(this.recorder);
+  }
+
+  /** Drops the second mic; the first keeps running. */
+  removeSecondMic(): void {
+    this.secondSource?.disconnect();
+    this.secondSource = null;
+    this.secondStream?.getTracks().forEach(track => track.stop());
+    this.secondStream = null;
+  }
 
   /**
    * Processing the device applies although it was asked not to — an iPhone with its Mic Mode on
@@ -158,6 +197,7 @@ export class LiveMic {
   }
 
   stop(): void {
+    this.removeSecondMic();
     this.recorder?.disconnect();
     this.recorder = null;
     this.monitor?.disconnect();
