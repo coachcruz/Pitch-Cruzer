@@ -922,7 +922,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
 
     if (view === 'staff') lane.draw(now);
-    else karaoke.update(now, playing);
+    else karaoke.update(now, playing, mic.active ? sung : undefined);
     builder?.update(now);
     showLevels(micLevel);
     updateUpNext(now);

@@ -11,6 +11,11 @@
   --good: #34d399;
   --close: #fbbf24;
   --off: #f87171;
+  --pitch-perfect: #34d399;
+  --pitch-blue: #60a5fa;
+  --pitch-red: #f87171;
+  --pitch-silent: #fbbf24;
+  --pitch-line: #c084fc;
   --voice: #60a5fa;
   --lane-bg: #0f1220;
   --lane-note: #3b3f73;
@@ -349,6 +354,14 @@ input[type='range'] { accent-color: var(--accent); }
 .lyricsList .syl .t { transition: color 0.12s; }
 .lyricsList .syl.sung .t { color: var(--accent); }
 .lyricsList .syl.now .t { color: var(--accent-2); text-shadow: 0 0 12px color-mix(in srgb, var(--accent-2) 55%, transparent); }
+/* Karaoke live pitch colors (mic on): reactive per word, strongest wins over the plain highlight. */
+.lyricsList .syl.pitch-perfect .t { color: var(--pitch-perfect); text-shadow: 0 0 14px color-mix(in srgb, var(--pitch-perfect) 60%, transparent); }
+.lyricsList .syl.pitch-blue .t { color: var(--pitch-blue); }
+.lyricsList .syl.pitch-red .t { color: var(--pitch-red); }
+.lyricsList .syl.pitch-silent .t { color: var(--pitch-silent); }
+.lyricLine.linePerfect { box-shadow: inset 3px 0 0 var(--pitch-line); animation: linePerfect 2.2s ease-in-out infinite; }
+@keyframes linePerfect { 50% { box-shadow: inset 3px 0 0 var(--pitch-line), 0 0 26px color-mix(in srgb, var(--pitch-line) 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .lyricLine.linePerfect { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .lyricsList { transform: none; } }
 
 .word { display: inline-flex; align-items: flex-end; white-space: nowrap; }

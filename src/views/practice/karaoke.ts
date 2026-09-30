@@ -1,6 +1,39 @@
-import { isTagLine, type LyricLine, type SongAnalysis } from '../../lib/analysis';
+import { isTagLine, type LyricLine, type NoteEvent, type SongAnalysis } from '../../lib/analysis';
+import { foldToOctave } from '../../lib/music';
 import { escapeHtml } from '../../ui/dom';
 import { syllablesHtml } from './text';
+
+/** Live pitch verdict for one syllable, painted while you sing. */
+export type PitchVerdict = 'perfect' | 'blue' | 'red' | 'silent';
+
+/**
+ * How the sung pitch compares to the expected note. "Perfect" is a quarter tone, the same bar
+ * the take scoring uses. Blue means the pitch class is right but the octave isn't, or it's close
+ * but not quite there. Red is a different note altogether. Silent is no voice heard over the word.
+ * Returns null inside a short grace at the word's attack, so late entries aren't punished instantly.
+ */
+export function pitchVerdict(sung: number | null, expected: number, intoWord: number): PitchVerdict | null {
+  if (sung === null) return intoWord >= 0.15 ? 'silent' : null;
+  const err = Math.abs(sung - expected);
+  if (err <= 0.5) return 'perfect';
+  if (Math.abs(foldToOctave(sung, expected) - expected) <= 0.5) return 'blue';
+  if (err <= 1.0) return 'blue';
+  return 'red';
+}
+
+/**
+ * Whisper's word starts can lag or lead the actual vocal by ~100–200 ms. The detected note
+ * onsets are the ground truth of when the voice starts: pull the word's highlight moment to the
+ * nearest onset when one is close, so the lyrics light up with the singer, not the transcript.
+ */
+export function snapToNoteOnset(start: number, end: number, notes: NoteEvent[]): number {
+  let best = start, bestDist = 0.25;
+  for (const note of notes) {
+    const dist = Math.abs(note.start - start);
+    if (dist < bestDist && note.start < end - 0.05) { best = note.start; bestDist = dist; }
+  }
+  return best;
+}
 
 export interface KaraokeState {
   inSelection: (time: number) => boolean;
@@ -16,9 +49,22 @@ export interface KaraokeState {
   building?: { current: string; kept: Map<string, number> } | null;
 }
 
+interface SylEntry {
+  el: HTMLElement;
+  row: HTMLElement;
+  /** Highlight start, snapped to the vocal's note onset. */
+  start: number;
+  end: number;
+  /** The note the singer is supposed to sing (null: spoken/aside, no verdict). */
+  midi: number | null;
+}
+
 /**
  * The Karaoke view: big lyrics that roll upward on their own at an even speed and light up word by
- * word as they're sung. Scrolling by hand pauses the roll for a few seconds.
+ * word as they're sung. Scrolling by hand pauses the roll for a few seconds. With the mic on, each
+ * word also reacts to the live pitch: green for on pitch, blue for close or the right note in the
+ * wrong octave, red for a wrong note, yellow when no voice is heard — and a line sung perfectly
+ * all the way through glows purple.
  */
 export class Karaoke {
   private current: HTMLElement | null = null;
@@ -27,6 +73,14 @@ export class Karaoke {
   private handScrollUntil = 0;
   /** While picking lines, the list stays where the person scrolls it. */
   holdScroll = false;
+  private syls: SylEntry[] = [];
+  private byEl = new Map<HTMLElement, SylEntry>();
+  private sylsByRow = new Map<HTMLElement, SylEntry[]>();
+  private verdicts = new Map<HTMLElement, PitchVerdict>();
+  private locked = new Set<HTMLElement>();
+  private finishedRows = new Set<HTMLElement>();
+  private pitchOn = false;
+  private pitchTime = NaN;
 
   constructor(
     private list: HTMLElement,
@@ -76,10 +130,92 @@ export class Karaoke {
       const line = this.analysis.lines.find(item => item.id === id);
       return row && line ? [{ row, dots, entry: line.start }] : [];
     });
+    // Index the syllables for the pitch layer (fresh slate: new DOM, no verdicts yet).
+    this.syls = [];
+    this.byEl = new Map();
+    this.sylsByRow = new Map();
+    this.resetPitch();
+    for (const el of this.list.querySelectorAll<HTMLElement>('.syl')) {
+      const row = el.closest<HTMLElement>('.lyricLine');
+      if (!row) continue;
+      const start = Number(el.dataset.s), end = Number(el.dataset.e);
+      const raw = el.dataset.m;
+      const midi = raw === undefined || raw === '' ? null : Number(raw);
+      const entry: SylEntry = { el, row, start: snapToNoteOnset(start, end, this.analysis.notes), end, midi };
+      this.syls.push(entry);
+      this.byEl.set(el, entry);
+      const group = this.sylsByRow.get(row) ?? [];
+      group.push(entry);
+      this.sylsByRow.set(row, group);
+    }
   }
 
-  /** Called every frame while the Karaoke view is showing. */
-  update(time: number, playing: boolean): void {
+  private setVerdict(el: HTMLElement, verdict: PitchVerdict | null): void {
+    const prev = this.verdicts.get(el);
+    if (prev === verdict) return;
+    if (prev) el.classList.remove('pitch-' + prev);
+    if (verdict) {
+      el.classList.add('pitch-' + verdict);
+      this.verdicts.set(el, verdict);
+    } else {
+      this.verdicts.delete(el);
+    }
+  }
+
+  /** A syllable's window has passed: keep its final color and stop judging it. */
+  private lockSyl(entry: SylEntry): void {
+    this.locked.add(entry.el);
+    if (!this.verdicts.has(entry.el) && entry.midi !== null) this.setVerdict(entry.el, 'silent');
+  }
+
+  /** The line is done: lock every syllable, and glow purple if all of them were perfect. */
+  private finishLine(row: HTMLElement): void {
+    let judged = 0, perfect = 0;
+    for (const entry of this.sylsByRow.get(row) ?? []) {
+      if (entry.midi === null) continue;
+      if (!this.locked.has(entry.el)) this.lockSyl(entry);
+      judged += 1;
+      if (this.verdicts.get(entry.el) === 'perfect') perfect += 1;
+    }
+    if (judged > 0 && perfect === judged) row.classList.add('linePerfect');
+  }
+
+  private resetPitch(): void {
+    for (const el of this.verdicts.keys()) {
+      const verdict = this.verdicts.get(el)!;
+      el.classList.remove('pitch-' + verdict);
+    }
+    this.verdicts = new Map();
+    this.locked = new Set();
+    this.finishedRows = new Set();
+    this.pitchOn = false;
+    this.pitchTime = NaN;
+    this.list.querySelectorAll('.linePerfect').forEach(row => row.classList.remove('linePerfect'));
+  }
+
+  /** Live pitch layer: paint the current line's words from the mic, lock each word as it passes. */
+  private updatePitch(time: number, row: HTMLElement, sung: number | null | undefined): void {
+    if (sung === undefined) {
+      if (this.pitchOn) this.resetPitch();
+      return;
+    }
+    this.pitchOn = true;
+    if (time < this.pitchTime - 0.5) this.resetPitch();   // jumped back: fresh slate
+    this.pitchTime = time;
+    for (const entry of this.sylsByRow.get(row) ?? []) {
+      if (entry.midi === null || this.locked.has(entry.el)) continue;
+      if (time > entry.end + 0.15) { this.lockSyl(entry); continue; }
+      if (time < entry.start - 0.1) continue;
+      this.setVerdict(entry.el, pitchVerdict(sung, entry.midi, time - entry.start));
+    }
+  }
+
+  /**
+   * Called every frame while the Karaoke view is showing. `sung` is the live mic pitch
+   * (vibrato-centered, null when nothing is heard) — undefined when the mic is off, in which
+   * case no pitch colors are painted.
+   */
+  update(time: number, playing: boolean, sung?: number | null): void {
     // Silent count-in: the dots over the coming line light up on the beats before it.
     for (const cue of this.cueRows) {
       const showing = time >= cue.dots[0] - 1.5 && time < cue.entry + 0.2;
@@ -93,16 +229,31 @@ export class Karaoke {
     if (index < 0) index = lines.length - 1;
     const row = rows[index];
     if (row !== this.current) {
+      if (this.current) {
+        this.finishLine(this.current);
+        this.finishedRows.add(this.current);
+      }
       rows.forEach((node, i) => node.classList.toggle('past', i < index));
       this.current?.querySelectorAll('.syl').forEach(node => node.classList.remove('now'));
       this.current = row;
     }
-    // Light up the words of the current line as they're sung.
+    // Light up the words of the current line as they're sung (snapped to the vocal's note onsets).
     row.querySelectorAll<HTMLElement>('.syl').forEach(node => {
-      const start = Number(node.dataset.s), end = Number(node.dataset.e);
+      const entry = this.byEl.get(node);
+      const start = entry?.start ?? Number(node.dataset.s);
+      const end = entry?.end ?? Number(node.dataset.e);
       node.classList.toggle('sung', time >= start);
       node.classList.toggle('now', time >= start && time < end + 0.05);
     });
+    this.updatePitch(time, row, sung);
+    // The last line never triggers a line change: finish it once every word is judged.
+    if (!this.finishedRows.has(row)) {
+      const entries = this.sylsByRow.get(row) ?? [];
+      if (entries.length && entries.every(entry => entry.midi === null || this.locked.has(entry.el))) {
+        this.finishLine(row);
+        this.finishedRows.add(row);
+      }
+    }
     // Stopped: follow only when the position changes, so the list can be browsed.
     if (performance.now() < this.handScrollUntil || this.holdScroll || (!playing && time === this.lastTime)) return;
     this.lastTime = time;
