@@ -39,7 +39,7 @@ export interface SongAnalysis {
   /** Tempo, beat grid and meter (for the silent count-in dots); null = no clear beat. Found once, then saved. */
   beat?: Beat | null;
   /** Duet: which voice you sing (the lower or the higher), plus lines you reassigned by hand. */
-  duet?: { mine: 'low' | 'high'; overrides: Record<string, 'me' | 'partner'> };
+  duet?: { mine: 'low' | 'high'; overrides: Record<string, 'me' | 'partner'>; names?: { me: string; partner: string } };
   /** What speech recognition actually heard, with timing — typed/fixed lyrics borrow their timing from it. */
   heard?: TimedWord[];
   /** The lyrics as you pasted, typed or found them. Redo lyrics keeps these words and only re-times them. */
@@ -855,6 +855,22 @@ export function relabel(sections: Section[]): Section[] {
   });
 }
 
+/**
+ * Consecutive sections of the same kind are one musical idea the block detector split apart
+ * (e.g. thirteen unrepeated blocks each labeled "verse"): fold them into the first section,
+ * extending its end. Sections of the same kind separated by anything else
+ * (Verse 1 … Chorus … Verse 2) are never merged.
+ */
+function mergeConsecutive(sections: Section[]): Section[] {
+  const merged: Section[] = [];
+  for (const section of sections) {
+    const last = merged[merged.length - 1];
+    if (last && last.kind === section.kind) last.end = Math.max(last.end, section.end);
+    else merged.push({ ...section });
+  }
+  return merged;
+}
+
 /** Finds intro / verse / pre-chorus / chorus / bridge / outro from lyric lines, gaps and repetition. */
 /**
  * Sections straight from the section tags in the lyrics. A tag like [Chorus] starts its section just
@@ -899,7 +915,7 @@ function sectionsFromTags(lines: LyricLine[], duration: number): Section[] | nul
 export function buildSections(lines: LyricLine[], notes: NoteEvent[], duration: number, hasLyrics: boolean): Section[] {
   // Lyrics that name their own sections ([Verse 1], [Chorus]…) are the best guide there is.
   const tagged = sectionsFromTags(lines, duration);
-  if (tagged) return tagged;
+  if (tagged) return relabel(mergeConsecutive(tagged));
   if (!lines.length) return [{ id: sectionId(), kind: 'verse', label: 'Whole song', start: 0, end: duration }];
 
   let blocks: Block[] = [];
@@ -995,5 +1011,5 @@ export function buildSections(lines: LyricLine[], notes: NoteEvent[], duration: 
   if (duration - last.end >= 5) sections.push({ id: sectionId(), kind: 'outro', label: '', start: last.end, end: duration });
   else last.end = duration;
 
-  return relabel(sections);
+  return relabel(mergeConsecutive(sections));
 }

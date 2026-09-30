@@ -83,8 +83,18 @@ export class Player {
   constructor(private buffers: SongBuffers) {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
     const gain = () => { const node = this.ctx.createGain(); node.connect(this.ctx.destination); return node; };
-    this.gains = { lead: gain(), music: gain(), voice: gain() };
+    this.gains = { lead: gain(), music: this.ctx.createGain(), voice: gain() };
     this.partnerLead = gain();
+    // Bass/treble EQ for the background track: music gain -> bass shelf -> treble shelf -> speakers.
+    this.eqBass = this.ctx.createBiquadFilter();
+    this.eqBass.type = 'lowshelf';
+    this.eqBass.frequency.value = 200;
+    this.eqTreble = this.ctx.createBiquadFilter();
+    this.eqTreble.type = 'highshelf';
+    this.eqTreble.frequency.value = 3000;
+    this.gains.music.connect(this.eqBass);
+    this.eqBass.connect(this.eqTreble);
+    this.eqTreble.connect(this.ctx.destination);
     // Silent taps for the level meters: the artist (both singer paths) and the music.
     const tap = (...sources: AudioNode[]) => {
       const analyser = this.ctx.createAnalyser();
@@ -97,6 +107,9 @@ export class Player {
 
   private taps: { artist: AnalyserNode; music: AnalyserNode };
   private tapBuffer = new Float32Array(1024);
+  /** Bass/treble shelves on the background track (the music meter taps pre-EQ, so it still shows the track's level). */
+  private eqBass: BiquadFilterNode;
+  private eqTreble: BiquadFilterNode;
 
   /** How loud the artist or the music is right now, 0..1 (for the level meters). */
   level(which: 'artist' | 'music'): number {
@@ -111,6 +124,14 @@ export class Player {
     const gain = this.gains[stem].gain;
     gain.cancelScheduledValues(this.ctx.currentTime);   // a change planned ahead (see handOver) gives way
     gain.setTargetAtTime(Math.max(0, value), this.ctx.currentTime, 0.02);
+  }
+
+  /** Bass/treble EQ on the background track, in dB (±12). Smooth, so it can move while playing. */
+  setEQ(bassDb: number, trebleDb: number): void {
+    const clamp = (db: number) => Math.max(-12, Math.min(12, db));
+    const t = this.ctx.currentTime;
+    this.eqBass.gain.setTargetAtTime(clamp(bassDb), t, 0.02);
+    this.eqTreble.gain.setTargetAtTime(clamp(trebleDb), t, 0.02);
   }
 
   /** Plays `stem` at full level until clock time `at`, then fades it out (50 ms): the artist hands over to you. */

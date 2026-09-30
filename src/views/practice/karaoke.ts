@@ -41,6 +41,10 @@ export interface KaraokeState {
   scores: Map<string, number> | null;
   /** Duet: who sings each line (absent = not a duet). */
   singer: ((line: LyricLine) => 'me' | 'partner') | null;
+  /** Duet: the singers' names (absent = not a duet; defaults to You/Them). */
+  singerNames?: { me: string; partner: string } | null;
+  /** Tap a line's score: show coaching for the whole section that line is in. */
+  onSectionCoach?: (sectionId: string) => void;
   /** Picking lines: the first line tapped. */
   anchor: LyricLine | null;
   /** Silent count-in dots before lines (beat times). */
@@ -81,6 +85,7 @@ export class Karaoke {
   private finishedRows = new Set<HTMLElement>();
   private pitchOn = false;
   private pitchTime = NaN;
+  private sectionCoach: ((sectionId: string) => void) | undefined;
 
   constructor(
     private list: HTMLElement,
@@ -94,6 +99,8 @@ export class Karaoke {
       const row = target.closest<HTMLElement>('[data-line]');
       const line = row && this.analysis.lines.find(item => item.id === row.dataset.line);
       if (!line) return;
+      const coach = target.closest<HTMLElement>('[data-coach]');
+      if (coach?.dataset.coach && this.sectionCoach) { this.sectionCoach(coach.dataset.coach); return; }
       if (target.closest('.who')) this.handlers.toggleSinger(line);
       else this.handlers.tap(line);
     });
@@ -102,6 +109,7 @@ export class Karaoke {
   render(state: KaraokeState): void {
     this.current = null;
     this.lastTime = NaN;
+    this.sectionCoach = state.onSectionCoach;
     let lastSection: string | null = null;
     this.list.innerHTML = this.analysis.lines.map(line => {
       const section = this.analysis.sections.find(item => line.start >= item.start && line.start < item.end);
@@ -110,6 +118,7 @@ export class Karaoke {
       const score = state.scores?.get(line.id);
       const kept = state.building?.kept.get(line.id);
       const who = line.words.every(word => word.aside) ? undefined : state.singer?.(line);
+      const names = state.singerNames ?? { me: 'You', partner: 'Them' };
       const classes = ['lyricLine',
         state.inSelection(line.start + 0.01) ? '' : 'outside',
         state.anchor?.id === line.id ? 'anchor' : '',
@@ -121,8 +130,8 @@ export class Karaoke {
       return header + `<div class="${classes}" data-line="${line.id}" role="button" tabindex="0">
         ${state.cues.has(line.id) ? `<span class="cueDots" aria-hidden="true">${'<i></i>'.repeat(state.cues.get(line.id)!.length)}</span>` : ''}
         <span class="lineText">${syllablesHtml(line)}</span>
-        ${who ? `<button class="who" title="Tap to switch who sings this line">${who === 'me' ? 'You' : 'Them'}</button>` : ''}
-        ${score === undefined ? '' : `<span class="lineScore">${score}%</span>`}
+        ${who ? `<button class="who" title="Tap to switch who sings this line — now ${escapeHtml(who === 'me' ? names.me : names.partner)}">${escapeHtml(who === 'me' ? names.me : names.partner)}</button>` : ''}
+        ${score === undefined ? '' : `<button class="lineScore" data-coach="${section?.id ?? ''}" title="How this section went — tap for coaching" type="button">${score}%</button>`}
         ${kept === undefined ? '' : `<span class="keptScore" title="Kept for your song">✓ ${kept}%</span>`}</div>`;
     }).join('') || '<p class="empty">No sung lines were found.</p>';
     this.cueRows = [...state.cues.entries()].flatMap(([id, dots]) => {

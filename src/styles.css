@@ -346,6 +346,13 @@ input[type='range'] { accent-color: var(--accent); }
 .hideNotes .syl .hy { display: none; }
 .hideNotes .syl i { display: none; }
 .lineScore { font-weight: 800; font-size: 0.9rem; }
+button.lineScore { appearance: none; background: none; border: none; padding: 2px 6px; margin: 0; cursor: pointer; border-radius: 6px; color: inherit; font: inherit; }
+button.lineScore:focus-visible { outline: 2px solid var(--accent); }
+/* Section coaching popup (tap a karaoke line's %) */
+.coachScore { font-size: 1.4rem; margin: 0 0 8px; }
+.coachScore strong { font-size: 2rem; }
+#coachBody h3 { margin: 12px 0 4px; font-size: 0.95rem; }
+#coachBody ul { margin: 0 0 4px; padding-left: 20px; display: grid; gap: 4px; }
 /* [Bracketed] text is a direction, not lyrics: small, italic, on a soft background, never lit as sung. */
 .word.aside { align-self: center; padding: 0 0.4em; border-radius: 6px; font-size: 0.55em; font-style: italic; font-weight: 600; color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
 .lyricLine.asideLine { cursor: default; padding-block: 2px; }
@@ -574,13 +581,24 @@ input[type='range'] { accent-color: var(--accent); }
 .micCheck .mcMsg.warn { color: var(--close); }
 .micCheck select { max-width: 100%; }
 
-/* Level meters in the controls: your mic, the artist, the music */
+/* Level meters in the controls: your mic, the artist, the music — each opens its panel */
 .meters { display: inline-flex; align-items: stretch; gap: 2px; height: 24px; margin: 0 4px; }
-.meters i { position: relative; width: 4px; background: var(--border); overflow: hidden; }
-.meters i::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 0%); background: var(--good); }
-.meters i[data-meter="mic"]::after { background: var(--voice); }
-.meters i[data-meter="artist"]::after { background: var(--accent-2); }
-.meters i[data-meter="music"]::after { background: var(--accent); }
+.meter { appearance: none; background: none; border: none; margin: 0; padding: 2px 4px; cursor: pointer; display: flex; align-items: stretch; justify-content: center; border-radius: 4px; }
+.meter:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.meter i { position: relative; width: 4px; background: var(--border); overflow: hidden; }
+.meter i::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: var(--lvl, 0%); background: var(--good); }
+.meter i[data-meter="mic"]::after { background: var(--voice); }
+.meter i[data-meter="artist"]::after { background: var(--accent-2); }
+.meter i[data-meter="music"]::after { background: var(--accent); }
+/* The Voices dialog: Mic / Singer / Music tabs */
+.vtabs { display: flex; gap: 4px; margin-bottom: 12px; }
+.vtab { flex: 1; padding: 8px 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--muted); font-weight: 700; cursor: pointer; }
+.vtab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.vpane { display: grid; gap: 10px; }
+.vpane h3 { margin: 6px 0 0; font-size: 0.95rem; }
+.vrow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.vrow .textInput { min-width: 0; }
+.lyricLine .who { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Sync check, in the Mic check */
 .micCheck .mcSync { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .micCheck .mcSyncState { margin: 0; }

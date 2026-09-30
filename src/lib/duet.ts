@@ -37,9 +37,17 @@ export function lineVoices(lines: LyricLine[], notes: NoteEvent[]): Map<string, 
   return voices;
 }
 
+/** The two singers' names for this song's duet (editable, saved per song). Defaults: Singer One (you), Singer Two (partner). */
+export function duetNames(analysis: SongAnalysis): { me: string; partner: string } {
+  const names = analysis.duet?.names;
+  return {
+    me: names?.me?.trim() || 'Singer One',
+    partner: names?.partner?.trim() || 'Singer Two'
+  };
+}
+
 /** Who sings each line in this song's duet, or null when it isn't set up as a duet. */
-export function duetParts(analysis: SongAnalysis): Map<string, Part> | null {
-  const duet = analysis.duet;
+export function duetParts(analysis: SongAnalysis): Map<string, Part> | null {  const duet = analysis.duet;
   if (!duet) return null;
   const voices = lineVoices(analysis.lines, analysis.notes);
   const parts = new Map<string, Part>();
