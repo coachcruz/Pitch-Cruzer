@@ -9,6 +9,8 @@ export interface StoredSong {
   createdAt: number;
   analysis: SongAnalysis;
   stems: { lead: Blob; backing?: Blob; instrumental?: Blob };
+  /** A YouTube video id kept as a reference video (listening only — never downloaded or separated). */
+  referenceVideoId?: string;
 }
 
 export interface StoredTake {

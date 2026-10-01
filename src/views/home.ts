@@ -45,6 +45,10 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     <details class="pasteWrap"><summary>Have the lyrics? Paste them <small>(for any song — a file, a recording, YouTube or Suno)</small></summary>
       <textarea id="pasteLyrics" rows="5" placeholder="One sung line per line — they’re matched to the singer automatically. You can paste them before or after picking the song, while it’s being prepared."></textarea>
     </details>
+    <details class="pasteWrap"><summary>Reference video <small>(optional — a YouTube link to watch while you practice)</small></summary>
+      <div class="row wrap"><input id="refLink" class="textInput" type="url" placeholder="Paste a YouTube link" aria-label="Reference video link" autocomplete="off"><span id="refLinkState" class="hint small"></span></div>
+      <p class="hint small">For listening only — it never becomes the song. Upload your own audio file above for stem separation.</p>
+    </details>
     <div class="sources" role="radiogroup" aria-label="Where to get the song">
       ${SOURCES.map(source => `<button type="button" role="radio" data-source="${source.id}" aria-checked="false" title="${escapeHtml(source.hint)}">${source.label}</button>`).join('')}
       <label class="srcFile" title="A song file on this device — bought/downloaded from Spotify, Apple Music, Amazon… (MP3, WAV, M4A, FLAC, video). Or drop it on this card.">📁 Upload a file
@@ -110,6 +114,16 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
   const lyricsLang = el<HTMLSelectElement>(root, '#lyricsLang');
   lyricsLang.value = prefs.get('lyricsLang', 'auto');
   lyricsLang.addEventListener('change', () => prefs.set('lyricsLang', lyricsLang.value));
+  /** A YouTube link pasted as a reference video (listening only): validated here, kept with the song being added. */
+  let refVideoId: string | null = null;
+  const refLink = el<HTMLInputElement>(root, '#refLink');
+  const refLinkState = el(root, '#refLinkState');
+  refLink.addEventListener('input', () => {
+    const value = refLink.value.trim();
+    if (!value) { refVideoId = null; refLinkState.textContent = ''; return; }
+    refVideoId = youtubeId(value);
+    refLinkState.textContent = refVideoId ? '✓ Looks good — it’ll be kept with the song.' : 'That doesn’t look like a YouTube link.';
+  });
   /** The song's name (typed, or the video's title) — names the song and finds its real lyrics. */
   let songTitle = '';
   const lyricsSource = (input: SongInput): LyricsSource => {
@@ -222,6 +236,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       if (abort.signal.aborted || disposed) return;
       const song = prepared.song;
       if (songTitle && input.kind !== 'link') song.title = songTitle;
+      if (refVideoId) song.referenceVideoId = refVideoId;
       const unnamed = !songTitle && !prepared.named;
       session.song = song;
       session.buffers = prepared.buffers;
@@ -244,6 +259,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       pasteLyrics.value = '';
       searchInput.value = '';
       songTitle = '';
+      refLink.value = '';
+      refLinkState.textContent = '';
+      refVideoId = null;
       navigate('#/song/' + song.id);
     } catch (error) {
       if (disposed) return;
