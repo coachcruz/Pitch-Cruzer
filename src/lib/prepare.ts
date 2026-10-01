@@ -139,7 +139,7 @@ async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: Lyri
   if (await serverTranscriptionAvailable()) {
     try {
       diag('Lyrics: using the server model (Whisper Large v3 Turbo)');
-      return { words: await transcribeOnServer(buffer, notes, options, onProgress), partial: false };
+      return { words: await transcribeOnServer(buffer, notes, options, onProgress, prompt), partial: false };
     } catch (error) {
       diag('Server lyrics failed (' + (error instanceof Error ? error.message : String(error)) + ') — using the in-browser model', 'warn');
     }
