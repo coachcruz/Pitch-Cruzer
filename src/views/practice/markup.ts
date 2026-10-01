@@ -130,6 +130,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
           <button id="voicesMic2Btn" class="btn small" type="button">Add second mic</button>
         </div>
         <p id="voicesMic2State" class="hint small"></p>
+        <p id="iosMicModeHint" class="hint small" hidden>iPhone: Mic Mode must be <strong>Standard</strong> — Voice Isolation ducks the music. While the mic is on: Control Center → Mic Mode → Standard.</p>
         <div class="mixRow">
           <label for="mixMonitor">Hear my mic</label>
           <input id="mixMonitor" type="range" min="0" max="100" step="1">

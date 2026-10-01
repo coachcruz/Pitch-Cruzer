@@ -40,7 +40,20 @@ export function announceMic(mic: LiveMic): void {
 /** Playing through speakers (not headphones): the mic then cancels the music's echo. */
 export const onSpeakers = (): boolean => prefs.get('speakers', false);
 
-const isMac = () => /Mac/.test(navigator.platform || navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent);
+const isMac = () => typeof navigator !== 'undefined'
+  && /Mac/.test(navigator.platform || navigator.userAgent) && !/iPhone|iPad/.test(navigator.userAgent);
+
+/**
+ * iPhone/iPad: Mic Mode lives in Control Center and a web page can't change it — so the app
+ * says out loud that it must be Standard (Voice Isolation ducks the music). iPadOS reports a
+ * Mac user agent, hence the touch check.
+ */
+export const isIOS = (): boolean => {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod/.test(ua)) return true;
+  return /Mac/.test(ua) && navigator.maxTouchPoints > 1;
+};
 
 /** Why the mic couldn't start, in plain words, with what to do about it. */
 export function micErrorMessage(error: unknown): string {
