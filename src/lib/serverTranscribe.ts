@@ -87,11 +87,14 @@ function sungWords(result: ServerResult, offset: number, notes: NoteEvent[], lan
 
 /**
  * Transcribes the lead vocal on the server. Throws if the server model is unavailable or fails, so
- * the caller can fall back to the in-browser model.
+ * the caller can fall back to the in-browser model. `prompt` is a reattempt's previous words:
+ * Whisper's initial prompt, so the second listen is guided by the first. The old worry (Whisper
+ * writing hint text out as if sung) is handled below: `sungWords` keeps only words that line up
+ * with detected notes, so prompt echo in intros, solos and silence is dropped.
  */
 export async function transcribeOnServer(
   buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions,
-  onProgress: (fraction: number, detail: string) => void
+  onProgress: (fraction: number, detail: string) => void, prompt?: string
 ): Promise<TimedWord[]> {
   const audio = await resampleMono(buffer, RATE);
   const parts = pieces(notes, buffer.duration);
@@ -109,8 +112,11 @@ export async function transcribeOnServer(
     const mp3 = await encodeMp3([samples], RATE, 48);
     const query = new URLSearchParams();
     if (lang) query.set('lang', lang);
-    // No prompt/hint: Whisper tends to write hint text out as if it were sung (in intros, solos, silence).
-    // Short pieces mean more requests: wait (as long as the service asks) and retry if it says "too many" or hiccups.
+    // A reattempt's previous words ride along as Whisper's initial prompt (the API takes ~224
+    // tokens; ~800 chars stays inside that). Short pieces mean more requests: wait (as long as
+    // the service asks) and retry if it says "too many" or hiccups.
+    const hint = prompt?.trim().slice(0, 800);
+    if (hint) query.set('prompt', hint);
     const response = await fetchWithRetry(() => apiFetch('/api/transcribe?' + query.toString(), {
       method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
     }), { backoffMs: [4000, 12000, 20000], maxWaitMs: 65000 });

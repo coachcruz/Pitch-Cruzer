@@ -9,7 +9,9 @@ import { gate } from '../lib/gate.mts';
  * audio. Needs GROQ_API_KEY; without it the app falls back to the in-browser model.
  *
  * GET  → { available }             (is the server model set up?)
- * POST → audio/mpeg body (≤ 4 MB), ?lang=xx (optional)
+ * POST → audio/mpeg body (≤ 4 MB), ?lang=xx (optional), ?prompt=… (optional: a reattempt's
+ *        previous words, passed to Whisper as its initial prompt so the second listen is
+ *        guided by the first)
  *      ← { language, words: [{ text, start, end }], segments: [{ start, end, noSpeech, logProb }] }
  */
 const GROQ_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -43,6 +45,10 @@ export default async (req: Request) => {
   form.append('temperature', '0');
   const lang = params.get('lang');
   if (lang && /^[a-z]{2}$/.test(lang)) form.append('language', lang);
+  // A lyrics reattempt's previous words: Whisper's initial prompt, guiding the second listen
+  // toward what the first missed. (Kept short; the API takes about 224 tokens of prompt.)
+  const hint = (params.get('prompt') ?? '').trim().slice(0, 800);
+  if (hint) form.append('prompt', hint);
 
   const response = await groqFetch(() => fetch(GROQ_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + key }, body: form }), 4000);
   if (!response) return json({ error: 'The transcription service could not be reached.' }, 502);
