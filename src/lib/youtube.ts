@@ -23,7 +23,8 @@ export async function searchYouTube(query: string): Promise<VideoResult[]> {
 }
 
 /** The video id in any YouTube link (watch, youtu.be, shorts, embed, music.youtube.com), or null. */
-export function youtubeId(value: string): string | null {  try {
+export function youtubeId(value: string): string | null {
+  try {
     const url = new URL(value.trim());
     const host = url.hostname.replace(/^(www|m|music)\./, '');
     if (host === 'youtu.be') return url.pathname.slice(1, 12) || null;
