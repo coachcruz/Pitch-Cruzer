@@ -507,6 +507,9 @@ button.lineScore:focus-visible { outline: 2px solid var(--accent); }
 .videoStage { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: start; padding: 12px; border-radius: 12px; background: var(--surface-2); }
 .videoHost { aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #000; }
 .videoHost iframe, .videoHost > div { width: 100%; height: 100%; border: 0; display: block; }
+/* Reference video (practice ⋯ menu): privacy-enhanced embed, listening only. */
+.refEmbed { aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: #000; margin: 8px 0; }
+.refEmbed iframe { width: 100%; height: 100%; border: 0; display: block; }
 .videoTitle { display: block; font-size: 1rem; }
 .videoSide .recordRow { margin-top: 10px; }
 .videoSide .vu { margin-top: 10px; }

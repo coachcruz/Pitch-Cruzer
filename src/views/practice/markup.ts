@@ -38,6 +38,7 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
           <button id="redoLyrics" class="menuItem" role="menuitem">Redo lyrics (listen again)</button>
           <button id="renameSections" class="menuItem" role="menuitem">Rename sections</button>
           <button id="renameSong" class="menuItem" role="menuitem">Rename song</button>
+          <button id="refVideo" class="menuItem" role="menuitem">📺 Reference video</button>
           <button id="downloadSong" class="menuItem" role="menuitem">Download song file</button>
           <button id="saveSong" class="menuItem ${session.saved ? 'hidden' : ''}" role="menuitem">Try saving on this device again</button>
           <label class="menuItem check small"><input id="showNotes" type="checkbox"> Notes over the karaoke words</label>
@@ -196,8 +197,20 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
       <div class="row end"><button id="coachDone" class="btn primary" type="button">Done</button></div>
     </dialog>
 
-    <dialog id="detailsDialog" class="dialog wide" aria-label="Details">
-      <h2>What happened</h2>
+    <dialog id="refDialog" class="dialog wide" aria-label="Reference video">
+      <h2>Reference video</h2>
+      <p class="hint small"><b>For listening only</b> — it’s never downloaded or separated. Your song still comes from the audio file you uploaded.</p>
+      <div id="refEmbed" class="refEmbed"></div>
+      <div class="row wrap"><input id="refInput" class="textInput" type="url" placeholder="Paste a YouTube link" aria-label="Reference video link" autocomplete="off"></div>
+      <p id="refMsg" class="hint small"></p>
+      <div class="row end">
+        <button id="refRemove" class="btn danger" type="button">Remove</button>
+        <button id="refSave" class="btn primary" type="button">Save link</button>
+        <button id="refClose" class="btn ghost" type="button">Close</button>
+      </div>
+    </dialog>
+
+    <dialog id="detailsDialog" class="dialog wide" aria-label="Details">      <h2>What happened</h2>
       <p class="hint small">Step by step: preparing this song and writing its lyrics. Copy it and send it along if something went wrong.</p>
       <ol id="detailsLog" class="diagLog"></ol>
       <div class="row end"><button id="detailsCopy" class="btn">Copy details</button><button id="detailsClose" class="btn ghost">Close</button></div>

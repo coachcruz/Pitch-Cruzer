@@ -24,6 +24,7 @@ import { announceMic, chosenMic, micErrorMessage, onSpeakers, rawMic } from '../
 import { mountMicCheck } from '../../ui/micCheck';
 import { roundTrip } from '../../lib/sync';
 import { sectionCoaching } from '../../lib/score';
+import { referenceEmbedUrl, youtubeId } from '../../lib/youtube';
 import { lineText, safeName } from './text';
 
 const KIND_ORDER: SectionKind[] = ['intro', 'verse', 'pre', 'chorus', 'bridge', 'instrumental', 'outro'];
@@ -311,6 +312,32 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     song.title = name;
     $('#songTitle').textContent = name;
     void persist();
+  });
+  // ------------------------------------------------ reference video (listening only)
+  const refDialog = $<HTMLDialogElement>('#refDialog');
+  const renderRefVideo = () => {
+    const id = song.referenceVideoId;
+    $('#refEmbed').innerHTML = id
+      ? `<iframe src="${referenceEmbedUrl(id)}" title="Reference video (listening only)" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>`
+      : '<p class="hint small">No reference video yet — paste a YouTube link below.</p>';
+    $<HTMLInputElement>('#refInput').value = id ? 'https://www.youtube.com/watch?v=' + id : '';
+    $('#refMsg').textContent = '';
+    $('#refRemove').classList.toggle('hidden', !id);
+  };
+  $('#refVideo').addEventListener('click', () => { renderRefVideo(); refDialog.showModal(); });
+  $('#refClose').addEventListener('click', () => refDialog.close());
+  $('#refSave').addEventListener('click', () => {
+    const id = youtubeId($<HTMLInputElement>('#refInput').value);
+    if (!id) { $('#refMsg').textContent = 'That doesn’t look like a YouTube link.'; return; }
+    song.referenceVideoId = id;
+    void persist();
+    renderRefVideo();
+    toast('Reference video saved with this song.');
+  });
+  $('#refRemove').addEventListener('click', () => {
+    delete song.referenceVideoId;
+    void persist();
+    renderRefVideo();
   });
   $('#downloadSong').addEventListener('click', async () => downloadBlob(await exportSong(song), safeName(song.title) + '.pitchcruzer'));
   $('#saveSong').addEventListener('click', async () => {

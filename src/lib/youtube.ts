@@ -50,6 +50,16 @@ export function cleanSongTitle(title: string): string {
     .trim();
 }
 
+/**
+ * Privacy-enhanced embed URL for a reference video: YouTube's no-cookie player, no autoplay,
+ * and no related videos from other channels (rel=0). The id is validated to YouTube's 11-char
+ * format first, so it interpolates safely. Reference-only: the app never downloads from it.
+ */
+export function referenceEmbedUrl(videoId: string): string {
+  if (!/^[\w-]{11}$/.test(videoId)) throw new Error('Not a YouTube video id.');
+  return 'https://www.youtube-nocookie.com/embed/' + videoId + '?rel=0';
+}
+
 // ---------------------------------------------------------------- embedded player (IFrame Player API)
 
 interface YTPlayer {

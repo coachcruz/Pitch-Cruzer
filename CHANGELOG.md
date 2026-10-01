@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-01 — YouTube reference video (reference-only)
+
+- **Reference video (listening only).** The Add-a-song card has an optional "Reference video"
+  field: paste any YouTube link (watch, youtu.be, shorts, embed) and it's validated on the spot.
+  The link is kept with the song and can be watched from the practice screen's ⋯ menu, in
+  YouTube's privacy-enhanced player (no cookies, no autoplay, no related videos).
+- **It never becomes the song.** The video is for listening only — nothing is downloaded from
+  YouTube and it never goes through stem separation. The song still comes from the audio file
+  you upload. The link can be changed or removed anytime from the same ⋯ menu dialog.
+- New `tests/youtube.test.ts`: link parsing across all URL formats plus the embed-URL builder.
+
 ## 2026-09-30 — Take playback, count-in dots, and Redo-lyrics reattempt fixes
 
 Three reported defects fixed:
