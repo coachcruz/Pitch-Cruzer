@@ -1,7 +1,7 @@
 import { LiveMic, listMics } from '../lib/mic';
 import { midiToNote } from '../lib/music';
 import { escapeHtml, prefs } from './dom';
-import { chosenMic, micErrorMessage, micWarning, onSpeakers, rawMic, silentMicMessage } from './micSetup';
+import { chosenMic, isIOS, micErrorMessage, micWarning, onSpeakers, rawMic, silentMicMessage } from './micSetup';
 import { measureRoundTrip, saveSync, savedSync } from '../lib/sync';
 
 /**
@@ -29,6 +29,7 @@ export function mountMicCheck(host: HTMLElement, changed: () => void = () => und
       <p class="mcMsg hint small">Sing or hum a note: you should see the bar move and your note appear.</p>
       <label class="inline">Microphone <select data-mc="input"><option value="">Automatic (the device picks)</option></select></label>
       <label class="check small"><input type="checkbox" data-mc="raw"> Singing mic <small>(ask the device for no filters like Voice Isolation — they squash singing)</small></label>
+      ${isIOS() ? '<p class="hint small">iPhone: Mic Mode must be <strong>Standard</strong> — Voice Isolation ducks the music. While the mic is on: Control Center → Mic Mode → Standard.</p>' : ''}
       <label class="check small"><input type="checkbox" data-mc="speakers"> I’m on speakers, not headphones <small>(headphones give the cleanest takes)</small></label>
       <div class="mcSync">
         <button class="btn" data-mc="sync">⏱ Sync check</button>

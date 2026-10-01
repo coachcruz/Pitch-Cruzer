@@ -20,7 +20,7 @@ import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
-import { announceMic, chosenMic, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
+import { announceMic, chosenMic, isIOS, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
 import { mountMicCheck } from '../../ui/micCheck';
 import { roundTrip } from '../../lib/sync';
 import { sectionCoaching } from '../../lib/score';
@@ -753,6 +753,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     showVTab(tab);
     renderVoicesMic();
     renderMic2();
+    // iPhone/iPad only: Mic Mode lives in Control Center, so the app states the requirement here.
+    $('#iosMicModeHint')?.toggleAttribute('hidden', !isIOS());
     void fillMicSelect(micSelect, chosenMic(), 'Automatic (the device picks)');
     void fillMicSelect(mic2Select, prefs.get<MicChoice | null>('micInput2', null), 'Pick a mic…');
     voicesDialog.showModal();
