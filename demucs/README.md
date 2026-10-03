@@ -11,3 +11,4 @@ Deploys automatically via GitHub Actions on push to `main`.
 Secrets (`MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `PC_API_KEY`) live in the
 repo's Actions secrets.
 
+Deploy retry after billing unlock.
