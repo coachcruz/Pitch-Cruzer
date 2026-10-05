@@ -16,7 +16,7 @@ const serverBody = {
 };
 
 let lastUrl = '';
-const fakeFetch = vi.fn(async (url: string) =>
+const fakeFetch = vi.fn(async (_url: string) =>
   new Response(JSON.stringify(serverBody), { status: 200, headers: { 'content-type': 'application/json' } }));
 fakeFetch.mockImplementation(async (url: string) => {
   lastUrl = url;

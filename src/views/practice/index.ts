@@ -20,7 +20,7 @@ import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
-import { announceMic, chosenMic, isIOS, micErrorMessage, rawMic } from '../../ui/micSetup';
+import { announceMic, chosenMic, isIOS, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
 import { mountMicCheck } from '../../ui/micCheck';
 import { roundTrip } from '../../lib/sync';
 import { sectionCoaching } from '../../lib/score';
@@ -693,7 +693,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   // The mic settings (which mic, headphones or speakers, no phone filters) live in one place: ⚙ → Mic check.
   const enableMic = async (): Promise<boolean> => {
     try {
-      await mic.start(chosenMic(), rawMic());
+      await mic.start(onSpeakers(), chosenMic(), rawMic());
       mic.setMonitor(levels.monitor / 100);
       const second = prefs.get<MicChoice | null>('micInput2', null);
       if (second && !mic.secondActive) await mic.addSecondMic(second).catch(() => undefined);

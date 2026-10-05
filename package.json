@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "check": "tsc --noEmit -p . && vitest run"
+    "typecheck": "tsc --noEmit -p .",
+    "typecheck:functions": "tsc -p netlify",
+    "check": "npm run typecheck && npm run typecheck:functions && npm run test"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",
