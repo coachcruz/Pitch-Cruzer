@@ -1,4 +1,4 @@
-import { buildLines, parseSyncedLyrics, buildSections, buildWord, keyAndRange, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
+import { buildLines, parseSyncedLyrics, buildSections, rebaseToNoteRuns, keyAndRange, BINDING_VERSION, NOTES_VERSION, segmentNotes, type LyricsOptions, type NoteEvent, type PitchTrack, type SongAnalysis } from './analysis';
 import { pickLyrics, writeLyrics, type FoundLyrics, type LyricsCandidate, type LyricsResult, type LyricsServices } from './lyrics';
 import { decodeAudio, resampleMono } from './audio';
 import { formatTime } from './music';
@@ -258,7 +258,7 @@ export async function analyzeLead(lead: AudioBuffer, separated: boolean, lyrics:
   const lines = buildLines([], notes);
   const analysis: SongAnalysis = {
     duration: lead.duration, key, range, notes, lines, sections: buildSections(lines, notes, lead.duration, false),
-    transcript: 'none', separated, notesVersion: NOTES_VERSION, lyricsPending: true, lyricsOptions: lyrics
+    transcript: 'none', separated, notesVersion: NOTES_VERSION, bindingVersion: BINDING_VERSION, lyricsPending: true, lyricsOptions: lyrics
   };
   const lyricsJob = async () => {
     progress('lyrics', 0);
@@ -283,7 +283,9 @@ export const LYRICS_DONE: Record<LyricsResult['source'], string> = {
 
 /**
  * Re-detects the notes of an already prepared song (after note detection improves), keeping its
- * lyrics, timing and sections. Runs locally from the saved vocal — no LALAL.AI minutes.
+ * lyrics and sections. Every syllable's time and pitch is re-derived from the new notes — the old
+ * guessed-time bindings don't survive a new note detection. Runs locally from the saved vocal —
+ * no LALAL.AI minutes.
  */
 export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): Promise<void> {
   const track = await pitchTrackFor(lead, undefined, analysis.separated);
@@ -292,11 +294,9 @@ export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): P
   analysis.notes = notes;
   analysis.key = key;
   analysis.range = range;
-  analysis.lines = analysis.lines.map(line => ({
-    ...line,
-    words: line.words.map(word => word.text === '♪' || word.aside ? word : buildWord(word.text, word.start, word.end, notes, word.lang))
-  }));
+  rebaseToNoteRuns(analysis.lines, analysis.notes);
   analysis.notesVersion = NOTES_VERSION;
+  analysis.bindingVersion = BINDING_VERSION;
 }
 
 export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal, lyricsSource: LyricsSource = {}): Promise<PreparedSong> {

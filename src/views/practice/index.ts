@@ -1,4 +1,4 @@
-import { alignSyncedLyrics, applyTypedLyrics, buildLines, lyricBreaths, buildSections, NOTES_VERSION, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
+import { alignSyncedLyrics, applyTypedLyrics, buildLines, lyricBreaths, buildSections, BINDING_VERSION, NOTES_VERSION, rebaseToNoteRuns, relabel, SECTION_NAMES, type LyricLine, type SectionKind } from '../../lib/analysis';
 import { decodeAudio, downloadBlob } from '../../lib/audio';
 import { diagEntries, onDiag } from '../../lib/diag';
 import { beatNeedsEstimate, countInCues, estimateBeat } from '../../lib/beat';
@@ -20,7 +20,7 @@ import { Karaoke } from './karaoke';
 import { practiceMarkup } from './markup';
 import { TakeReview, type Review } from './review';
 import { SongBuilder } from './builder';
-import { announceMic, chosenMic, isIOS, micErrorMessage, onSpeakers, rawMic } from '../../ui/micSetup';
+import { announceMic, chosenMic, isIOS, micErrorMessage, rawMic } from '../../ui/micSetup';
 import { mountMicCheck } from '../../ui/micCheck';
 import { roundTrip } from '../../lib/sync';
 import { sectionCoaching } from '../../lib/score';
@@ -55,6 +55,17 @@ export function renderPractice(root: HTMLElement, songId: string): () => void {
       const notesOnly = !song.analysis.lines.some(line => line.words.some(word => word.text !== '♪'));
       await recheckNotes(buffers.lead, song.analysis);
       if (notesOnly) song.analysis.lines = buildLines([], song.analysis.notes);
+      if (session.saved) await saveSong(song).catch(() => undefined);
+    }
+    if ((song.analysis.bindingVersion ?? 0) < BINDING_VERSION) {
+      // Bound before the note-run rework: every syllable's time and pitch is re-derived from the
+      // measured notes (the old bindings trusted transcription timestamps). Line ids, word order
+      // and duet overrides are untouched; sections are rebuilt from the rebound lines.
+      root.innerHTML = '<div class="card loading">Re-binding this song’s lyrics to its notes…</div>';
+      rebaseToNoteRuns(song.analysis.lines, song.analysis.notes);
+      song.analysis.sections = buildSections(song.analysis.lines, song.analysis.notes, song.analysis.duration,
+        song.analysis.lines.some(line => line.words.some(word => word.text !== '♪')));
+      song.analysis.bindingVersion = BINDING_VERSION;
       if (session.saved) await saveSong(song).catch(() => undefined);
     }
     // Songs saved by older versions could have generic "Part 1, Part 2…" sections: give them real names.
@@ -682,7 +693,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   // The mic settings (which mic, headphones or speakers, no phone filters) live in one place: ⚙ → Mic check.
   const enableMic = async (): Promise<boolean> => {
     try {
-      await mic.start(onSpeakers(), chosenMic(), rawMic());
+      await mic.start(chosenMic(), rawMic());
       mic.setMonitor(levels.monitor / 100);
       const second = prefs.get<MicChoice | null>('micInput2', null);
       if (second && !mic.secondActive) await mic.addSecondMic(second).catch(() => undefined);
@@ -950,7 +961,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     review.close();
     closeSettings();
     await startPlayback(true);
-    toast(onSpeakers() ? 'Recording — sing along!' : 'Recording — sing along! (Headphones give the cleanest take.)');
+    toast('Recording — sing along! (Headphones give the cleanest take.)');
   });
 
   const finishRecording = async () => {
@@ -1121,7 +1132,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
 
     if (view === 'staff') lane.draw(now);
-    else karaoke.update(now, playing, mic.active ? sung : undefined);
+    else karaoke.update(now, playing, mic.active ? sung : undefined, forgiveOctave.checked);
     builder?.update(now);
     showLevels(micLevel);
     updateUpNext(now);
