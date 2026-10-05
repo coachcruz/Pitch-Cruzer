@@ -58,7 +58,7 @@ describe('song builder: joining kept lines', () => {
 describe('song builder: what it says after a line', () => {
   const score = (partial: Partial<TakeScore>): TakeScore => ({
     score: 60, onPitchWhenSinging: 60, coverage: 90, meanCents: 0, steadiness: 70,
-    vibrato: {} as TakeScore['vibrato'], lines: [], trail: [], ...partial
+    vibrato: {} as TakeScore['vibrato'], lines: [], trail: [], words: [], ...partial
   });
 
   it('praises a line that earns it', () => {
