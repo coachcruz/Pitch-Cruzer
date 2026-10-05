@@ -1,4 +1,5 @@
 import type { LyricLine, NoteEvent, PitchTrack, Section, Word } from './analysis';
+import { noteAt } from './analysis';
 import { encodeWav } from './audio';
 import { foldToOctave } from './music';
 import { splitByRanges, type Range, type Timeline } from './player';
@@ -20,17 +21,6 @@ export interface TakeScore {
   /** Only words with at least 3 voiced frames and a measurable error. */
   words: WordScore[];
   trail: Array<{ t: number; midi: number }>;
-}
-
-function noteAt(notes: NoteEvent[], time: number): NoteEvent | null {
-  let lo = 0, hi = notes.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (time < notes[mid].start) hi = mid - 1;
-    else if (time >= notes[mid].end) lo = mid + 1;
-    else return notes[mid];
-  }
-  return null;
 }
 
 /** The sung (non-aside) word sounding at `time`, if any. */
