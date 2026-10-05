@@ -420,26 +420,44 @@ export function syllablesFromRun(wordText: string, run: NoteEvent[], lang?: stri
 }
 
 /**
- * Gives unvoiced syllables (NaN times from `syllablesFromRun`) their times: interpolated between
- * the nearest voiced neighbors, clamped to the neighbor at the edges.
+ * Gives unvoiced syllables (NaN times from `syllablesFromRun`) their times. A syllable the
+ * binding left without notes is still sung — on a neighbor's note (several syllables on one
+ * note) — so edge groups split the neighboring voiced syllable's span proportionally by text
+ * length and inherit its pitch: every sung syllable lights up in its turn instead of piling
+ * up as a zero-width flash at the line's edge. A group between two voiced neighbors is a
+ * breath-like gap: interpolated between them, pitchless.
  */
 function fillSyllableTimes(syllables: Syllable[]): void {
+  const weight = (s: Syllable) => Math.max(1, s.text.length);
+  const share = (voiced: Syllable, sharers: Syllable[], fromFront: boolean) => {
+    // Split the voiced span across [voiced, ...sharers] (or [...sharers, voiced]) in order.
+    const group = fromFront ? [...sharers, voiced] : [voiced, ...sharers];
+    const total = group.reduce((sum, s) => sum + weight(s), 0);
+    const span = Math.max(0.01, voiced.end - voiced.start);
+    let cursor = voiced.start;
+    for (const s of group) {
+      const w = (span * weight(s)) / total;
+      s.start = cursor;
+      s.end = cursor + w;
+      cursor += w;
+    }
+    // Sharers ride the voiced syllable's note.
+    for (const s of sharers) { s.midi = voiced.midi; s.notes = [...voiced.notes]; }
+  };
   let pending: number[] = [];
   const flush = (before: Syllable | null, after: Syllable | null) => {
     if (!pending.length) return;
+    const group = pending.map(index => syllables[index]);
     if (before && after) {
       const step = (after.start - before.end) / (pending.length + 1);
-      pending.forEach((index, k) => {
-        const s = syllables[index];
+      group.forEach((s, k) => {
         s.start = before.end + step * (k + 1);
         s.end = Math.max(s.start, before.end + step * (k + 2) - 0.01);
       });
     } else if (after) {
-      // Leading: clamp to the first voiced start.
-      pending.forEach(index => { const s = syllables[index]; s.start = after.start; s.end = after.start; });
+      share(after, group, true);    // leading: split the following voiced span
     } else if (before) {
-      // Trailing: clamp to the last voiced end.
-      pending.forEach(index => { const s = syllables[index]; s.start = before.end; s.end = before.end; });
+      share(before, group, false);  // trailing: split the preceding voiced span
     }
     pending = [];
   };

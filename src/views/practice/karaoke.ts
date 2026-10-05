@@ -28,6 +28,17 @@ export function pitchVerdict(sung: number | null, expected: number, intoWord: nu
 }
 
 /**
+ * Sung syllables begin with a consonant transition (~30–120 ms) before the pitch stabilizes,
+ * but note onsets mark stable pitch. The lyric highlight fires at the acoustic onset — a fixed
+ * perceptual lead — so words light up as they're sung, not a consonant late. Grading is
+ * untouched: it reads the pitch, which starts at the note.
+ */
+export const HIGHLIGHT_LEAD = 0.07;
+
+/** The moment a syllable's highlight fires: its note onset pulled back to the acoustic onset. */
+export function highlightStart(start: number): number { return start - HIGHLIGHT_LEAD; }
+
+/**
  * Safety net for the word highlight: syllable starts are note onsets by construction now —
  * every syllable is bound to a run of the measured notes — so this usually changes nothing. It
  * stays for songs bound by older versions and odd cases, pulling the highlight to a nearby onset
@@ -260,10 +271,11 @@ export class Karaoke {
       this.current?.querySelectorAll('.syl').forEach(node => node.classList.remove('now'));
       this.current = row;
     }
-    // Light up the words of the current line as they're sung (snapped to the vocal's note onsets).
+    // Light up the words of the current line as they're sung (snapped to the vocal's note onsets,
+    // firing at the acoustic onset via the highlight lead).
     row.querySelectorAll<HTMLElement>('.syl').forEach(node => {
       const entry = this.byEl.get(node);
-      const start = entry?.start ?? Number(node.dataset.s);
+      const start = highlightStart(entry?.start ?? Number(node.dataset.s));
       const end = entry?.end ?? Number(node.dataset.e);
       node.classList.toggle('sung', time >= start);
       node.classList.toggle('now', time >= start && time < end + 0.05);

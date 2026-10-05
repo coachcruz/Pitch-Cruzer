@@ -156,15 +156,18 @@ describe('bindSyllables', () => {
 });
 
 describe('unvoiced interpolation', () => {
-  it('trailing unvoiced syllables clamp to the last voiced end', () => {
+  it('trailing unvoiced syllables share the last note instead of flashing at its end', () => {
     const lines = buildLines([{ text: 'banana', start: 5, end: 6 }], [
       { start: 0.0, end: 0.3, midi: 60 },
       { start: 0.3, end: 0.6, midi: 62 },
     ]);
     const word = lines[0].words[0];
-    expect(word.syllables[2].midi).toBeNull();
-    expect(word.syllables[2].start).toBeCloseTo(0.6, 6);
-    expect(word.syllables[2].end).toBeCloseTo(0.6, 6);
+    const last = word.syllables[2];
+    // A real span inside the shared note — not a zero-width point at 0.6.
+    expect(last.end - last.start).toBeGreaterThan(0.05);
+    expect(last.end).toBeCloseTo(0.6, 6);
+    // It rides the shared note's pitch, so it gets judged instead of skipped.
+    expect(last.midi).toBe(62);
     expect(word.end).toBeCloseTo(0.6, 6);
     // …and the word no longer sits at the guessed time.
     expect(word.start).toBeCloseTo(0.0, 6);
@@ -242,5 +245,51 @@ describe('pitchVerdict flexible octave', () => {
   it('a wrong note class is never perfect, even when forgiving', () => {
     expect(pitchVerdict(62, 60, 0.5, true)).not.toBe('perfect');
     expect(pitchVerdict(60.2, 60, 0.5, true)).toBe('perfect');
+  });
+});
+
+describe('unvoiced syllables share the neighbor note', () => {
+  const notes: NoteEvent[] = [
+    { start: 13.10, end: 13.40, midi: 60 },
+    { start: 13.40, end: 13.70, midi: 62 },
+    { start: 13.70, end: 14.20, midi: 64 },
+    { start: 14.20, end: 14.90, midi: 62 },
+  ];
+  const heard = [
+    { text: 'I', start: 0, end: 0.1 },
+    { text: 'was', start: 0, end: 0.1 },
+    { text: 'lonesome', start: 0, end: 0.1 },
+  ];
+
+  it('a trailing syllable with no note splits the previous note instead of flashing at the end', () => {
+    const lines = buildLines(heard as any, notes);
+    const sylls = lines.flatMap(l => l.words.flatMap(w => w.syllables));
+    const some = sylls.find(s => s.text === 'some')!;
+    const ne = sylls.find(s => s.text === 'ne')!;
+    // Not a zero-width point at the line's end: a real span inside the shared note.
+    expect(some.end - some.start).toBeGreaterThan(0.2);
+    expect(some.start).toBeGreaterThanOrEqual(ne.start);
+    expect(some.end).toBeCloseTo(14.9, 6);
+    // It rides the shared note's pitch, so it gets judged instead of skipped.
+    expect(some.midi).toBe(62);
+    expect(ne.end).toBeCloseTo(some.start, 6);
+  });
+
+  it('every syllable still lands on the measured notes in order', () => {
+    const lines = buildLines(heard as any, notes);
+    const sylls = lines.flatMap(l => l.words.flatMap(w => w.syllables));
+    for (let k = 1; k < sylls.length; k += 1) {
+      expect(sylls[k].start).toBeGreaterThanOrEqual(sylls[k - 1].start);
+    }
+    expect(sylls[0].start).toBeCloseTo(13.1, 6);
+  });
+});
+
+describe('highlight lead', () => {
+  it('fires the highlight at the acoustic onset, ahead of the pitch onset', async () => {
+    const { highlightStart, HIGHLIGHT_LEAD } = await import('../src/views/practice/karaoke');
+    expect(HIGHLIGHT_LEAD).toBeGreaterThan(0);
+    expect(HIGHLIGHT_LEAD).toBeLessThan(0.15);
+    expect(highlightStart(10.0)).toBeCloseTo(10.0 - HIGHLIGHT_LEAD, 9);
   });
 });
