@@ -11,10 +11,16 @@ export type PitchVerdict = 'perfect' | 'blue' | 'red' | 'silent';
  * the take scoring uses. Blue means the pitch class is right but the octave isn't, or it's close
  * but not quite there. Red is a different note altogether. Silent is no voice heard over the word.
  * Returns null inside a short grace at the word's attack, so late entries aren't punished instantly.
+ *
+ * With `flexibleOctave` (the "Forgive octave" setting), the sung pitch is folded into the
+ * expected octave *before* the perfect check — exactly as take scoring does — so the live colors
+ * and the take score are two displays of the same comparison. Without it, the right pitch class
+ * in the wrong octave reads blue, as before.
  */
-export function pitchVerdict(sung: number | null, expected: number, intoWord: number): PitchVerdict | null {
+export function pitchVerdict(sung: number | null, expected: number, intoWord: number, flexibleOctave = false): PitchVerdict | null {
   if (sung === null) return intoWord >= 0.15 ? 'silent' : null;
-  const err = Math.abs(sung - expected);
+  const compared = flexibleOctave ? foldToOctave(sung, expected) : sung;
+  const err = Math.abs(compared - expected);
   if (err <= 0.5) return 'perfect';
   if (Math.abs(foldToOctave(sung, expected) - expected) <= 0.5) return 'blue';
   if (err <= 1.0) return 'blue';
@@ -22,9 +28,10 @@ export function pitchVerdict(sung: number | null, expected: number, intoWord: nu
 }
 
 /**
- * Whisper's word starts can lag or lead the actual vocal by ~100–200 ms. The detected note
- * onsets are the ground truth of when the voice starts: pull the word's highlight moment to the
- * nearest onset when one is close, so the lyrics light up with the singer, not the transcript.
+ * Safety net for the word highlight: syllable starts are note onsets by construction now —
+ * every syllable is bound to a run of the measured notes — so this usually changes nothing. It
+ * stays for songs bound by older versions and odd cases, pulling the highlight to a nearby onset
+ * when one is close so the lyrics light up with the singer.
  */
 export function snapToNoteOnset(start: number, end: number, notes: NoteEvent[]): number {
   let best = start, bestDist = 0.25;
@@ -203,7 +210,7 @@ export class Karaoke {
   }
 
   /** Live pitch layer: paint the current line's words from the mic, lock each word as it passes. */
-  private updatePitch(time: number, row: HTMLElement, sung: number | null | undefined): void {
+  private updatePitch(time: number, row: HTMLElement, sung: number | null | undefined, flexibleOctave: boolean): void {
     if (sung === undefined) {
       if (this.pitchOn) this.resetPitch();
       return;
@@ -221,16 +228,17 @@ export class Karaoke {
       // the wrong note in here and grade a right note wrong.
       const target = noteAt(this.analysis.notes, time);
       if (!target) continue;
-      this.setVerdict(entry.el, pitchVerdict(sung, target.midi, time - entry.start));
+      this.setVerdict(entry.el, pitchVerdict(sung, target.midi, time - entry.start, flexibleOctave));
     }
   }
 
   /**
    * Called every frame while the Karaoke view is showing. `sung` is the live mic pitch
    * (vibrato-centered, null when nothing is heard) — undefined when the mic is off, in which
-   * case no pitch colors are painted.
+   * case no pitch colors are painted. `flexibleOctave` is the "Forgive octave" setting, so the
+   * live colors match take scoring.
    */
-  update(time: number, playing: boolean, sung?: number | null): void {
+  update(time: number, playing: boolean, sung?: number | null, flexibleOctave = false): void {
     // Silent count-in: the dots over the coming line light up on the beats before it.
     for (const cue of this.cueRows) {
       const showing = time >= cue.dots[0] - 1.5 && time < cue.entry + 0.2;
@@ -260,7 +268,7 @@ export class Karaoke {
       node.classList.toggle('sung', time >= start);
       node.classList.toggle('now', time >= start && time < end + 0.05);
     });
-    this.updatePitch(time, row, sung);
+    this.updatePitch(time, row, sung, flexibleOctave);
     // The last line never triggers a line change: finish it once every word is judged.
     if (!this.finishedRows.has(row)) {
       const entries = this.sylsByRow.get(row) ?? [];

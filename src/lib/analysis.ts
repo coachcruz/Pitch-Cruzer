@@ -23,9 +23,19 @@ export interface Section { id: string; kind: SectionKind; label: string; start: 
 /** Bump when note detection changes, so saved songs re-check their notes when opened. */
 export const NOTES_VERSION = 3;   // 3: fewer notes read an octave low (tenor, alto, soprano)
 
+/**
+ * Bump when the lyric↔pitch binding changes, so saved songs re-derive every syllable's time and
+ * pitch from the measured notes when opened. Version 1 is the note-run rework: no lyric timestamp
+ * is the authority for any word/syllable time or pitch — each syllable is bound to a run of the
+ * artist's NoteEvents and its start/end/midi are derived from that run.
+ */
+export const BINDING_VERSION = 1;
+
 export interface SongAnalysis {
   duration: number;
   notesVersion?: number;
+  /** Which lyric↔pitch binding built these lines (see BINDING_VERSION). */
+  bindingVersion?: number;
   key: MusicalKey | null;
   range: [number, number] | null;
   notes: NoteEvent[];
@@ -40,9 +50,13 @@ export interface SongAnalysis {
   beat?: Beat | null;
   /** Duet: which voice you sing (the lower or the higher), plus lines you reassigned by hand. */
   duet?: { mine: 'low' | 'high'; overrides: Record<string, 'me' | 'partner'>; names?: { me: string; partner: string } };
-  /** What speech recognition actually heard, with timing — typed/fixed lyrics borrow their timing from it. */
+  /**
+   * What speech recognition actually heard: raw word observations in sung order. The timestamps
+   * are never used as timing — every word is bound to the measured notes structurally, and only
+   * the text (and order) of what was heard matters.
+   */
   heard?: TimedWord[];
-  /** The lyrics as you pasted, typed or found them. Redo lyrics keeps these words and only re-times them. */
+  /** The lyrics as you pasted, typed or found them. Redo lyrics keeps these words and re-binds them to the notes. */
   typed?: string;
 }
 
@@ -287,16 +301,6 @@ function overlapping(notes: NoteEvent[], start: number, end: number): NoteEvent[
   return notes.filter(note => note.end > start && note.start < end);
 }
 
-function dominantMidi(notes: NoteEvent[], start: number, end: number): number | null {
-  let best: NoteEvent | null = null;
-  let bestOverlap = 0;
-  for (const note of notes) {
-    const overlap = Math.min(end, note.end) - Math.max(start, note.start);
-    if (overlap > bestOverlap) { bestOverlap = overlap; best = note; }
-  }
-  return best ? best.midi : null;
-}
-
 function distinctRounded(notes: NoteEvent[]): number[] {
   const out: number[] = [];
   for (const note of notes) {
@@ -306,34 +310,186 @@ function distinctRounded(notes: NoteEvent[]): number[] {
   return out.slice(0, 6);
 }
 
-export function buildWord(text: string, start: number, end: number, notes: NoteEvent[], lang?: string): Word {
-  const parts = syllabify(text);
-  const inside = overlapping(notes, start, end);
-  const syllables: Syllable[] = [];
+// ---------------------------------------------------------------- note-run binding
+//
+// The foundation: no lyric timestamp is ever the authority for a word/syllable time or pitch.
+// Transcription timestamps are guesses (off ~100–200 ms); the measured notes are not. So every
+// syllable is bound to a run of the artist's NoteEvents, and its start/end/midi are derived from
+// that run. The guess may supply the word sequence (what was heard, in what order) — never timing.
 
-  if (inside.length >= parts.length && parts.length > 1) {
-    // Enough sung notes: give each syllable its own run of notes.
-    parts.forEach((part, k) => {
-      const from = Math.floor((k * inside.length) / parts.length);
-      const to = Math.max(from + 1, Math.floor(((k + 1) * inside.length) / parts.length));
-      const slice = inside.slice(from, to);
-      const s = k === 0 ? start : Math.max(start, slice[0].start);
-      const e = k === parts.length - 1 ? end : Math.min(end, slice[slice.length - 1].end);
-      syllables.push({ text: part, start: s, end: Math.max(e, s + 0.02), midi: dominantMidi(slice, s, e), notes: distinctRounded(slice) });
-    });
-  } else {
-    // Otherwise split the word's time by syllable length.
-    const weights = parts.map(part => Math.max(1, part.length));
-    const total = weights.reduce((a, b) => a + b, 0);
-    let cursor = start;
-    parts.forEach((part, k) => {
-      const e = k === parts.length - 1 ? end : cursor + ((end - start) * weights[k]) / total;
-      const slice = overlapping(inside, cursor, e);
-      syllables.push({ text: part, start: cursor, end: e, midi: dominantMidi(slice, cursor, e), notes: distinctRounded(slice) });
-      cursor = e;
-    });
+const MAX_RUN_NOTES = 12;   // longest melisma run one syllable may hold
+const GAP_LIMIT = 0.5;      // a syllable's run may never span an inter-note gap this long
+
+/**
+ * Binds a flat syllable sequence to the note sequence, monotonic, by dynamic programming.
+ * Returns one note run per syllable (a slice of `notes`; possibly empty). Deterministic.
+ *
+ * Costs: a syllable taking no notes costs 1.2 (worse than absorbing extra notes), with an
+ * infinitesimal −1e-9 × index so the *later* syllables go unvoiced first when notes are scarce
+ * (matching `syllablesFromRun`: the first parts get the notes); a skipped note (ad-lib, hum)
+ * costs 0.3; a run of n > 1 notes costs (n−1) × 0.6 minus a stress bonus of 0.55 × (the run's
+ * longest note / the input's longest note), so melisma runs prefer to sit on the longer —
+ * usually stressed — notes. Exact ties go to the later syllable (−1e-9 × index): runs live on
+ * stressed syllables (Ten-nes-SEE), which is what the tie-break encodes.
+ */
+export function bindSyllables(syllables: Array<{ text: string }>, notes: NoteEvent[]): NoteEvent[][] {
+  const S = syllables.length, N = notes.length;
+  const empty: NoteEvent[][] = Array.from({ length: S }, () => []);
+  if (!S || !N) return empty;
+  const dur = notes.map(note => Math.max(0, note.end - note.start));
+  const longestInput = Math.max(0, ...dur);
+  // gapBad[m] = 1 when the gap between note m and m+1 reaches GAP_LIMIT; prefix sums make the
+  // "no run spans a long gap" check O(1).
+  const gapPrefix = new Array(N + 1).fill(0);
+  for (let m = 0; m + 1 < N; m += 1) gapPrefix[m + 1] = gapPrefix[m] + (notes[m + 1].start - notes[m].end >= GAP_LIMIT ? 1 : 0);
+  gapPrefix[N] = gapPrefix[N - 1];
+  const spanOk = (from: number, to: number) => gapPrefix[to - 1] - gapPrefix[from] === 0;  // run = notes[from..to)
+
+  const cost: number[][] = Array.from({ length: S + 1 }, () => new Array(N + 1).fill(Infinity));
+  const prev: Array<Array<{ pi: number; pj: number; from: number; to: number } | null>> =
+    Array.from({ length: S + 1 }, () => new Array(N + 1).fill(null));
+  const relax = (i: number, j: number, pi: number, pj: number, from: number, to: number, value: number) => {
+    if (value < cost[i][j]) { cost[i][j] = value; prev[i][j] = { pi, pj, from, to }; }
+  };
+  cost[0][0] = 0;
+  for (let i = 0; i <= S; i += 1) {
+    for (let j = 0; j <= N; j += 1) {
+      const here = cost[i][j];
+      if (!Number.isFinite(here)) continue;
+      // Skip note j: it belongs to no syllable.
+      if (j < N) relax(i, j + 1, i, j, -1, -1, here + 0.3);
+      if (i < S) {
+        // Syllable i takes no notes (ties go to the later syllables: the first parts keep the notes).
+        relax(i + 1, j, i, j, j, j, here + 1.2 - 1e-9 * i);
+        // Syllable i takes a run of n notes (gaps only widen a violation, so stop at the first).
+        // A single note costs nothing; the length penalty, stress bonus and tie-break only
+        // shape multi-note (melisma) runs.
+        for (let n = 1; n <= MAX_RUN_NOTES && j + n <= N; n += 1) {
+          if (!spanOk(j, j + n)) break;
+          let longest = 0;
+          for (let m = j; m < j + n; m += 1) longest = Math.max(longest, dur[m]);
+          const bonus = longestInput > 0 ? 0.55 * (longest / longestInput) : 0;
+          const extra = n > 1 ? (n - 1) * 0.6 - bonus - 1e-9 * i : 0;
+          relax(i + 1, j + n, i, j, j, j + n, here + extra);
+        }
+      }
+    }
   }
-  return { text, start, end, syllables, lang };
+  const ranges: Array<[number, number]> = new Array(S);
+  let i = S, j = N;
+  while (i > 0 || j > 0) {
+    const p = prev[i][j]!;
+    if (p.pi < i) ranges[p.pi] = [p.from, p.to];
+    i = p.pi; j = p.pj;
+  }
+  return ranges.map(([from, to]) => notes.slice(from, to));
+}
+
+/**
+ * Splits one word's note run across its syllables — the replacement for `buildWord`. Times and
+ * pitch come from the run alone; the word's guessed time window plays no part.
+ *
+ * - run.length ≥ parts.length: one note per part, and ALL surplus notes join the part sung on
+ *   the longest baseline note (tie → the later part) — the melisma sits on the stressed
+ *   syllable (Ten-nes-SEE).
+ * - run.length < parts.length (or empty): the first notes go to the first parts in order; the
+ *   rest are unvoiced — start/end NaN (the caller interpolates them between voiced neighbors),
+ *   midi null, notes [].
+ * Each voiced syllable spans its sub-run; its midi is the sub-run's longest note (tie → first).
+ */
+export function syllablesFromRun(wordText: string, run: NoteEvent[], lang?: string): Syllable[] {
+  // `lang` is reserved: syllabification is language-agnostic today, but per-word language will
+  // matter if that ever changes — kept in the signature so callers don't have to change later.
+  void lang;
+  const parts = syllabify(wordText);
+  const voiced = (text: string, sub: NoteEvent[]): Syllable => {
+    let best = sub[0];
+    for (const note of sub) if (note.end - note.start > best.end - best.start) best = note;
+    return { text, start: sub[0].start, end: sub[sub.length - 1].end, midi: best.midi, notes: distinctRounded(sub) };
+  };
+  if (run.length >= parts.length) {
+    let host = 0;
+    for (let k = 1; k < parts.length; k += 1) {
+      if (run[k].end - run[k].start >= run[host].end - run[host].start) host = k;
+    }
+    return parts.map((part, k) => voiced(part, k === host ? [run[k], ...run.slice(parts.length)] : [run[k]]));
+  }
+  return parts.map((part, k) => k < run.length
+    ? voiced(part, [run[k]])
+    : { text: part, start: NaN, end: NaN, midi: null, notes: [] });
+}
+
+/**
+ * Gives unvoiced syllables (NaN times from `syllablesFromRun`) their times: interpolated between
+ * the nearest voiced neighbors, clamped to the neighbor at the edges.
+ */
+function fillSyllableTimes(syllables: Syllable[]): void {
+  let pending: number[] = [];
+  const flush = (before: Syllable | null, after: Syllable | null) => {
+    if (!pending.length) return;
+    if (before && after) {
+      const step = (after.start - before.end) / (pending.length + 1);
+      pending.forEach((index, k) => {
+        const s = syllables[index];
+        s.start = before.end + step * (k + 1);
+        s.end = Math.max(s.start, before.end + step * (k + 2) - 0.01);
+      });
+    } else if (after) {
+      // Leading: clamp to the first voiced start.
+      pending.forEach(index => { const s = syllables[index]; s.start = after.start; s.end = after.start; });
+    } else if (before) {
+      // Trailing: clamp to the last voiced end.
+      pending.forEach(index => { const s = syllables[index]; s.start = before.end; s.end = before.end; });
+    }
+    pending = [];
+  };
+  let before: Syllable | null = null;
+  syllables.forEach((s, index) => {
+    if (Number.isNaN(s.start)) pending.push(index);
+    else { flush(before, s); before = s; }
+  });
+  flush(before, null);
+}
+
+/** One Word from its note run (unvoiced syllables still need `fillSyllableTimes`). */
+function wordFromRun(text: string, run: NoteEvent[], lang?: string): Word {
+  return { text, start: NaN, end: NaN, syllables: syllablesFromRun(text, run, lang), lang };
+}
+
+/** After `fillSyllableTimes`, each word's window is its syllables' span. */
+function finishWordTimes(words: Word[]): void {
+  for (const word of words) {
+    if (!word.syllables.length) continue;
+    word.start = word.syllables[0].start;
+    word.end = word.syllables[word.syllables.length - 1].end;
+  }
+}
+
+/**
+ * One note run per word: the words' syllables are bound flat (see `bindSyllables`), then each
+ * word's syllable runs are joined into the word's run (a slice of `notes`). The shared core of
+ * the heard path and the typed path's heard-word binding.
+ */
+function bindWordRuns(texts: string[], notes: NoteEvent[]): NoteEvent[][] {
+  const counts: number[] = [];
+  const flat: Array<{ text: string }> = [];
+  texts.forEach(text => {
+    const parts = syllabify(text);
+    counts.push(parts.length);
+    parts.forEach(part => flat.push({ text: part }));
+  });
+  const runs = bindSyllables(flat, notes);
+  const out: NoteEvent[][] = [];
+  let k = 0;
+  counts.forEach(count => {
+    const wordRuns = runs.slice(k, k + count);
+    k += count;
+    const voicedRuns = wordRuns.filter(run => run.length);
+    if (!voicedRuns.length) { out.push([]); return; }
+    const first = voicedRuns[0][0], last = voicedRuns[voicedRuns.length - 1];
+    out.push(notes.slice(notes.indexOf(first), notes.indexOf(last[last.length - 1]) + 1));
+  });
+  return out;
 }
 
 // Chinese and Japanese are written without spaces: two such words sit side by side.
@@ -425,7 +581,32 @@ function linesFromNotes(notes: NoteEvent[]): LyricLine[] {
 
 export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] {
   if (!timed.length) return linesFromNotes(notes);
-  const words = timed.map(word => buildWord(word.text, word.start, word.end, notes, word.lang));
+  if (!notes.length) {
+    // Degenerate: note detection found no vocal at all, so there is no measured structure to
+    // bind to. The raw guess windows stand in — the only signal — so the words still have times.
+    const words = timed.map(word => {
+      const parts = syllabify(word.text);
+      const span = Math.max(0.01, word.end - word.start) / parts.length;
+      const syllables: Syllable[] = parts.map((part, k) => ({
+        text: part, start: word.start + span * k, end: word.start + span * (k + 1), midi: null, notes: []
+      }));
+      return { text: word.text, start: word.start, end: word.end, syllables, lang: word.lang };
+    });
+    return groupLines(words, new Set(), notes);
+  }
+  // The guess's times are ignored entirely: each heard word is a raw observation — its text in
+  // sung order. Syllables bind to runs of the measured notes (see `bindSyllables`), and every
+  // time and pitch below is derived from those runs. Shifting the input times changes nothing.
+  const runs = bindWordRuns(timed.map(word => word.text), notes);
+  const words: Word[] = [];
+  const flat: Syllable[] = [];
+  timed.forEach((word, i) => {
+    const built = wordFromRun(word.text, runs[i], word.lang);
+    words.push(built);
+    flat.push(...built.syllables);
+  });
+  fillSyllableTimes(flat);
+  finishWordTimes(words);
   return groupLines(words, new Set(), notes);
 }
 
@@ -449,9 +630,11 @@ const normalizeWord = (value: string) => value.toLowerCase().normalize('NFD').re
  * programming — a line takes one or more phrases (or two short lines share one) so that its syllable
  * count fits the phrase's note count; stray phrases (ad-libs, humming) can be skipped. Within a line,
  * syllables are laid on its notes in order (a syllable held over several notes is fine).
- * Returns [start, end] for every word, in order.
+ * Returns one entry per word, in order: its [start, end] (derived from its notes) plus
+ * `from`/`to`, the word's note run as indices into `notes` (`to` is inclusive; `to < from` means
+ * the word got no notes and stays unvoiced).
  */
-export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<[number, number]> {
+export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<{ start: number; end: number; from: number; to: number }> {
   const phrases: NoteEvent[][] = [];
   for (const note of notes) {
     const last = phrases[phrases.length - 1];
@@ -494,9 +677,10 @@ export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<[num
   let i = L, j = P;
   if (!Number.isFinite(cost[L][P])) {
     // Far more lines than sung phrases: share the sung stretch out evenly, word by word.
+    // No notes back these words — they stay unvoiced (from > to) for the caller to interpolate.
     const words = lines.flat().length;
     const from = notes[0]?.start ?? 0, span = Math.max(0.1, (notes[notes.length - 1]?.end ?? 0.3) - from);
-    return lines.flat().map((_, k) => [from + (span * k) / words, from + (span * (k + 0.9)) / words]);
+    return lines.flat().map((_, k) => ({ start: from + (span * k) / words, end: from + (span * (k + 0.9)) / words, from: 0, to: -1 }));
   }
   while (i > 0 || j > 0) {
     const back = step[i][j]!;
@@ -505,39 +689,44 @@ export function alignToMelody(lines: string[][], notes: NoteEvent[]): Array<[num
     i = back.i; j = back.j;
   }
 
-  const times: Array<[number, number]> = [];
+  const placed: Array<{ start: number; end: number; from: number; to: number }> = [];
   for (const group of assigned) {
     const groupNotes = phrases.slice(group.phrases[0], group.phrases[1]).flat();
     const counts = group.lines.flatMap(index => syllables[index]);
     const total = counts.reduce((a, b) => a + b, 0);
-    // Syllable k of the group → [start, end] on the notes.
-    const sylTime = (k: number): [number, number] => {
+    // `from`/`to` are indices into `notes`: the phrases partition the notes in order, so the
+    // group's notes are one contiguous slice of them.
+    const base = groupNotes.length ? notes.indexOf(groupNotes[0]) : 0;
+    // Syllable k of the group → its time and its note run.
+    const sylTime = (k: number): { start: number; end: number; from: number; to: number } => {
       const n = groupNotes.length;
+      if (!n) return { start: 0, end: 0.08, from: 0, to: -1 };
       if (n >= total) {
         const a = Math.floor((k * n) / total), b = Math.max(a, Math.floor(((k + 1) * n) / total) - 1);
-        return [groupNotes[a].start, groupNotes[b].end];
+        return { start: groupNotes[a].start, end: groupNotes[b].end, from: base + a, to: base + b };
       }
       // More syllables than notes: share the sung time out evenly, note by note.
       const spans = groupNotes.map(note => note.end - note.start);
       const sung = spans.reduce((a, b) => a + b, 0);
-      const at = (fraction: number) => {
+      const at = (fraction: number): { time: number; index: number } => {
         let left = fraction * sung;
         for (let x = 0; x < groupNotes.length; x += 1) {
-          if (left <= spans[x] || x === groupNotes.length - 1) return groupNotes[x].start + Math.min(left, spans[x]);
+          if (left <= spans[x] || x === groupNotes.length - 1) return { time: groupNotes[x].start + Math.min(left, spans[x]), index: base + x };
           left -= spans[x];
         }
-        return groupNotes[groupNotes.length - 1].end;
+        return { time: groupNotes[groupNotes.length - 1].end, index: base + groupNotes.length - 1 };
       };
-      return [at(k / total), at((k + 1) / total)];
+      const s0 = at(k / total), s1 = at((k + 1) / total);
+      return { start: s0.time, end: s1.time, from: s0.index, to: s1.index };
     };
     let k = 0;
     for (const count of counts) {
       const first = sylTime(k), last = sylTime(k + count - 1);
-      times.push([first[0], Math.max(last[1], first[0] + 0.08)]);
+      placed.push({ start: first.start, end: Math.max(last.end, first.start + 0.08), from: first.from, to: last.to });
       k += count;
     }
   }
-  return times;
+  return placed;
 }
 
 /**
@@ -612,9 +801,11 @@ function withAsides(tokens: LyricToken[], sung: Word[], fallback: number): Word[
 }
 
 /**
- * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to the
- * automatic transcript (edit-distance alignment) to keep timing, or to the melody when there is no
- * transcript; unmatched words are interpolated. [Bracketed] text is kept as asides, untimed.
+ * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to what was
+ * heard (edit-distance alignment, text only) and inherit the heard word's *note run* — never its
+ * timestamps. Unmatched words are laid on the singer's notes between their neighbours (see
+ * `alignToMelody`); with no hearing at all, on the melody alone. [Bracketed] text is kept as
+ * asides, untimed.
  */
 export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLine[] {
   const tokenLines = lyricTokens(text.split(/\n+/).map(line => line.trim()).filter(Boolean));
@@ -629,14 +820,80 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     typed.push(...sungWords);
   }
   if (!allTokens.length) return analysis.lines;
-  const filled = typed.length ? timeTypedWords(analysis, typed, hardBreaks) : [];
-  const sung = typed.map((word, index) => buildWord(word, filled[index][0], Math.max(filled[index][1], filled[index][0] + 0.08), analysis.notes));
-  const words = withAsides(allTokens, sung, 0);
+  const notes = analysis.notes;
+  if (!notes.length) {
+    // Degenerate: no vocal notes at all — words share the song out evenly, unvoiced.
+    const slot = Math.max(0.1, analysis.duration / Math.max(1, typed.length));
+    const words = typed.map((word, k) => ({
+      text: word, start: slot * k, end: slot * (k + 0.9),
+      syllables: syllabify(word).map(part => ({ text: part, start: slot * k, end: slot * (k + 0.9), midi: null, notes: [] as number[] }))
+    }));
+    const withA = withAsides(allTokens, words, 0);
+    const lineBreaks = new Set<number>();
+    let count = 0;
+    tokenLines.forEach(line => { if (line.length) lineBreaks.add(count); count += line.length; });
+    return groupLines(withA, lineBreaks);
+  }
+  // Absolute placement from the melody alone: typed lines laid on the singer's note phrases
+  // (see `alignToMelody`). No timestamps anywhere — heard or guessed.
+  const typedLines: string[][] = [];
+  for (let k = 0; k < typed.length; k += 1) {
+    if (k === 0 || hardBreaks.has(k)) typedLines.push([]);
+    typedLines[typedLines.length - 1].push(typed[k]);
+  }
+  const base = alignToMelody(typedLines, notes);
+  const runs: NoteEvent[][] = base.map(placed => placed.to >= placed.from ? notes.slice(placed.from, placed.to + 1) : []);
+  // The heard words are raw observations: their text and order, never their timestamps. A typed
+  // word that really matches a heard word inherits that heard word's note run — anchored by the
+  // structural placement above (a from-zero binding would let intro hallucinations shift every
+  // run), then refined by the actually-sung syllable stream within the line's note span.
+  // (Songs saved before `heard` existed fall back to their own words as the observation sequence.)
+  const heardTexts: string[] = analysis.heard?.length
+    ? analysis.heard.map(word => word.text)
+    : analysis.transcript === 'ok'
+      ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪' && !word.aside).map(word => word.text)
+      : [];
+  if (heardTexts.length) {
+    const pairs = matchHeardWords(typed, heardTexts.map(text => ({ text })));
+    // A handful of chance matches isn't a binding to trust.
+    if (pairs.length >= Math.max(3, typed.length * 0.1)) {
+      const typedToHeard = new Map<number, number>();
+      pairs.forEach(([i, j]) => typedToHeard.set(i, j));
+      let k = 0;
+      typedLines.forEach(line => {
+        const indices: number[] = [];
+        line.forEach(() => { indices.push(k); k += 1; });
+        const paired = indices.filter(i => typedToHeard.has(i));
+        if (!paired.length) return;
+        const jFirst = typedToHeard.get(paired[0])!;
+        const jLast = typedToHeard.get(paired[paired.length - 1])!;
+        const spanFrom = Math.min(...paired.map(i => base[i].from));
+        const spanTo = Math.max(...paired.map(i => base[i].to));
+        if (spanTo < spanFrom) return;
+        const spanNotes = notes.slice(spanFrom, spanTo + 1);
+        const heardRuns = bindWordRuns(heardTexts.slice(jFirst, jLast + 1), spanNotes);
+        paired.forEach(i => {
+          const run = heardRuns[typedToHeard.get(i)! - jFirst];
+          if (run.length) runs[i] = run;
+        });
+      });
+    }
+  }
+  const words: Word[] = [];
+  const flat: Syllable[] = [];
+  typed.forEach((word, i) => {
+    const built = wordFromRun(word, runs[i]);
+    words.push(built);
+    flat.push(...built.syllables);
+  });
+  fillSyllableTimes(flat);
+  finishWordTimes(words);
+  const withA = withAsides(allTokens, words, 0);
   // Every typed line (including a line that is only an aside) stays its own line.
   const lineBreaks = new Set<number>();
   let count = 0;
   tokenLines.forEach(line => { if (line.length) lineBreaks.add(count); count += line.length; });
-  return groupLines(words, lineBreaks);
+  return groupLines(withA, lineBreaks);
 }
 
 /** Levenshtein distance, stopping early once it's over `limit`. */
@@ -686,47 +943,6 @@ export function matchHeardWords(typed: string[], heard: Array<{ text: string }>)
   return pairs.filter(([i, j]) => normalizeWord(typed[i]).length > 3
     || (paired.has(i - 1) && pairs.some(([a, b]) => a === i - 1 && b === j - 1))
     || (paired.has(i + 1) && pairs.some(([a, b]) => a === i + 1 && b === j + 1)));
-}
-
-/**
- * [start, end] for each sung typed word (see applyTypedLyrics). Words the singer was heard singing
- * take that timing. Everything else is laid on the singer's notes between those words (by syllables
- * and breaths — see alignToMelody), so a verse the listening missed still lands on its own notes.
- */
-export function timeTypedWords(analysis: SongAnalysis, typed: string[], hardBreaks: Set<number>): Array<[number, number]> {
-  // Songs saved before `heard` existed use their automatic transcript if they have one.
-  const heard: Array<{ text: string; start: number; end: number }> = analysis.heard
-    ?? (analysis.transcript === 'ok' ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪' && !word.aside) : []);
-  const times: Array<[number, number] | null> = new Array(typed.length).fill(null);
-  const pairs = matchHeardWords(typed, heard);
-  // A handful of chance matches isn't timing to trust.
-  if (pairs.length >= Math.max(3, typed.length * 0.1)) for (const [i, j] of pairs) times[i] = [heard[j].start, heard[j].end];
-
-  // Fill each run of unplaced words from the notes between its neighbours.
-  const notes = analysis.notes;
-  for (let a = 0; a < typed.length;) {
-    if (times[a]) { a += 1; continue; }
-    let b = a;
-    while (b < typed.length && !times[b]) b += 1;
-    const from = a > 0 ? times[a - 1]![1] : 0;
-    const to = b < typed.length ? times[b]![0] : analysis.duration;
-    const inside = notes.filter(note => note.start >= from - 0.05 && note.end <= to + 0.05);
-    if (inside.length) {
-      // The run's words, split where the typed lines break.
-      const lines: string[][] = [];
-      for (let k = a; k < b; k += 1) {
-        if (k === a || hardBreaks.has(k)) lines.push([]);
-        lines[lines.length - 1].push(typed[k]);
-      }
-      alignToMelody(lines, inside).forEach((time, k) => { times[a + k] = time; });
-    } else {
-      // No singing there at all: share the gap out evenly.
-      const slot = Math.max(0.1, (to - from) / (b - a));
-      for (let k = a; k < b; k += 1) times[k] = [from + slot * (k - a), from + slot * (k - a + 0.9)];
-    }
-    a = b;
-  }
-  return times.map(time => time!);
 }
 
 /** One line of timed lyrics (from LRCLIB's "[mm:ss.xx] text" format). */
@@ -782,20 +998,86 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
     const end = inLine.length ? inLine[inLine.length - 1].end : Math.min(nextStart, start + texts.length * 0.45);
     hardBreaks.add(words.length);
     const sungWords = texts.map((text, k): Word => {
-      let from: number, to: number;
+      // Each word gets a run of the line's notes by count proportion — never a guessed time
+      // window. With fewer notes than words, the run is the notes overlapping the word's
+      // proportional span (possibly empty: the word stays unvoiced).
+      let run: NoteEvent[];
       if (inLine.length >= texts.length) {
         const a = Math.floor((k * inLine.length) / texts.length);
         const b = Math.max(a, Math.floor(((k + 1) * inLine.length) / texts.length) - 1);
-        from = inLine[a].start; to = inLine[b].end;
+        run = inLine.slice(a, b + 1);
       } else {
         const span = Math.max(0.2, end - start);
-        from = start + (span * k) / texts.length; to = start + (span * (k + 1)) / texts.length;
+        const from = start + (span * k) / texts.length, to = start + (span * (k + 1)) / texts.length;
+        run = notes.filter(note => note.end > from && note.start < to);
       }
-      return buildWord(text, Math.max(0, from), Math.max(to, from + 0.08), notes);
+      return wordFromRun(text, run);
     });
+    const flat: Syllable[] = sungWords.flatMap(word => word.syllables);
+    fillSyllableTimes(flat);
+    finishWordTimes(sungWords);
     words.push(...withAsides(tokens, sungWords, Math.max(0, start)));
   });
   return { lines: groupLines(words, hardBreaks), offset, fit };
+}
+
+// ---------------------------------------------------------------- old-song upgrade
+
+/**
+ * Re-derives every syllable's time and pitch from the measured notes, in place, for songs bound
+ * before the note-run rework (their syllables trusted transcription timestamps). Line ids, word
+ * order and text, asides and ♪ words are preserved — only times, midis and note lists change.
+ *
+ * Each line searches the notes near its old window (±0.35 s; the window is only a search
+ * neighborhood, never the authority), binds its sung syllables to that pool (see
+ * `bindSyllables`), and rewrites each syllable from its own run. A monotonic note cursor keeps
+ * lines from stealing each other's notes.
+ */
+export function rebaseToNoteRuns(lines: LyricLine[], notes: NoteEvent[]): void {
+  let cursor = 0;
+  for (const line of lines) {
+    const pool: NoteEvent[] = [];
+    let lastIdx = cursor;
+    for (let i = cursor; i < notes.length && notes[i].start < line.end + 0.35; i += 1) {
+      if (notes[i].end > line.start - 0.35) { pool.push(notes[i]); lastIdx = i; }
+    }
+    if (!pool.length) continue;   // no measured singing near this line: leave it as it was
+    cursor = lastIdx + 1;
+    const sung = line.words.filter(word => !word.aside && word.syllables.length);
+    const flat = sung.flatMap(word => word.syllables.map(text => ({ text: text.text })));
+    const runs = bindSyllables(flat, pool);
+    const rewritten: Syllable[] = [];
+    let k = 0;
+    for (const word of sung) {
+      for (const syllable of word.syllables) {
+        const run = runs[k++];
+        if (!run.length) {
+          syllable.start = NaN; syllable.end = NaN; syllable.midi = null; syllable.notes = [];
+        } else {
+          let best = run[0];
+          for (const note of run) if (note.end - note.start > best.end - best.start) best = note;
+          syllable.start = run[0].start;
+          syllable.end = run[run.length - 1].end;
+          syllable.midi = best.midi;
+          syllable.notes = distinctRounded(run);
+        }
+        rewritten.push(syllable);
+      }
+    }
+    fillSyllableTimes(rewritten);
+    for (const word of sung) {
+      word.start = word.syllables[0].start;
+      word.end = word.syllables[word.syllables.length - 1].end;
+    }
+    // Asides ride on the next sung word's new start (or keep their time when there is none).
+    line.words.forEach((word, wi) => {
+      if (!word.aside) return;
+      const next = line.words.slice(wi + 1).find(candidate => !candidate.aside);
+      if (next) { word.start = next.start; word.end = next.start; }
+    });
+    line.start = line.words[0].start;
+    line.end = line.words[line.words.length - 1].end;
+  }
 }
 
 // ---------------------------------------------------------------- sections

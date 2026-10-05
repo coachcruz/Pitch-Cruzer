@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pitchVerdict, snapToNoteOnset } from '../src/views/practice/karaoke';
-import { buildWord, noteAt, type NoteEvent } from '../src/lib/analysis';
+import { buildLines, noteAt, type NoteEvent } from '../src/lib/analysis';
 
 const notes = (starts: number[]): NoteEvent[] =>
   starts.map(start => ({ start, end: start + 0.4, midi: 60 }));
@@ -76,26 +76,35 @@ describe('noteAt', () => {
 });
 
 describe('live verdict follows the sounding note, not the word window', () => {
-  // The artist sings C (1.0-1.4) then D (1.4-1.8). Transcription heard the C word 250 ms late,
-  // so the word's time window overlaps mostly D.
+  // The artist sings C (10-14) then D (14-18), each exactly 4 s. Transcription heard the C word
+  // 2.5 s late, so the word's guessed time window overlaps mostly D.
   const notes: NoteEvent[] = [
-    { start: 1.0, end: 1.4, midi: 60 },
-    { start: 1.4, end: 1.8, midi: 62 },
+    { start: 10, end: 14, midi: 60 },
+    { start: 14, end: 18, midi: 62 },
   ];
+  const lateHeard = [{ text: 'love', start: 12.5, end: 16.5 }];
 
-  it('an offset word attaches the wrong note (the old verdict input)', () => {
-    const late = buildWord('love', 1.25, 1.65, notes);
-    expect(late.syllables[0].midi).toBe(62);
-    // …which would have graded a perfectly sung C as a wrong note:
-    expect(pitchVerdict(60.05, late.syllables[0].midi!, 0.5)).toBe('red');
+  it('an offset word no longer attaches the neighbouring note', () => {
+    // The guessed window [12.5, 16.5] overlaps D more than C — the old binding put a D here.
+    // The note-run binding ignores the guess: the syllable binds the C's run instead.
+    const word = buildLines(lateHeard, notes)[0].words[0];
+    expect(word.syllables[0].midi).toBe(60);
+    expect(word.syllables[0].start).toBeCloseTo(10, 6);
+  });
+
+  it('a shifted guess grades the same as a correct one', () => {
+    const onTime = buildLines([{ text: 'love', start: 10, end: 14 }], notes)[0].words[0];
+    const late = buildLines(lateHeard, notes)[0].words[0];
+    expect(pitchVerdict(60.05, onTime.syllables[0].midi!, 0.5)).toBe('perfect');
+    expect(pitchVerdict(60.05, late.syllables[0].midi!, 0.5)).toBe('perfect');
   });
 
   it('the verdict target is the note sounding now, whatever the word window says', () => {
-    // At 1.3 s the artist sings C: a sung C is perfect even though the word claims D.
-    expect(noteAt(notes, 1.3)?.midi).toBe(60);
-    expect(pitchVerdict(60.05, noteAt(notes, 1.3)!.midi, 0.5)).toBe('perfect');
-    // And at 1.5 s the artist sings D: a sung C is wrong, even for the C word.
-    expect(noteAt(notes, 1.5)?.midi).toBe(62);
-    expect(pitchVerdict(60.05, noteAt(notes, 1.5)!.midi, 0.5)).toBe('red');
+    // At 11.3 s the artist sings C: a sung C is perfect even though the word claims D.
+    expect(noteAt(notes, 11.3)?.midi).toBe(60);
+    expect(pitchVerdict(60.05, noteAt(notes, 11.3)!.midi, 0.5)).toBe('perfect');
+    // And at 15 s the artist sings D: a sung C is wrong, even for the C word.
+    expect(noteAt(notes, 15)?.midi).toBe(62);
+    expect(pitchVerdict(60.05, noteAt(notes, 15)!.midi, 0.5)).toBe('red');
   });
 });

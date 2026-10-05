@@ -7,11 +7,12 @@ import type { TimedWord } from './transcribe.worker';
  *  1. Your own lyrics (pasted, the song's own like Suno's, or kept on Redo) always win.
  *  2. Otherwise the lyrics are looked up by the song's name. Timed lyrics that fit the singer are used
  *     straight away — nothing to listen to.
- *  3. The singer is listened to. That gives the timing, and the words when nothing else has them.
+ *  3. The singer is listened to. That gives the words when nothing else has them — raw
+ *     observations in sung order; their timing always comes from the singer's measured notes.
  *  4. Lyrics found by name must contain what was heard (a vague name can find another song).
  *  5. No lyrics yet: the song is recognised from what was heard, and its real lyrics are fetched
  *     (again, only used if they contain what was heard).
- *  6. The words are laid on the singer's timing; with nothing heard, on the melody alone.
+ *  6. The words are bound to the singer's measured notes; with nothing heard, to the melody alone.
  * If everything fails and the song already had lyrics, they're kept.
  */
 
@@ -96,6 +97,9 @@ const hasSungWords = (analysis: SongAnalysis) => analysis.lines.some(line => lin
  * result (a clean second listen can clarify misheard words), but where the new pass heard nothing
  * and the first pass caught words over actual singing, those words are kept — the redo mainly goes
  * after what was missed the first time through, and never loses ground.
+ *
+ * The timestamps here are raw observations from the listening passes, never the authority: they
+ * only decide which words overlap, before structural note binding takes over downstream.
  */
 export function mergeHeard(previous: TimedWord[], fresh: TimedWord[], notes: NoteEvent[]): TimedWord[] {
   if (!previous.length) return fresh;
@@ -152,7 +156,7 @@ export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest
     hearingFailed = true;
     diag('Lyrics: listening failed — ' + (error instanceof Error ? error.message : String(error)), 'error');
   }
-  // What was heard is kept for timing (a failed redo keeps the earlier hearing).
+  // What was heard is kept as the word observations (a failed redo keeps the earlier hearing).
   if (heard.length) analysis.heard = heard;
 
   // 4. Lyrics found by name must be the song being sung.
