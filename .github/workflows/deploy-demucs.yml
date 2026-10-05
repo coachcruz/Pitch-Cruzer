@@ -17,16 +17,6 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install modal
-      - name: Check Modal secrets are present
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          PC_API_KEY: ${{ secrets.PC_API_KEY }}
-        run: |
-          for v in MODAL_TOKEN_ID MODAL_TOKEN_SECRET PC_API_KEY; do
-            val="${!v:-}"
-            if [ -z "$val" ]; then echo "$v is EMPTY"; else echo "$v is set, length ${#val}"; fi
-          done
       - name: Deploy to Modal
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
