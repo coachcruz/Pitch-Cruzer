@@ -17,6 +17,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install modal
+# NOTE: MODAL_TOKEN_ID must be the full token id INCLUDING the 'ak-' prefix;
+# MODAL_TOKEN_SECRET must be the full secret INCLUDING the 'as-' prefix.
+# Trimming the prefixes makes `modal token set` fail validation.
       - name: Deploy to Modal
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
