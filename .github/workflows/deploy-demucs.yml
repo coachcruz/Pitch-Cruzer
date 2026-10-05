@@ -23,6 +23,9 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           PC_API_KEY: ${{ secrets.PC_API_KEY }}
         run: |
+          set -euo pipefail
           python -m modal token set --token-id "$MODAL_TOKEN_ID" --token-secret "$MODAL_TOKEN_SECRET"
-          python -m modal secret create pc-demucs PC_API_KEY="$PC_API_KEY" || true
+          # modal secret create fails if the secret already exists, so delete first (ignore "not found")
+          printf 'y\n' | python -m modal secret delete pc-demucs 2>/dev/null || true
+          python -m modal secret create pc-demucs PC_API_KEY="$PC_API_KEY"
           python -m modal deploy demucs/modal_demucs.py
