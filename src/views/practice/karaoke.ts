@@ -1,4 +1,4 @@
-import { isTagLine, type LyricLine, type NoteEvent, type SongAnalysis } from '../../lib/analysis';
+import { isTagLine, noteAt, type LyricLine, type NoteEvent, type SongAnalysis } from '../../lib/analysis';
 import { foldToOctave } from '../../lib/music';
 import { escapeHtml } from '../../ui/dom';
 import { syllablesHtml } from './text';
@@ -215,7 +215,13 @@ export class Karaoke {
       if (entry.midi === null || this.locked.has(entry.el)) continue;
       if (time > entry.end + 0.15) { this.lockSyl(entry); continue; }
       if (time < entry.start - 0.1) continue;
-      this.setVerdict(entry.el, pitchVerdict(sung, entry.midi, time - entry.start));
+      // The expected pitch is the artist's note sounding now — the same lookup take scoring
+      // and the staff use — not the note the word's time window overlapped when the lyrics were
+      // written. Lyric timestamps can be off by ~100-200 ms (transcription), which used to pull
+      // the wrong note in here and grade a right note wrong.
+      const target = noteAt(this.analysis.notes, time);
+      if (!target) continue;
+      this.setVerdict(entry.el, pitchVerdict(sung, target.midi, time - entry.start));
     }
   }
 

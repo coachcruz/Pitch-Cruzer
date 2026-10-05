@@ -220,6 +220,22 @@ export function segmentNotes(track: PitchTrack): NoteEvent[] {
   return merged;
 }
 
+/**
+ * The artist's note sounding at `time` (binary search; end-exclusive). The single source of
+ * truth for "what should be sung now" — take scoring, the staff, and the live karaoke
+ * verdicts all ask this, so an offset lyric timestamp can never change the expected pitch.
+ */
+export function noteAt(notes: NoteEvent[], time: number): NoteEvent | null {
+  let lo = 0, hi = notes.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (time < notes[mid].start) hi = mid - 1;
+    else if (time >= notes[mid].end) lo = mid + 1;
+    else return notes[mid];
+  }
+  return null;
+}
+
 export function keyAndRange(notes: NoteEvent[]): { key: MusicalKey | null; range: [number, number] | null } {
   if (!notes.length) return { key: null, range: null };
   const histogram = new Array<number>(12).fill(0);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pitchVerdict, snapToNoteOnset } from '../src/views/practice/karaoke';
-import type { NoteEvent } from '../src/lib/analysis';
+import { buildWord, noteAt, type NoteEvent } from '../src/lib/analysis';
 
 const notes = (starts: number[]): NoteEvent[] =>
   starts.map(start => ({ start, end: start + 0.4, midi: 60 }));
@@ -49,5 +49,53 @@ describe('snapToNoteOnset', () => {
 
   it('picks the nearest onset', () => {
     expect(snapToNoteOnset(1.1, 2.0, notes([1.2, 0.95]))).toBeCloseTo(1.2, 6);
+  });
+});
+
+describe('noteAt', () => {
+  const two = [
+    { start: 1.0, end: 1.4, midi: 60 },
+    { start: 1.4, end: 1.8, midi: 62 },
+  ];
+
+  it('finds the note sounding at a time', () => {
+    expect(noteAt(two, 1.2)?.midi).toBe(60);
+    expect(noteAt(two, 1.6)?.midi).toBe(62);
+  });
+
+  it('is start-inclusive and end-exclusive', () => {
+    expect(noteAt(two, 1.0)?.midi).toBe(60);
+    expect(noteAt(two, 1.4)?.midi).toBe(62);
+  });
+
+  it('returns null in a rest or with no notes', () => {
+    expect(noteAt(two, 0.5)).toBeNull();
+    expect(noteAt(two, 2.5)).toBeNull();
+    expect(noteAt([], 1.2)).toBeNull();
+  });
+});
+
+describe('live verdict follows the sounding note, not the word window', () => {
+  // The artist sings C (1.0-1.4) then D (1.4-1.8). Transcription heard the C word 250 ms late,
+  // so the word's time window overlaps mostly D.
+  const notes: NoteEvent[] = [
+    { start: 1.0, end: 1.4, midi: 60 },
+    { start: 1.4, end: 1.8, midi: 62 },
+  ];
+
+  it('an offset word attaches the wrong note (the old verdict input)', () => {
+    const late = buildWord('love', 1.25, 1.65, notes);
+    expect(late.syllables[0].midi).toBe(62);
+    // …which would have graded a perfectly sung C as a wrong note:
+    expect(pitchVerdict(60.05, late.syllables[0].midi!, 0.5)).toBe('red');
+  });
+
+  it('the verdict target is the note sounding now, whatever the word window says', () => {
+    // At 1.3 s the artist sings C: a sung C is perfect even though the word claims D.
+    expect(noteAt(notes, 1.3)?.midi).toBe(60);
+    expect(pitchVerdict(60.05, noteAt(notes, 1.3)!.midi, 0.5)).toBe('perfect');
+    // And at 1.5 s the artist sings D: a sung C is wrong, even for the C word.
+    expect(noteAt(notes, 1.5)?.midi).toBe(62);
+    expect(pitchVerdict(60.05, noteAt(notes, 1.5)!.midi, 0.5)).toBe('red');
   });
 });
