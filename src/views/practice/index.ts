@@ -839,6 +839,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     gain.gain.exponentialRampToValueAtTime(0.35, when + 0.005);
     gain.gain.exponentialRampToValueAtTime(0.0001, when + 0.12);
     osc.connect(gain).connect(player.ctx.destination);
+    osc.onended = () => { osc.disconnect(); gain.disconnect(); };   // don't leave one-shot nodes wired in
     osc.start(when);
     osc.stop(when + 0.15);
   };
@@ -877,38 +878,51 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     return modelCache;
   };
 
+  /** Monotonic generation: a newer startPlayback() supersedes one still awaiting setup. */
+  let playbackToken = 0;
   const startPlayback = async (withRecording: boolean, from = 0) => {
-    setReviewPlaying(false);
-    lane.trail = liveTrail;
-    liveTrail.length = 0;
-    lastSource = -1;
-    const useCountIn = withRecording && countIn.checked;
-    const model = await echoModelVoice();
-    player.setLevel('voice', model ? levels.voice / 100 : 0);
-    player.setLevel('lead', levels.lead / 100);
-    player.setLevel('music', levels.music / 100);
-    if (withRecording) mic.startRecording();
-    const origin = await player.play(playbackRanges(), repeats(), {
-      from, leadIn: useCountIn ? 1.9 : 0.12, model, partner: partnerRanges(analysis, parts)
-    });
-    if (useCountIn) {
-      [1.8, 1.2, 0.6].forEach((before, index) => beep(origin - before, index === 0));
-      showCountdown(origin);
+    const token = ++playbackToken;
+    try {
+      setReviewPlaying(false);
+      lane.trail = liveTrail;
+      liveTrail.length = 0;
+      lastSource = -1;
+      const useCountIn = withRecording && countIn.checked;
+      const model = await echoModelVoice();
+      if (token !== playbackToken) return;   // a newer playback took over while the model loaded
+      player.setLevel('voice', model ? levels.voice / 100 : 0);
+      player.setLevel('lead', levels.lead / 100);
+      player.setLevel('music', levels.music / 100);
+      if (withRecording) mic.startRecording();
+      const origin = await player.play(playbackRanges(), repeats(), {
+        from, leadIn: useCountIn ? 1.9 : 0.12, model, partner: partnerRanges(analysis, parts)
+      });
+      if (origin === null || token !== playbackToken) return;   // superseded: the newer call owns playback
+      if (useCountIn) {
+        [1.8, 1.2, 0.6].forEach((before, index) => beep(origin - before, index === 0));
+        showCountdown(origin);
+      }
+      recordingOrigin = origin;
+      renderTransport();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Couldn’t start playback.', 'error');
     }
-    recordingOrigin = origin;
-    renderTransport();
   };
   const playTake = async (take: Review, from: number) => {
-    // Pause the live mic for the take's playback (see setReviewPlaying): an open capture session
-    // lets the phone duck the music and the singer under the take's voice.
-    if (mic.active) { micPausedForTake = true; mic.stop(); renderMicButton(); renderVoicesMic(); }
-    setReviewPlaying(true);
-    lane.trail = take.score.trail;
-    player.setLevel('voice', levels.voice / 100);
-    player.setLevel('lead', analysis.separated ? levels.takeLead / 100 : 1);
-    player.setLevel('music', levels.takeMusic / 100);
-    await player.play(take.ranges, take.repeats, { from, voice: { buffer: take.voice, offset: take.offset }, partner: partnerRanges(analysis, parts) });
-    renderTransport();
+    try {
+      // Pause the live mic for the take's playback (see setReviewPlaying): an open capture session
+      // lets the phone duck the music and the singer under the take's voice.
+      if (mic.active) { micPausedForTake = true; mic.stop(); renderMicButton(); renderVoicesMic(); }
+      setReviewPlaying(true);
+      lane.trail = take.score.trail;
+      player.setLevel('voice', levels.voice / 100);
+      player.setLevel('lead', analysis.separated ? levels.takeLead / 100 : 1);
+      player.setLevel('music', levels.takeMusic / 100);
+      await player.play(take.ranges, take.repeats, { from, voice: { buffer: take.voice, offset: take.offset }, partner: partnerRanges(analysis, parts) });
+      renderTransport();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Couldn’t play that take.', 'error');
+    }
   };
   const stopAll = () => player.stop(true);
 

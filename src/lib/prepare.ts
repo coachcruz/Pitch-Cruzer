@@ -56,15 +56,27 @@ export interface SongBuffers { lead: AudioBuffer; backing: AudioBuffer | null; i
 
 const PITCH_RATE = 11025;
 
+/** How long the pitch worker may run before it's declared stalled (a slow phone on a long song). */
+const PITCH_TIMEOUT_MS = 120000;
+
 /** `soloVoice`: a single isolated voice (enables subharmonic detection); false for a full mix. */
 export function pitchTrackFor(buffer: AudioBuffer, onProgress?: (fraction: number) => void, soloVoice = true): Promise<PitchTrack> {
-  return resampleMono(buffer, PITCH_RATE).then(samples => new Promise((resolve, reject) => {
+  // One retry: the samples' buffer is transferred to the worker, so only a fresh resample can retry.
+  return trackWithTimeout(buffer, onProgress, soloVoice).catch(() => trackWithTimeout(buffer, onProgress, soloVoice));
+}
+
+function trackWithTimeout(buffer: AudioBuffer, onProgress?: (fraction: number) => void, soloVoice = true): Promise<PitchTrack> {
+  return resampleMono(buffer, PITCH_RATE).then(samples => new Promise<PitchTrack>((resolve, reject) => {
     const worker = new Worker(new URL('./pitch.worker.ts', import.meta.url), { type: 'module' });
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error('Pitch analysis timed out — the note-finding worker stalled.'));
+    }, PITCH_TIMEOUT_MS);
     worker.onmessage = (event: MessageEvent<{ progress?: number; result?: PitchJobResult }>) => {
-      if (event.data.result) { worker.terminate(); resolve(event.data.result); }
+      if (event.data.result) { clearTimeout(timer); worker.terminate(); resolve(event.data.result); }
       else if (typeof event.data.progress === 'number') onProgress?.(event.data.progress);
     };
-    worker.onerror = event => { worker.terminate(); reject(new Error(event.message || 'Pitch analysis failed.')); };
+    worker.onerror = event => { clearTimeout(timer); worker.terminate(); reject(new Error(event.message || 'Pitch analysis failed.')); };
     worker.postMessage({ samples, sampleRate: PITCH_RATE, hopSeconds: 0.02, soloVoice }, [samples.buffer]);
   }));
 }

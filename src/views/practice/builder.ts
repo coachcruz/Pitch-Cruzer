@@ -229,6 +229,7 @@ export class SongBuilder {
     this.host.changed();
     mic.startRecording();
     const origin = await player.play([range], 1, { leadIn: 0.15 });
+    if (origin === null) { this.cancelled = true; return; }   // superseded by a newer play(): it owns the graph now
     this.recordOrigin = origin;
     const lineAt = origin + (plan.lineStart - plan.start);
     if (plan.cueFrom !== null) player.handOver('lead', lineAt);   // the artist's cue stops where your line starts

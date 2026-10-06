@@ -15,6 +15,13 @@ export async function listMics(): Promise<MicChoice[]> {
 export const isBluetoothMic = (label: string) => /airpods|bluetooth|hands-?free|headset|beats|buds|\bbt\b/i.test(label);
 
 /**
+ * AudioWorklet modules register once per AudioContext. Re-adding the same processor is
+ * spec-ambiguous, and the old retry path could spuriously degrade to "can't record here"
+ * after merely changing a mic setting.
+ */
+const workletLoaded = new WeakSet<AudioContext>();
+
+/**
  * Live microphone: real-time pitch, an input level, optional "hear myself" monitoring and
  * sample-accurate recording on the same audio clock as the Player.
  */
@@ -31,6 +38,8 @@ export class LiveMic {
   echoCancel = false;
   private choice: MicChoice | null = null;
   private raw = true;
+  /** Monotonic generation: a stop() or newer start() invalidates one still awaiting the device. */
+  private startToken = 0;
   /** The chosen mic couldn't be opened, so the device's default was used. */
   fellBack = false;
   /** Duet: a second live mic. Its audio joins the level meter, the "hear myself" monitor and the recording. */
@@ -49,6 +58,7 @@ export class LiveMic {
   async start(echoCancel: boolean, choice: MicChoice | null = null, raw = true): Promise<void> {
     if (this.stream && echoCancel === this.echoCancel && choice?.id === this.choice?.id && raw === this.raw) return;
     this.stop();
+    const token = ++this.startToken;   // a stop() or newer start() supersedes this one
     this.echoCancel = echoCancel;
     this.choice = choice;
     this.raw = raw;
@@ -57,18 +67,24 @@ export class LiveMic {
       ? { echoCancellation: echoCancel, noiseSuppression: false, autoGainControl: false, voiceIsolation: false, channelCount: 1 }
       : { echoCancellation: echoCancel, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
     const mics = choice ? await listMics() : [];
+    if (token !== this.startToken) return;   // stopped or restarted while listing mics
     // The exact mic first; by name only if its id changed (two mics of the same model share a name).
     const id = choice ? (mics.find(mic => mic.id === choice.id) ?? mics.find(mic => mic.label === choice.label))?.id : undefined;
     if (choice && !id) this.fellBack = true;   // the picked mic isn't connected: the default one is used
+    let stream: MediaStream;
     try {
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...audio, deviceId: { exact: id } } : audio, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...audio, deviceId: { exact: id } } : audio, video: false });
     } catch (error) {
+      if (token !== this.startToken) return;   // a newer start() owns the mic now: don't fall back into this one
       if (!id || (error instanceof DOMException && error.name === 'NotAllowedError')) throw error;
       // The chosen mic is gone (unplugged, switched off): use the default one.
-      this.stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
       this.fellBack = true;
     }
+    if (token !== this.startToken) { stream.getTracks().forEach(track => track.stop()); return; }
+    this.stream = stream;
     if (this.ctx.state !== 'running') await this.ctx.resume();
+    if (token !== this.startToken) return;   // stop() already tore everything down
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 4096; // long enough for ~30 Hz subharmonics
@@ -76,17 +92,29 @@ export class LiveMic {
     this.monitor = this.ctx.createGain();
     this.monitor.gain.value = 0;
     this.source.connect(this.monitor).connect(this.ctx.destination);
-    try {
-      await this.ctx.audioWorklet.addModule(new URL('recorder-worklet.js', document.baseURI).href);
-      this.recorder = new AudioWorkletNode(this.ctx, 'recorder-processor', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
-      this.recorder.port.onmessage = (event: MessageEvent<{ frame: number; data: Float32Array }>) => {
-        if (this.firstFrame === null) this.firstFrame = event.data.frame;
-        this.chunks.push(event.data.data);
-      };
-      this.source.connect(this.recorder);
-    } catch (error) {
-      console.warn('Recording worklet unavailable', error);
-      this.recorder = null;
+    // The worklet module registers once per audio context (see workletLoaded above).
+    if (!workletLoaded.has(this.ctx)) {
+      try {
+        await this.ctx.audioWorklet.addModule(new URL('recorder-worklet.js', document.baseURI).href);
+        workletLoaded.add(this.ctx);
+      } catch (error) {
+        console.warn('Recording worklet unavailable', error);
+      }
+    }
+    if (token !== this.startToken) return;
+    this.recorder = null;
+    if (workletLoaded.has(this.ctx)) {
+      try {
+        this.recorder = new AudioWorkletNode(this.ctx, 'recorder-processor', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
+        this.recorder.port.onmessage = (event: MessageEvent<{ frame: number; data: Float32Array }>) => {
+          if (this.firstFrame === null) this.firstFrame = event.data.frame;
+          this.chunks.push(event.data.data);
+        };
+        this.source.connect(this.recorder);
+      } catch (error) {
+        console.warn('Recording worklet unavailable', error);
+        this.recorder = null;
+      }
     }
   }
 
@@ -189,7 +217,9 @@ export class LiveMic {
     if (!result || result.confidence < 0.7) { this.recent = []; return { midi: null, level }; }
     let midi = frequencyToMidi(result.frequency);
     const last = this.recent[this.recent.length - 1];
-    if (last !== undefined && Math.abs(midi - last - 12) < 0.7) midi -= 12;  // octave-jump guard
+    // Octave-jump guard, symmetric: YIN sometimes locks an octave high — or low — for a frame.
+    if (last !== undefined && Math.abs(midi - last - 12) < 0.7) midi -= 12;
+    else if (last !== undefined && Math.abs(midi - last + 12) < 0.7) midi += 12;
     this.recent.push(midi);
     if (this.recent.length > 4) this.recent.shift();
     const sorted = [...this.recent].sort((a, b) => a - b);
@@ -197,6 +227,7 @@ export class LiveMic {
   }
 
   stop(): void {
+    ++this.startToken;   // an in-flight start() must not finish into a stopped mic
     this.removeSecondMic();
     this.recorder?.disconnect();
     this.recorder = null;

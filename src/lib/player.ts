@@ -73,6 +73,8 @@ export class Player {
   /** Duet: the original singer on your partner's lines, always at full volume. */
   private partnerLead: GainNode;
   private sources: AudioBufferSourceNode[] = [];
+  /** Monotonic generation: a newer play() (or a stop()) invalidates one still awaiting the audio clock. */
+  private playToken = 0;
   timeline: Timeline = new Timeline([], 1);
   private originAt = 0;
   private endTimer: number | null = null;
@@ -138,9 +140,10 @@ export class Player {
   handOver(stem: StemName, at: number): void {
     const gain = this.gains[stem].gain;
     const now = this.ctx.currentTime;
+    const current = gain.value;   // where the fader actually is — snapping to 1 first clicks
     gain.cancelScheduledValues(now);
-    gain.setValueAtTime(1, now);
-    gain.setValueAtTime(1, Math.max(now, at - 0.05));
+    gain.setValueAtTime(current, now);
+    gain.setValueAtTime(current, Math.max(now, at - 0.05));
     gain.linearRampToValueAtTime(0, Math.max(now + 0.01, at));
   }
 
@@ -155,9 +158,13 @@ export class Player {
     voice?: { buffer: AudioBuffer; offset: number };
     model?: { buffer: AudioBuffer; locate: (sourceTime: number) => number | null };
     partner?: Range[];
-  } = {}): Promise<number> {
+  } = {}): Promise<number | null> {
     this.stop(false);
+    const token = ++this.playToken;
     if (this.ctx.state !== 'running') await this.ctx.resume();
+    // Two overlapping play() calls used to interleave across the await above: both sources
+    // played, only one end-timer survived. The superseded call bows out; the newer one owns the graph.
+    if (token !== this.playToken) return null;
 
     this.timeline = new Timeline(ranges, repeats);
     const cursor = this.timeline.duration;
@@ -206,15 +213,18 @@ export class Player {
     const node = this.ctx.createBufferSource();
     node.buffer = buffer;
     const safe = Math.min(duration, buffer.duration - offset);
+    let envelope: GainNode | null = null;
     if (fade) {
       // 8 ms fades stop clicks where sections are stitched together.
-      const envelope = this.ctx.createGain();
+      envelope = this.ctx.createGain();
       envelope.gain.setValueAtTime(0, when);
       envelope.gain.linearRampToValueAtTime(1, when + 0.008);
       envelope.gain.setValueAtTime(1, when + Math.max(0.008, safe - 0.008));
       envelope.gain.linearRampToValueAtTime(0, when + safe);
       node.connect(envelope).connect(gain);
     } else node.connect(gain);
+    // Ended nodes stay wired into the audio graph unless freed: release source and envelope as each finishes.
+    node.onended = () => { node.disconnect(); envelope?.disconnect(); };
     node.start(Math.max(this.ctx.currentTime, when), offset, safe);
     this.sources.push(node);
   }
@@ -257,7 +267,11 @@ export class Player {
   }
 
   stop(notify = true): void {
-    for (const node of this.sources) { try { node.stop(); } catch { /* already stopped */ } }
+    ++this.playToken;   // a play() still awaiting the audio clock must not schedule after this
+    for (const node of this.sources) {
+      try { node.stop(); } catch { /* already stopped */ }
+      node.disconnect();   // onended may not have fired yet: don't leave ended nodes wired in
+    }
     this.sources = [];
     if (this.endTimer !== null) window.clearTimeout(this.endTimer);
     this.endTimer = null;
