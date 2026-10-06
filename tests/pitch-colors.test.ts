@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pitchVerdict, lineVerdict } from '../src/views/practice/karaoke';
+import { pitchVerdict, lineVerdict, fillForRun } from '../src/views/practice/karaoke';
 import { buildLines, noteAt, noteIndexAt, nextNoteIndexAt, type NoteEvent } from '../src/lib/analysis';
 
 describe('pitchVerdict', () => {
@@ -129,5 +129,25 @@ describe('live verdict follows the sounding note, not the word window', () => {
     // And at 15 s the artist sings D: a sung C is wrong, even for the C word.
     expect(noteAt(notes, 15)?.midi).toBe(62);
     expect(pitchVerdict(60.05, noteAt(notes, 15)!.midi, 0.5)).toBe('red');
+  });
+});
+
+describe('fillForRun', () => {
+  // One syllable sung as a melisma across three notes (10-14, 14-18, 18-22).
+  // The wipe must sweep the whole 12 s run without restarting at each note.
+  it('sweeps a multi-note run continuously — never resets mid-word', () => {
+    const at = (t: number) => fillForRun(10, 22, t);
+    expect(at(9)).toBe(0);
+    const mid1 = at(12);   // inside note 1
+    const mid2 = at(16);   // inside note 2 — must be further along, not back at 0
+    const mid3 = at(20);   // inside note 3
+    expect(mid2).toBeGreaterThan(mid1);
+    expect(mid3).toBeGreaterThan(mid2);
+    expect(at(22)).toBe(1);
+    expect(at(30)).toBe(1);
+  });
+  it('longer runs fill slower than shorter ones', () => {
+    // 1 s into a 12 s run vs 1 s into a 2 s run.
+    expect(fillForRun(10, 22, 11)).toBeLessThan(fillForRun(10, 12, 11));
   });
 });

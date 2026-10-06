@@ -17,6 +17,17 @@ export type LineVerdict = 'perfect' | 'good' | 'ok' | 'bad' | 'silent';
  * different note altogether. Silent is no voice heard over the word. Returns null inside a short
  * grace at the word's attack, so late entries aren't punished instantly.
  */
+
+/**
+ * The liquid fill for one syllable: 0 before its note run starts, 1 after it ends,
+ * sweeping continuously across the run in between. Because the run is the syllable's full
+ * bound note span (not the currently sounding note), the wipe never restarts mid-word —
+ * it's one unbroken line through the song, slower through longer notes.
+ */
+export function fillForRun(runStart: number, runEnd: number, time: number): number {
+  return Math.max(0, Math.min(1, (time - runStart) / Math.max(0.05, runEnd - runStart)));
+}
+
 export function pitchVerdict(sung: number | null, expected: number, intoWord: number, flexibleOctave = false): PitchVerdict | null {
   if (sung === null) return intoWord >= 0.15 ? 'silent' : null;
   const compared = flexibleOctave ? foldToOctave(sung, expected) : sung;
@@ -238,16 +249,14 @@ export class Karaoke {
       this.current = row;
     }
 
-    // Liquid fill: past syllables full, the sounding one filling with its note — longer notes
-    // fill slower, exactly as sung.
-    for (const entry of this.sylsByRow.get(row) ?? []) {
+    // Liquid fill: one continuous wipe through the whole song. Each syllable fills across
+    // its FULL bound note run (first note's start to last note's end), so the sweep never
+    // restarts mid-word — longer notes fill slower, exactly as sung. Past syllables read 1,
+    // future ones 0, all from the same clock.
+    for (const entry of this.syls) {
       let fill = 0;
-      if (sounding !== null && entry.noteIndex !== null && entry.noteEnd !== null) {
-        if (entry.noteEnd < sounding) fill = 1;
-        else if (entry.noteIndex <= sounding) {
-          const note = notes[sounding];
-          fill = Math.max(0, Math.min(1, (time - note.start) / Math.max(0.05, note.end - note.start)));
-        }
+      if (entry.noteIndex !== null && entry.noteEnd !== null) {
+        fill = fillForRun(notes[entry.noteIndex].start, notes[entry.noteEnd].end, time);
       }
       entry.el.style.setProperty('--fill', fill.toFixed(3));
     }
