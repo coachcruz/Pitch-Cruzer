@@ -4,6 +4,7 @@ import {
   syllabify, syllablesFromRun, type LyricLine, type NoteEvent, type SongAnalysis,
 } from '../src/lib/analysis';
 import { pitchVerdict } from '../src/views/practice/karaoke';
+import { segmentMergedWord } from '../src/lib/segment';
 
 /** Line ids are random: strip them before comparing bindings for equality. */
 const bindingOf = (lines: LyricLine[]) => lines.map(line => ({
@@ -352,5 +353,28 @@ describe('unvoiced syllables share the neighbor note', () => {
       expect(sylls[k].start).toBeGreaterThanOrEqual(sylls[k - 1].start);
     }
     expect(sylls[0].start).toBeCloseTo(13.1, 6);
+  });
+});
+
+describe('segmentMergedWord', () => {
+  it('splits fast-sung merged tokens into real words', () => {
+    expect(segmentMergedWord('sixfootsix')).toEqual(['six', 'foot', 'six']);
+    expect(segmentMergedWord('twofortyfive')).toEqual(['two', 'forty', 'five']);
+  });
+  it('leaves genuine words whole', () => {
+    for (const word of ['something', 'without', 'birthday', 'cannot', 'heaven', 'highway']) {
+      expect(segmentMergedWord(word)).toBeNull();
+    }
+  });
+  it('buildLines splits merged tokens before binding', () => {
+    const notes: NoteEvent[] = [
+      { start: 10, end: 12, midi: 60 },
+      { start: 12, end: 14, midi: 62 },
+      { start: 14, end: 16, midi: 64 },
+    ];
+    const lines = buildLines([{ text: 'sixfootsix', start: 10, end: 16 }], notes);
+    const words = lines.flatMap(line => line.words);
+    // One merged token becomes three words, so the karaoke renders them with spaces.
+    expect(words.map(word => word.text)).toEqual(['six', 'foot', 'six']);
   });
 });
