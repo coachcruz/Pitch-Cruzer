@@ -38,6 +38,8 @@ export class PageRecorder {
   private meterBuffer = new Float32Array(2048);
   recording = false;
   private held = false;
+  /** Monotonic generation: a close() during connect()'s awaits must win. */
+  private connectToken = 0;
   seconds = 0;
   /** Loudest level of the current take (stays ~0 if nothing audible is being recorded). */
   peak = 0;
@@ -64,6 +66,7 @@ export class PageRecorder {
 
   async connect(): Promise<void> {
     this.close();
+    const token = ++this.connectToken;   // a close() during the awaits below must win
     const stream = await navigator.mediaDevices.getDisplayMedia({
       audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       // The picture isn't used: as small and slow as possible so it costs the video nothing.
@@ -75,15 +78,18 @@ export class PageRecorder {
       stream.getTracks().forEach(item => item.stop());
       throw new Error('That share had no sound: “Also share tab audio” was off, or a window or screen was picked instead of this tab.');
     }
+    if (token !== this.connectToken) { stream.getTracks().forEach(item => item.stop()); return; }
     const ctx = new AudioContext();
     await ctx.resume();
+    if (token !== this.connectToken) { stream.getTracks().forEach(item => item.stop()); void ctx.close().catch(() => undefined); return; }
     const source = ctx.createMediaStreamSource(new MediaStream([track]));
-    this.analyser = ctx.createAnalyser();
-    this.analyser.fftSize = 2048;
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
     const moduleUrl = URL.createObjectURL(new Blob([COLLECTOR], { type: 'text/javascript' }));
     try { await ctx.audioWorklet.addModule(moduleUrl); } finally { URL.revokeObjectURL(moduleUrl); }
-    this.collector = new AudioWorkletNode(ctx, 'collect');
-    this.collector.port.onmessage = (event: MessageEvent<Float32Array>) => {
+    if (token !== this.connectToken) { stream.getTracks().forEach(item => item.stop()); void ctx.close().catch(() => undefined); return; }
+    const collector = new AudioWorkletNode(ctx, 'collect');
+    collector.port.onmessage = (event: MessageEvent<Float32Array>) => {
       if (!this.recording || this.hold) return;
       const mono = event.data;
       let energy = 0;
@@ -94,10 +100,12 @@ export class PageRecorder {
     };
     const silent = ctx.createGain();
     silent.gain.value = 0; // the page already plays the song; nothing is played twice
-    source.connect(this.analyser);
-    source.connect(this.collector).connect(silent).connect(ctx.destination);
+    source.connect(analyser);
+    source.connect(collector).connect(silent).connect(ctx.destination);
     // If the share is ended from Chrome's "Stop sharing" bar, the next Record asks again.
     track.addEventListener('ended', () => { if (this.stream === stream) this.close(); });
+    this.analyser = analyser;
+    this.collector = collector;
     this.ctx = ctx;
     this.stream = stream;
   }
@@ -176,6 +184,7 @@ export class PageRecorder {
 
   /** Ends the share and releases the audio engine. */
   close(): void {
+    ++this.connectToken;   // an in-flight connect() must not finish into a closed recorder
     this.recording = false;
     this.stream?.getTracks().forEach(track => track.stop());
     this.stream = null;
