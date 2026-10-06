@@ -19,6 +19,23 @@ export type LineVerdict = 'perfect' | 'good' | 'ok' | 'bad' | 'silent';
  */
 
 /**
+ * Split a shared note run into per-syllable time slices, proportional to weights
+ * (character counts). When legato singing is under-segmented into one long note, this is
+ * what keeps the wipe sequencing through the syllables instead of filling them in lockstep.
+ * Returns [start, end] pairs that exactly tile [runStart, runEnd].
+ */
+export function subdivideSlices(runStart: number, runEnd: number, weights: number[]): Array<[number, number]> {
+  const total = weights.reduce((sum, w) => sum + w, 0) || 1;
+  let acc = runStart;
+  return weights.map(weight => {
+    const slice = ((runEnd - runStart) * weight) / total;
+    const start = acc;
+    acc += slice;
+    return [start, acc] as [number, number];
+  });
+}
+
+/**
  * The liquid fill for one syllable: 0 before its note run starts, 1 after it ends,
  * sweeping continuously across the run in between. Because the run is the syllable's full
  * bound note span (not the currently sounding note), the wipe never restarts mid-word —
@@ -79,6 +96,13 @@ interface SylEntry {
   noteEnd: number | null;
   /** The note the singer is supposed to sing (null: spoken/aside, no verdict). */
   midi: number | null;
+  /**
+   * The time slice this syllable fills over. Usually its note run's full span; when K
+   * syllables share one run (legato under-segmented into a long note), each gets its
+   * proportional slice so the wipe sequences through them instead of filling in lockstep.
+   */
+  fillStart: number;
+  fillEnd: number;
 }
 
 /**
@@ -174,7 +198,7 @@ export class Karaoke {
       const noteIndex = rawN === undefined || rawN === '' ? null : Number(rawN);
       const noteEnd = rawNe === undefined || rawNe === '' ? null : Number(rawNe);
       const midi = raw === undefined || raw === '' ? null : Number(raw);
-      const entry: SylEntry = { el, row, noteIndex, noteEnd, midi };
+      const entry: SylEntry = { el, row, noteIndex, noteEnd, midi, fillStart: 0, fillEnd: 0 };
       this.syls.push(entry);
       if (noteIndex !== null && noteEnd !== null) {
         for (let i = noteIndex; i <= noteEnd; i += 1) {
@@ -184,6 +208,28 @@ export class Karaoke {
       const group = this.sylsByRow.get(row) ?? [];
       group.push(entry);
       this.sylsByRow.set(row, group);
+    }
+    // Subdivide shared note runs: when K syllables are stapled to one run (legato singing
+    // under-segmented into a long note), each fills over its character-proportional slice.
+    // Without this they fill in lockstep and the wipe runs slower than the singing.
+    const notes = this.analysis.notes;
+    const byRun = new Map<string, SylEntry[]>();
+    for (const entry of this.syls) {
+      if (entry.noteIndex === null || entry.noteEnd === null) continue;
+      const key = `${entry.noteIndex}:${entry.noteEnd}`;
+      const list = byRun.get(key) ?? [];
+      list.push(entry);
+      byRun.set(key, list);
+    }
+    for (const group of byRun.values()) {
+      const first = group[0];
+      const runStart = notes[first.noteIndex!]?.start ?? 0;
+      const runEnd = notes[first.noteEnd!]?.end ?? runStart;
+      const slices = subdivideSlices(runStart, runEnd, group.map(e => e.el.textContent?.length ?? 1));
+      group.forEach((entry, i) => {
+        entry.fillStart = slices[i][0];
+        entry.fillEnd = slices[i][1];
+      });
     }
   }
 
@@ -250,14 +296,10 @@ export class Karaoke {
     }
 
     // Liquid fill: one continuous wipe through the whole song. Each syllable fills across
-    // its FULL bound note run (first note's start to last note's end), so the sweep never
-    // restarts mid-word — longer notes fill slower, exactly as sung. Past syllables read 1,
-    // future ones 0, all from the same clock.
+    // its time slice (its note run, or its share of a shared run) — longer slices fill slower,
+    // exactly as sung. Past syllables read 1, future ones 0, all from the same clock.
     for (const entry of this.syls) {
-      let fill = 0;
-      if (entry.noteIndex !== null && entry.noteEnd !== null) {
-        fill = fillForRun(notes[entry.noteIndex].start, notes[entry.noteEnd].end, time);
-      }
+      const fill = entry.noteIndex === null ? 0 : fillForRun(entry.fillStart, entry.fillEnd, time);
       entry.el.style.setProperty('--fill', fill.toFixed(3));
     }
 

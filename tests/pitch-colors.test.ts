@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pitchVerdict, lineVerdict, fillForRun } from '../src/views/practice/karaoke';
+import { pitchVerdict, lineVerdict, fillForRun, subdivideSlices } from '../src/views/practice/karaoke';
 import { buildLines, noteAt, noteIndexAt, nextNoteIndexAt, type NoteEvent } from '../src/lib/analysis';
 
 describe('pitchVerdict', () => {
@@ -149,5 +149,23 @@ describe('fillForRun', () => {
   it('longer runs fill slower than shorter ones', () => {
     // 1 s into a 12 s run vs 1 s into a 2 s run.
     expect(fillForRun(10, 22, 11)).toBeLessThan(fillForRun(10, 12, 11));
+  });
+});
+
+describe('subdivideSlices', () => {
+  it('tiles the run with no gaps or overlaps', () => {
+    const slices = subdivideSlices(10, 20, [2, 3, 5]);
+    expect(slices[0][0]).toBe(10);
+    expect(slices[2][1]).toBe(20);
+    // Contiguous: each slice starts where the previous ended.
+    expect(slices[1][0]).toBe(slices[0][1]);
+    expect(slices[2][0]).toBe(slices[1][1]);
+    // Proportional to weights: [2,3,5] of 10s -> [2s, 3s, 5s].
+    expect(slices[0][1] - slices[0][0]).toBeCloseTo(2, 9);
+    expect(slices[1][1] - slices[1][0]).toBeCloseTo(3, 9);
+    expect(slices[2][1] - slices[2][0]).toBeCloseTo(5, 9);
+  });
+  it('a lone syllable keeps the whole run', () => {
+    expect(subdivideSlices(10, 20, [4])).toEqual([[10, 20]]);
   });
 });
