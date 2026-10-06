@@ -61,7 +61,6 @@ export class SongBuilder {
   private recordOrigin = 0;
   private recordRange: Range = { start: 0, end: 0 };
   private cancelled = false;
-  private rehearsing = false;
   private result: { url: string; blob: Blob; label: string } | null = null;
   private opts = {
     music: prefs.get('build.music', true),
@@ -221,15 +220,14 @@ export class SongBuilder {
     player.setLevel('lead', plan.cueFrom === null ? 0 : 1);
     player.setLevel('music', this.opts.music ? this.musicLevel() : 0);
     player.setLevel('voice', 0);
-    this.rehearsing = this.opts.hear;
-    mic.setMonitor(this.rehearsing ? Math.max(0.6, this.host.levels.monitor / 100) : 0);
+    mic.setMonitor(this.opts.hear ? Math.max(0.6, this.host.levels.monitor / 100) : 0);
     this.cancelled = false;
     this.attempt = null;
     this.recordRange = range;
     this.phase = 'recording';
     this.render();
     this.host.changed();
-    if (!this.rehearsing) mic.startRecording();
+    mic.startRecording();
     const origin = await player.play([range], 1, { leadIn: 0.15 });
     if (origin === null) { this.cancelled = true; return; }   // superseded by a newer play(): it owns the graph now
     this.recordOrigin = origin;
@@ -243,17 +241,8 @@ export class SongBuilder {
 
   private async finishRecording(): Promise<void> {
     const { player, mic } = this.host;
-    const rehearsing = this.rehearsing;
-    this.rehearsing = false;
-    const result = rehearsing ? null : mic.stopRecording();
+    const result = mic.stopRecording();
     this.host.restoreMix();
-    if (rehearsing) {
-      this.phase = 'ready';
-      this.render();
-      this.host.changed();
-      toast('Rehearsal done — nothing was recorded.');
-      return;
-    }
     const range = this.recordRange;
     if (this.cancelled || !result || result.samples.length < result.sampleRate * 0.5) {
       if (!this.cancelled) toast('No audio was recorded from the mic.', 'error');
@@ -402,7 +391,7 @@ export class SongBuilder {
     const stop = '<div class="bGrid one"><button class="btn" data-act="stop">■ Stop</button></div>';
     let body = '';
     if (phase === 'listening' || phase === 'hearing') body = `<p class="bStatus">${phase === 'listening' ? 'Listening to the artist…' : 'Your take…'}</p>${stop}`;
-    else if (phase === 'recording') body = `<p class="bStatus live">${this.rehearsing ? 'Rehearsing — not recording. ' : ''}${plan.cueFrom === null ? 'Get ready — your turn after the count-in' : 'Your turn comes right after the artist’s cue'}</p>${stop}`;
+    else if (phase === 'recording') body = `<p class="bStatus live">${plan.cueFrom === null ? 'Get ready — your turn after the count-in' : 'Your turn comes right after the artist’s cue'}</p>${stop}`;
     else if (phase === 'scoring') body = '<p class="bStatus">Checking how it went…</p>';
     else if (phase === 'assembling') body = '<p class="bStatus">Putting your song together…</p>';
     else if (phase === 'result' && this.attempt) {
@@ -443,7 +432,7 @@ export class SongBuilder {
       ${body}
       <div class="bOpts">
         ${option('music', 'Music', 'Off: hear the artist alone, and sing in the quiet')}
-        ${option('hear', 'Hear myself', 'Rehearse: hear your own mic while you sing — nothing is recorded')}
+        ${option('hear', 'Hear myself', 'Hear your own mic while you sing')}
         ${option('highlight', 'Highlight words', 'Light up the words as they’re sung')}
       </div>
       <div class="bFoot">
