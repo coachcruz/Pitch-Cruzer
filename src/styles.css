@@ -359,17 +359,14 @@ button.lineScore:focus-visible { outline: 2px solid var(--accent); }
 /* A line that's only a section tag ([Chorus]) — the section heading already says it. */
 .lyricLine.tagLine { display: none; }
 /* Liquid fill: each syllable fills left to right with its note, like pouring — longer notes
-   fill slower, exactly as sung. The fill is progress, not judgment; the verdict comes at line end. */
-.lyricsList .syl { position: relative; }
-.lyricsList .syl::before {
-  content: ''; position: absolute; inset: -1px 0; width: calc(var(--fill, 0) * 100%);
-  /* The leading edge is baked into the gradient (not a border), so nothing shows at fill 0. */
-  background:
-    linear-gradient(90deg, transparent calc(100% - 2px), color-mix(in srgb, var(--accent) 75%, transparent) 0),
-    linear-gradient(90deg,
-      color-mix(in srgb, var(--accent) 10%, transparent),
-      color-mix(in srgb, var(--accent) 35%, transparent));
-  border-radius: 5px; pointer-events: none;
+   fill slower, exactly as sung. The fill is progress, not judgment; the verdict comes at line end.
+   The fill is a background on the syllable itself (not a pseudo-element), so at fill 0 there is
+   nothing to render — no stray lines, ever. */
+.lyricsList .syl {
+  border-radius: 4px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 30%, transparent) calc(var(--fill, 0) * 100%),
+    transparent calc(var(--fill, 0) * 100%));
 }
 /* Line verdicts: judged once when the line is done, from the whole line's pitch. Verdict rows
    are never dimmed — the color is the feedback. */
