@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { pitchVerdict, snapToNoteOnset } from '../src/views/practice/karaoke';
-import { buildLines, noteAt, type NoteEvent } from '../src/lib/analysis';
-
-const notes = (starts: number[]): NoteEvent[] =>
-  starts.map(start => ({ start, end: start + 0.4, midi: 60 }));
+import { pitchVerdict, lineVerdict } from '../src/views/practice/karaoke';
+import { buildLines, noteAt, noteIndexAt, nextNoteIndexAt, type NoteEvent } from '../src/lib/analysis';
 
 describe('pitchVerdict', () => {
   it('calls it perfect within a quarter tone', () => {
@@ -37,22 +34,24 @@ describe('pitchVerdict', () => {
   });
 });
 
-describe('snapToNoteOnset', () => {
-  it('pulls the word start to a nearby note onset', () => {
-    expect(snapToNoteOnset(1.1, 1.8, notes([1.02, 2.5]))).toBeCloseTo(1.02, 6);
+describe('lineVerdict', () => {
+  it('is null when the mic was off — no judgment without a singer', () => {
+    expect(lineVerdict({ perfect: 0, blue: 0, red: 0, silent: 0 })).toBeNull();
   });
 
-  it('leaves the start alone when no onset is close', () => {
-    expect(snapToNoteOnset(1.1, 1.8, notes([2.5]))).toBe(1.1);
-    expect(snapToNoteOnset(1.1, 1.8, [])).toBe(1.1);
+  it('glows purple only for an all-perfect line', () => {
+    expect(lineVerdict({ perfect: 40, blue: 0, red: 0, silent: 0 })).toBe('perfect');
+    expect(lineVerdict({ perfect: 39, blue: 1, red: 0, silent: 0 })).toBe('good');
   });
 
-  it('never snaps past the word end', () => {
-    expect(snapToNoteOnset(1.1, 1.15, notes([1.12]))).toBe(1.1);
+  it('grades by mean score otherwise', () => {
+    expect(lineVerdict({ perfect: 30, blue: 10, red: 0, silent: 0 })).toBe('good');
+    expect(lineVerdict({ perfect: 10, blue: 20, red: 10, silent: 0 })).toBe('ok');
+    expect(lineVerdict({ perfect: 2, blue: 2, red: 20, silent: 0 })).toBe('bad');
   });
 
-  it('picks the nearest onset', () => {
-    expect(snapToNoteOnset(1.1, 2.0, notes([1.2, 0.95]))).toBeCloseTo(1.2, 6);
+  it('calls a line sung mostly in silence silent', () => {
+    expect(lineVerdict({ perfect: 5, blue: 0, red: 0, silent: 20 })).toBe('silent');
   });
 });
 
@@ -76,6 +75,26 @@ describe('noteAt', () => {
     expect(noteAt(two, 0.5)).toBeNull();
     expect(noteAt(two, 2.5)).toBeNull();
     expect(noteAt([], 1.2)).toBeNull();
+  });
+});
+
+describe('noteIndexAt / nextNoteIndexAt', () => {
+  const two = [
+    { start: 1.0, end: 1.4, midi: 60 },
+    { start: 2.0, end: 2.4, midi: 62 },
+  ];
+
+  it('returns the sounding note’s index, null in a rest', () => {
+    expect(noteIndexAt(two, 1.2)).toBe(0);
+    expect(noteIndexAt(two, 2.2)).toBe(1);
+    expect(noteIndexAt(two, 1.6)).toBeNull();
+    expect(noteIndexAt([], 1.2)).toBeNull();
+  });
+
+  it('finds the next note at or after a time — the coming phrase during a rest', () => {
+    expect(nextNoteIndexAt(two, 1.6)).toBe(1);
+    expect(nextNoteIndexAt(two, 1.0)).toBe(0);
+    expect(nextNoteIndexAt(two, 3.0)).toBeNull();
   });
 });
 

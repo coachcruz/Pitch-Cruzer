@@ -358,17 +358,32 @@ button.lineScore:focus-visible { outline: 2px solid var(--accent); }
 .lyricLine.asideLine { cursor: default; padding-block: 2px; }
 /* A line that's only a section tag ([Chorus]) — the section heading already says it. */
 .lyricLine.tagLine { display: none; }
-.lyricsList .syl .t { transition: color 0.12s; }
-.lyricsList .syl.sung .t { color: var(--accent); }
-.lyricsList .syl.now .t { color: var(--accent-2); text-shadow: 0 0 12px color-mix(in srgb, var(--accent-2) 55%, transparent); }
-/* Karaoke live pitch colors (mic on): reactive per word, strongest wins over the plain highlight. */
-.lyricsList .syl.pitch-perfect .t { color: var(--pitch-perfect); text-shadow: 0 0 14px color-mix(in srgb, var(--pitch-perfect) 60%, transparent); }
-.lyricsList .syl.pitch-blue .t { color: var(--pitch-blue); }
-.lyricsList .syl.pitch-red .t { color: var(--pitch-red); }
-.lyricsList .syl.pitch-silent .t { color: var(--pitch-silent); }
-.lyricLine.linePerfect { box-shadow: inset 3px 0 0 var(--pitch-line); animation: linePerfect 2.2s ease-in-out infinite; }
-@keyframes linePerfect { 50% { box-shadow: inset 3px 0 0 var(--pitch-line), 0 0 26px color-mix(in srgb, var(--pitch-line) 35%, transparent); } }
-@media (prefers-reduced-motion: reduce) { .lyricLine.linePerfect { animation: none; } }
+/* Liquid fill: each syllable fills left to right with its note, like pouring — longer notes
+   fill slower, exactly as sung. The fill is progress, not judgment; the verdict comes at line end. */
+.lyricsList .syl { position: relative; }
+.lyricsList .syl::before {
+  content: ''; position: absolute; inset: -1px 0; width: calc(var(--fill, 0) * 100%);
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--accent) 10%, transparent),
+    color-mix(in srgb, var(--accent) 35%, transparent));
+  border-right: 2px solid color-mix(in srgb, var(--accent) 75%, transparent);
+  border-radius: 5px; pointer-events: none;
+}
+/* Line verdicts: judged once when the line is done, from the whole line's pitch. Verdict rows
+   are never dimmed — the color is the feedback. */
+.lyricLine.lv-perfect .lineText { color: var(--pitch-line); }
+.lyricLine.lv-good .lineText { color: var(--pitch-perfect); }
+.lyricLine.lv-ok .lineText { color: var(--pitch-blue); }
+.lyricLine.lv-bad .lineText { color: var(--pitch-red); }
+.lyricLine.lv-silent .lineText { color: var(--pitch-silent); }
+.lyricLine.lv-perfect, .lyricLine.lv-good, .lyricLine.lv-ok, .lyricLine.lv-bad, .lyricLine.lv-silent { opacity: 1; }
+/* A perfect line gets its pizzazz: purple glow with a slow shine sweep. */
+.lyricLine.lv-perfect { animation: lineShine 2.4s ease-in-out infinite; }
+@keyframes lineShine {
+  0%, 100% { box-shadow: inset 3px 0 0 var(--pitch-line); }
+  50% { box-shadow: inset 3px 0 0 var(--pitch-line), 0 0 30px color-mix(in srgb, var(--pitch-line) 45%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .lyricLine.lv-perfect { animation: none; } }
 @media (prefers-reduced-motion: reduce) { .lyricsList { transform: none; } }
 
 .word { display: inline-flex; align-items: flex-end; white-space: nowrap; }

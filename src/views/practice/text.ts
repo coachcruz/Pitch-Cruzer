@@ -16,7 +16,8 @@ export function syllablesHtml(line: LyricLine): string {
     const hz = syllable.midi === null ? '' : ` title="${midiToNote(syllable.midi)} · ${midiToFrequency(Math.round(syllable.midi)).toFixed(0)} Hz"`;
     const joiner = index < word.syllables.length - 1 ? '<b class="hy">-</b>' : '';
     const dm = syllable.midi === null ? '' : ` data-m="${syllable.midi.toFixed(2)}"`;
-    return `<span class="syl" data-s="${syllable.start.toFixed(3)}" data-e="${syllable.end.toFixed(3)}"${dm}${hz}><i>${escapeHtml(noteLabel(syllable))}</i><span class="t">${escapeHtml(syllable.text)}${joiner}</span></span>`;
+    const dn = syllable.noteIndex === null ? '' : ` data-n="${syllable.noteIndex}" data-ne="${syllable.noteEnd ?? syllable.noteIndex}"`;
+    return `<span class="syl" data-s="${syllable.start.toFixed(3)}" data-e="${syllable.end.toFixed(3)}"${dm}${dn}${hz}><i>${escapeHtml(noteLabel(syllable))}</i><span class="t">${escapeHtml(syllable.text)}${joiner}</span></span>`;
   }).join('') + '</span>');
 }
 
