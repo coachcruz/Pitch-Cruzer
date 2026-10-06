@@ -25,24 +25,17 @@ fakeFetch.mockImplementation(async (url: string) => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('server transcription: the reattempt prompt reaches the server', () => {
-  it('sends the previous listen’s words as ?prompt=', async () => {
-    vi.stubGlobal('fetch', fakeFetch);
-    const words = await transcribeOnServer(buffer, notes, options, () => undefined, 'kid rock');
-    expect(lastUrl).toContain('prompt=kid+rock');
-    expect(words.map(w => w.text)).toEqual(['hello']);
-  });
-
-  it('sends no prompt when there is no previous listen', async () => {
+describe('server transcription: no prompt is ever sent', () => {
+  it('never sends a ?prompt= — every listen is a fresh listen', async () => {
     vi.stubGlobal('fetch', fakeFetch);
     await transcribeOnServer(buffer, notes, options, () => undefined);
     expect(lastUrl).not.toContain('prompt=');
   });
 
-  it('trims a very long prompt to the API’s budget', async () => {
+  it('tags each word with its piece index, so repeats survive dedup', async () => {
     vi.stubGlobal('fetch', fakeFetch);
-    await transcribeOnServer(buffer, notes, options, () => undefined, 'word '.repeat(500));
-    const prompt = new URL(lastUrl, 'https://x.test').searchParams.get('prompt') ?? '';
-    expect(prompt.length).toBeLessThanOrEqual(800);
+    const words = await transcribeOnServer(buffer, notes, options, () => undefined);
+    expect(words.map(w => w.text)).toEqual(['hello']);
+    for (const word of words) expect(typeof word.clip).toBe('number');
   });
 });

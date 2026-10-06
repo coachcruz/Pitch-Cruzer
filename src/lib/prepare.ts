@@ -147,19 +147,19 @@ function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number
  * Words + timing for the lead vocal. The server model (Whisper Large v3 Turbo) is used when it's set
  * up — it's much more accurate on singing; otherwise, or if it fails, the in-browser model runs.
  */
-async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void, prompt?: string): Promise<{ words: TimedWord[]; partial: boolean }> {
+async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
   if (await serverTranscriptionAvailable()) {
     try {
       diag('Lyrics: using the server model (Whisper Large v3 Turbo)');
-      return { words: await transcribeOnServer(buffer, notes, options, onProgress, prompt), partial: false };
+      return { words: await transcribeOnServer(buffer, notes, options, onProgress), partial: false };
     } catch (error) {
       diag('Server lyrics failed (' + (error instanceof Error ? error.message : String(error)) + ') — using the in-browser model', 'warn');
     }
   } else diag('Lyrics: server model not set up (GROQ_API_KEY) — using the in-browser model', 'warn');
-  return transcribeInBrowser(buffer, notes, options, onProgress, prompt);
+  return transcribeInBrowser(buffer, notes, options, onProgress);
 }
 
-function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void, prompt?: string): Promise<{ words: TimedWord[]; partial: boolean }> {
+function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
   return resampleMono(buffer, 16000).then(audio => new Promise((resolve, reject) => {
     const clips = vocalClips(notes, buffer.duration).map(clip => ({
       audio: audio.slice(Math.floor(clip.start * 16000), Math.ceil(clip.end * 16000)),
@@ -210,7 +210,7 @@ function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: L
         onProgress(0.4, 'Listening to the singer…');
       } else if (data.stage === 'transcribe') {
         (data.langs as string[] | undefined)?.forEach(lang => heard.add(lang.toUpperCase()));
-        words.push(...(data.words ?? []));
+        for (const word of (data.words ?? []) as TimedWord[]) words.push({ ...word, clip: typeof data.clip === 'number' ? data.clip : word.clip });
         clipsDone += 1;
         const elapsed = (performance.now() - (transcribeStarted || performance.now())) / 1000;
         const left = clipsDone ? (elapsed / clipsDone) * (clips.length - clipsDone) : 0;
@@ -224,14 +224,14 @@ function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: L
       if (words.length) finish(true);
       else { settled = true; window.clearTimeout(timeout); worker.terminate(); reject(new Error(event.message || 'Transcription failed.')); }
     };
-    worker.postMessage({ clips, languages: options.languages, quality: options.quality, prompt }, clips.map(clip => clip.audio.buffer));
+    worker.postMessage({ clips, languages: options.languages, quality: options.quality }, clips.map(clip => clip.audio.buffer));
   }));
 }
 
 /** The real services behind the lyrics (see lib/lyrics): the singer, the lyrics database, song recognition. */
 export function lyricsServices(lead: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, progress: Progress): LyricsServices {
   return {
-    hear: (prompt?: string) => transcribe(lead, notes, options, (fraction, detail) => progress('lyrics', 0.05 + fraction * 0.85, detail), prompt),
+    hear: () => transcribe(lead, notes, options, (fraction, detail) => progress('lyrics', 0.05 + fraction * 0.85, detail)),
     lookup: query => findLyricsOnline(query, lead.duration),
     identify: async (heard, hint) => {
       try {

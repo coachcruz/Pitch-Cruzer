@@ -21,11 +21,10 @@ export interface FoundLyrics { text: string; synced: SyncedLine[] | null; label:
 /** The outside services the lyrics come from (replaced by fakes in tests). */
 export interface LyricsServices {
   /**
-   * Listens to the singer. Throws if it can't. `prompt` is the previous attempt's words (a
-   * reattempt only): context so the second listen catches what the first missed, not a script —
-   * the singer is still what's transcribed.
+   * Listens to the singer. Throws if it can't. Every listen is a fresh listen: no previous words
+   * are ever passed back in — the audio is what's transcribed, and nothing else gets a say.
    */
-  hear(prompt?: string): Promise<{ words: TimedWord[]; partial: boolean }>;
+  hear(): Promise<{ words: TimedWord[]; partial: boolean }>;
   /** Lyrics by song name/artist, or null. */
   lookup(query: string): Promise<FoundLyrics | null>;
   /** Names the song from rough heard words, or null if it isn't a song it knows. */
@@ -39,10 +38,7 @@ export interface LyricsRequest {
   lookup?: string;
   /** Always listen to the singer first (Redo lyrics): lyrics found by name are used only if they match what's sung. */
   listen?: boolean;
-  /**
-   * This is a reattempt (Redo lyrics): the previous listen's words guide the new one, so it mainly
-   * goes after what the first pass missed or got wrong instead of starting from nothing.
-   */
+  /** This is a reattempt (Redo lyrics): a second fresh listen, merged with the first pass. */
   reattempt?: boolean;
 }
 
@@ -57,8 +53,9 @@ export interface LyricsCandidate { title: string; artist: string; duration?: num
 /**
  * Which version of the lyrics to use. The database often has several: the album track, the music
  * video's, a live or remixed one, with or without line timings. Preferred: the one whose length
- * matches the recording, and one with line timings (they line up with the singer directly) even if
- * a few seconds off; versions named as a video/live/remix/karaoke… only if that's what was asked for.
+ * matches the recording, and one with line timings (they line up with the singer directly, and
+ * are strictly validated against the singer's phrases before use — a poor fit falls back to
+ * listening); versions named as a video/live/remix/karaoke… only if that's what was asked for.
  */
 export function pickLyrics(results: LyricsCandidate[], query: string, duration?: number): LyricsCandidate | null {
   const special = /\b(official|music video|video|live|remix|karaoke|instrumental|acapella|a cappella|cover|sped up|slowed|demo|acoustic)\b/i;
@@ -77,13 +74,32 @@ export function heardMatch(lyrics: string, heard: Array<{ text: string }>): numb
   return distinct.filter(word => lyricWords.has(word)).length / Math.max(1, distinct.length);
 }
 
-/** Heard words in time order, once each (listening windows can overlap and repeat a word). */
+/**
+ * Heard words in time order, with window duplicates removed — and nothing else.
+ *
+ * Transcription runs on overlapping windows, so one sung word can be heard twice. But a repeated
+ * word ("love love love") is two separate acoustic events and must NEVER be deleted: deleting it
+ * shifts every word after it onto the wrong notes. The old code deleted any identical word within
+ * 0.3 s — a time threshold that cannot tell a repeat from a duplicate.
+ *
+ * The rule now: a word is a duplicate only if it is the same word (case/punctuation-insensitive)
+ * heard in the SAME or an ADJACENT window at an OVERLAPPING time. Same word, same window,
+ * non-overlapping times? That's a repeat — it stays. Same word, windows far apart? That's a
+ * repeat — it stays. No clip tag (old data)? Fall back to strict time overlap only.
+ */
 export function inOrder(words: TimedWord[]): TimedWord[] {
   const sorted = [...words].sort((a, b) => a.start - b.start);
   const clean = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
   return sorted.filter((word, i) => {
     const before = sorted[i - 1];
-    return !before || clean(before.text) !== clean(word.text) || word.start - before.start > 0.3;
+    if (!before || clean(before.text) !== clean(word.text)) return true;
+    const adjacentWindow = word.clip === undefined || before.clip === undefined
+      || Math.abs(word.clip - before.clip) <= 1;
+    // Strict overlap, no slop: two hearings of the same acoustic event claim the same time.
+    // A miss (a duplicate that survives) only adds a word; a false deletion shifts every word
+    // after it onto the wrong notes. So the bar for deleting is high, on purpose.
+    const overlap = word.start < before.end;
+    return !(adjacentWindow && overlap);
   });
 }
 
@@ -142,12 +158,11 @@ export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest
   let heard: TimedWord[] = [];
   let partial = false;
   let hearingFailed = false;
-  // A reattempt listens with the first pass in mind: its words are the prompt, so the second
-  // listen mainly goes after what was missed or misheard rather than starting from nothing.
+  // A reattempt is a second fresh listen: the previous words are never fed back into the
+  // transcription itself. They are merged with the new pass afterwards by mergeHeard.
   const previousHeard = request.reattempt ? analysis.heard ?? [] : [];
-  const prompt = previousHeard.length ? previousHeard.map(word => word.text).join(' ') : undefined;
   try {
-    const result = await services.hear(prompt);
+    const result = await services.hear();
     heard = inOrder(result.words);
     partial = result.partial;
     if (request.reattempt) heard = mergeHeard(previousHeard, heard, analysis.notes);

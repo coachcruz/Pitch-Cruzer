@@ -7,22 +7,18 @@ import { syllablesHtml } from './text';
 export type PitchVerdict = 'perfect' | 'blue' | 'red' | 'silent';
 
 /**
- * How the sung pitch compares to the expected note. "Perfect" is a quarter tone, the same bar
- * the take scoring uses. Blue means the pitch class is right but the octave isn't, or it's close
- * but not quite there. Red is a different note altogether. Silent is no voice heard over the word.
- * Returns null inside a short grace at the word's attack, so late entries aren't punished instantly.
- *
- * With `flexibleOctave` (the "Forgive octave" setting), the sung pitch is folded into the
- * expected octave *before* the perfect check — exactly as take scoring does — so the live colors
- * and the take score are two displays of the same comparison. Without it, the right pitch class
- * in the wrong octave reads blue, as before.
+ * How the sung pitch compares to the expected note. One comparison, one set of colors, everywhere:
+ * the staff trail, the karaoke words and take scoring all ask this same question. "Perfect" is a
+ * quarter tone. Blue means close but not quite there — or the right note in the wrong octave, but
+ * only when octave forgiveness is on (without it, a wrong octave is red, like the staff). Red is a
+ * different note altogether. Silent is no voice heard over the word. Returns null inside a short
+ * grace at the word's attack, so late entries aren't punished instantly.
  */
 export function pitchVerdict(sung: number | null, expected: number, intoWord: number, flexibleOctave = false): PitchVerdict | null {
   if (sung === null) return intoWord >= 0.15 ? 'silent' : null;
   const compared = flexibleOctave ? foldToOctave(sung, expected) : sung;
   const err = Math.abs(compared - expected);
   if (err <= 0.5) return 'perfect';
-  if (Math.abs(foldToOctave(sung, expected) - expected) <= 0.5) return 'blue';
   if (err <= 1.0) return 'blue';
   return 'red';
 }
@@ -259,8 +255,18 @@ export class Karaoke {
     const rows = [...this.list.querySelectorAll<HTMLElement>('.lyricLine')];
     const lines = this.analysis.lines;
     if (!rows.length || rows.length !== lines.length) return;
-    let index = lines.findIndex(line => time < line.end);
-    if (index < 0) index = lines.length - 1;
+    // Bad data must never silently kill the view: lines with broken times are skipped, and if
+    // none qualifies, fall back to the nearest line by start instead of leaving every word white.
+    let index = lines.findIndex(line => Number.isFinite(line.end) && time < line.end);
+    if (index < 0) {
+      let best = 0, bestDist = Infinity;
+      lines.forEach((line, i) => {
+        if (!Number.isFinite(line.start)) return;
+        const dist = Math.abs(line.start - time);
+        if (dist < bestDist) { bestDist = dist; best = i; }
+      });
+      index = best;
+    }
     const row = rows[index];
     if (row !== this.current) {
       if (this.current) {
@@ -293,11 +299,16 @@ export class Karaoke {
     if (performance.now() < this.handScrollUntil || this.holdScroll || (!playing && time === this.lastTime)) return;
     this.lastTime = time;
     // Glide at an even speed from one line's start to the next, so the roll never jumps or stalls;
-    // the line being sung sits about a third of the way down.
+    // the line being sung sits about a third of the way down. A line with a broken start is
+    // skipped — never a wall the scroll dies on.
     let from = -1;
-    for (let i = 0; i < lines.length && lines[i].start <= time; i += 1) from = i;
+    for (let i = 0; i < lines.length; i += 1) {
+      const start = lines[i].start;
+      if (Number.isFinite(start) && start <= time) from = i;
+    }
     const a = rows[Math.max(0, from)], b = rows[from + 1];
-    const progress = from < 0 || !b ? 0 : Math.max(0, Math.min(1, (time - lines[from].start) / Math.max(0.1, lines[from + 1].start - lines[from].start)));
+    const nextStart = b ? lines[from + 1].start : NaN;
+    const progress = from < 0 || !Number.isFinite(nextStart) ? 0 : Math.max(0, Math.min(1, (time - lines[from].start) / Math.max(0.1, nextStart - lines[from].start)));
     const y = a.offsetTop + (b ? (b.offsetTop - a.offsetTop) * progress : 0);
     this.list.scrollTop = y - this.list.clientHeight * 0.36;
   }

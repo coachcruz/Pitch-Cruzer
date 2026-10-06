@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { writeLyrics, mergeHeard, type FoundLyrics, type LyricsServices } from '../src/lib/lyrics';
+import { writeLyrics, mergeHeard, inOrder, type FoundLyrics, type LyricsServices } from '../src/lib/lyrics';
 import { buildLines, joinWords } from '../src/lib/analysis';
 import { makeSong, SONG } from './fixtures';
 
@@ -176,7 +176,45 @@ describe('picking the version of the lyrics', () => {
   });
 });
 
-describe('reattempting the lyrics (Redo listens with the first pass in mind)', () => {
+describe('heard-word dedup (inOrder)', () => {
+  it('keeps real repeated words: "love love love" stays three words', () => {
+    const words = [
+      { text: 'love', start: 10.0, end: 10.25, clip: 0 },
+      { text: 'love', start: 10.3, end: 10.55, clip: 0 },
+      { text: 'love', start: 10.6, end: 10.85, clip: 0 },
+    ];
+    expect(inOrder(words).map(w => w.text)).toEqual(['love', 'love', 'love']);
+  });
+
+  it('removes the same word heard twice in overlapping windows', () => {
+    const words = [
+      { text: 'hello', start: 10.0, end: 10.4, clip: 0 },
+      { text: 'hello', start: 10.05, end: 10.42, clip: 1 },
+      { text: 'world', start: 10.6, end: 11.0, clip: 1 },
+    ];
+    expect(inOrder(words).map(w => w.text)).toEqual(['hello', 'world']);
+  });
+
+  it('keeps the same word sung again in a far-apart window', () => {
+    const words = [
+      { text: 'love', start: 10.0, end: 10.3, clip: 0 },
+      { text: 'love', start: 45.0, end: 45.3, clip: 3 },
+    ];
+    expect(inOrder(words).map(w => w.text)).toEqual(['love', 'love']);
+  });
+
+  it('without clip tags, only strict time overlaps dedup', () => {
+    const words = [
+      { text: 'yeah', start: 10.0, end: 10.2 },
+      { text: 'yeah', start: 10.25, end: 10.45 },
+      { text: 'yeah', start: 10.3, end: 10.5 },
+    ];
+    // First two are separate events (no overlap); the third overlaps the second: duplicate.
+    expect(inOrder(words).map(w => `${w.text}@${w.start}`)).toEqual(['yeah@10', 'yeah@10.25']);
+  });
+});
+
+describe('reattempting the lyrics (Redo is a second fresh listen)', () => {
   const notes = [
     { start: 10, end: 12, midi: 60 },
     { start: 13, end: 15, midi: 62 },
@@ -214,7 +252,7 @@ describe('reattempting the lyrics (Redo listens with the first pass in mind)', (
     expect(mergeHeard(previous, [], notes)).toEqual(previous);
   });
 
-  it('a reattempt passes the first listen’s words to the second listen as its prompt', async () => {
+  it('a reattempt is a fresh listen: the first pass words are never fed back in', async () => {
     const song = makeSong(SONG);
     song.analysis.heard = [
       { text: 'kid', start: 15.1, end: 15.3 },
@@ -222,15 +260,15 @@ describe('reattempting the lyrics (Redo listens with the first pass in mind)', (
     ];
     const fake = services(song, { heard: [] });
     await writeLyrics(song.analysis, { listen: true, reattempt: true }, fake);
-    expect(fake.hear).toHaveBeenCalledWith('kid rock');
+    expect(fake.hear).toHaveBeenCalledWith();
   });
 
-  it('without reattempt, the second listen gets no prompt', async () => {
+  it('without reattempt, the listen gets no prompt either', async () => {
     const song = makeSong(SONG);
     song.analysis.heard = [{ text: 'kid', start: 15.1, end: 15.3 }];
     const fake = services(song, { heard: [] });
     await writeLyrics(song.analysis, { listen: true }, fake);
-    expect(fake.hear).toHaveBeenCalledWith(undefined);
+    expect(fake.hear).toHaveBeenCalledWith();
   });
 
   it('a reattempt keeps first-pass words the fresh listen missed, over the singing', async () => {

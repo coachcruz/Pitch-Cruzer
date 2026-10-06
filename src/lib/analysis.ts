@@ -284,10 +284,13 @@ const SYLLABLE = new RegExp(`[^${VOWELS}]*[${VOWELS}]+(?:[^${VOWELS}]*$|[^${VOWE
 
 /**
  * Rough syllabification for English/Spanish/other Latin-script lyrics: vowel groups, with English
- * silent-e and -ed/-es endings merged back. Other scripts are kept as one unit.
+ * silent-e and -ed/-es endings merged back. Han, Hangul and kana scripts need no guessing: every
+ * character is one sung syllable (dime, por-que — and likewise 你好, 사랑, さくら), so the words
+ * split character by character instead of highlighting as one block per melisma.
  */
 export function syllabify(word: string): string[] {
   const clean = word.replace(/[^\p{L}\p{M}']/gu, '');
+  if (/^[\p{Script=Han}\p{Script=Hangul}\p{Script=Hiragana}\p{Script=Katakana}]+$/u.test(clean)) return [...clean];
   if ([...clean].length <= 3) return [clean || word];
   const parts = clean.match(SYLLABLE);
   if (!parts || parts.length < 2 || parts.join('') !== clean) return [clean];
@@ -981,10 +984,11 @@ export function parseSyncedLyrics(lrc: string): SyncedLine[] {
 
 /**
  * Times the song from lyrics that already say when each line starts — no transcription needed.
- * The recording may start earlier or later than the original (a longer intro, a trimmed start), so
- * the lyrics are first slid (±40 s) until their line starts land on the singer's phrase starts. Each
- * line's words are then spread over the notes sung in that line. Returns null if the lyrics don't
- * fit this recording (another version, a live take…), so the caller can fall back.
+ * The recording may start a little earlier or later than the original (a longer intro, a trimmed
+ * start), so the lyrics are first slid (±15 s) until their line starts land on the singer's phrase
+ * starts — and only used when they clearly do (fit ≥ 0.7). Each line's words are then spread over
+ * the notes sung in that line. Returns null if the lyrics don't fit this recording (another
+ * version, a live take…), so the caller falls back to listening to the singer instead.
  */
 export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]): { lines: LyricLine[]; offset: number; fit: number } | null {
   const notes = analysis.notes;
@@ -1002,11 +1006,15 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
   };
   const fitAt = (offset: number) => sung.reduce((sum, line) => sum + Math.exp(-((nearest(line.time + offset) / 0.3) ** 2)), 0) / sung.length;
   let offset = 0, fit = -1;
-  for (let candidate = -40; candidate <= 40; candidate += 0.05) {
+  // ±15 s covers a longer intro or a trimmed start; anything further out is a different recording.
+  for (let candidate = -15; candidate <= 15; candidate += 0.05) {
     const value = fitAt(candidate);
     if (value > fit) { fit = value; offset = candidate; }
   }
-  if (fit < 0.35) return null;
+  // Strict: the timed lyrics are used only when their lines clearly land on the singer's phrases.
+  // A loose fit used to shift the whole lyric track seconds off — anything doubtful falls back to
+  // listening to the singer instead. No wiggle room.
+  if (fit < 0.7) return null;
 
   const words: Word[] = [];
   const hardBreaks = new Set<number>();
