@@ -95,7 +95,10 @@ export function inOrder(words: TimedWord[]): TimedWord[] {
     if (!before || clean(before.text) !== clean(word.text)) return true;
     const adjacentWindow = word.clip === undefined || before.clip === undefined
       || Math.abs(word.clip - before.clip) <= 1;
-    const overlap = word.start < before.end + 0.05;
+    // Strict overlap, no slop: two hearings of the same acoustic event claim the same time.
+    // A miss (a duplicate that survives) only adds a word; a false deletion shifts every word
+    // after it onto the wrong notes. So the bar for deleting is high, on purpose.
+    const overlap = word.start < before.end;
     return !(adjacentWindow && overlap);
   });
 }

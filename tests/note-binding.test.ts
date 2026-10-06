@@ -279,11 +279,11 @@ describe('alignToMelody note runs', () => {
 });
 
 describe('pitchVerdict flexible octave', () => {
-  it('an exact octave off is perfect when forgiving, blue when not', () => {
+  it('an exact octave off is perfect when forgiving, red when not', () => {
     expect(pitchVerdict(72, 60, 0.5, true)).toBe('perfect');
-    expect(pitchVerdict(72, 60, 0.5, false)).toBe('blue');
+    expect(pitchVerdict(72, 60, 0.5, false)).toBe('red');
     expect(pitchVerdict(48.2, 60, 0.5, true)).toBe('perfect');
-    expect(pitchVerdict(48.2, 60, 0.5, false)).toBe('blue');
+    expect(pitchVerdict(48.2, 60, 0.5, false)).toBe('red');
   });
 
   it('a wrong note class is never perfect, even when forgiving', () => {
