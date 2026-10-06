@@ -391,7 +391,10 @@ export class PitchLane {
       const centerMidi = sum / count;
       const error = target ? Math.abs(this.errorAt(centerMidi, target)) : null;
       const px = x(point.t), py = Math.min(height - 3, Math.max(laneTop + 3, y(point.midi)));
-      ctx.strokeStyle = error === null ? color('--voice') : error <= 0.5 ? color('--good') : error <= 1.2 ? color('--close') : color('--off');
+      // One comparison everywhere: the same 0.5/1.0 bars the karaoke words and take scoring
+      // use, so the trail never disagrees with them. (errorAt already folds the octave exactly
+      // when forgiveness is on, like pitchVerdict.)
+      ctx.strokeStyle = error === null ? color('--voice') : error <= 0.5 ? color('--good') : error <= 1.0 ? color('--close') : color('--off');
       ctx.beginPath();
       if (previous && point.t - previous.t < 0.15) { ctx.moveTo(previous.px, previous.py); ctx.lineTo(px, py); }
       else ctx.arc(px, py, 1.5, 0, Math.PI * 2);

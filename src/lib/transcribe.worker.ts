@@ -16,14 +16,17 @@ export interface TranscribeJob {
   clips: TranscribeClip[];
   languages: string[];
   quality: 'fast' | 'best';
-  /**
-   * A reattempt's previous words: passed to Whisper as its initial prompt so the second listen is
-   * guided by the first — it mainly goes after what was missed or misheard. Plain context, not a
-   * script: the audio is still what's transcribed. Dropped silently if it can't be encoded.
-   */
-  prompt?: string;
 }
-export interface TimedWord { text: string; start: number; end: number; lang?: string }
+export interface TimedWord {
+  text: string; start: number; end: number; lang?: string;
+  /**
+   * Which transcription window heard this word (0-based, in song order). Windows overlap, so the
+   * same sung word can be heard twice — but only across the SAME or ADJACENT windows. A repeated
+   * word ("love love love") is two separate acoustic events and must never be deleted; a duplicate
+   * is the same event heard twice. The clip tag is what tells them apart — never a time threshold.
+   */
+  clip?: number;
+}
 
 const MODELS: Record<TranscribeJob['quality'], string[]> = {
   best: ['Xenova/whisper-small', 'Xenova/whisper-base', 'Xenova/whisper-tiny'],
@@ -98,26 +101,11 @@ async function languageScores(audio: Float32Array, allowed: string[]): Promise<A
     .sort((a, b) => b[1] - a[1]);
 }
 
-/** Encodes the reattempt prompt for Whisper; undefined when there's nothing usable to say. */
-async function promptIds(prompt: string | undefined): Promise<number[] | undefined> {
-  const text = prompt?.trim();
-  if (!text || !transcriber?.tokenizer) return undefined;
-  try {
-    const encoded: any = await transcriber.tokenizer(text.slice(0, 2000), { add_special_tokens: false });
-    const ids = encoded?.input_ids?.data ?? encoded?.input_ids;
-    const list = Array.isArray(ids) ? ids.map(Number).filter(Number.isFinite) : [];
-    return list.length ? list : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function transcribePiece(audio: Float32Array, offset: number, lang: string, multilingual: boolean, prompt_ids?: number[]): Promise<TimedWord[]> {
+async function transcribePiece(audio: Float32Array, offset: number, lang: string, multilingual: boolean): Promise<TimedWord[]> {
   const output: any = await transcriber(audio, {
     return_timestamps: 'word',
     ...(audio.length > RATE * 30 ? { chunk_length_s: 30, stride_length_s: 5 } : {}),
-    ...(multilingual ? { task: 'transcribe', language: lang } : {}),
-    ...(prompt_ids ? { prompt_ids } : {})
+    ...(multilingual ? { task: 'transcribe', language: lang } : {})
   });
   const words: TimedWord[] = [];
   for (const chunk of Array.isArray(output?.chunks) ? output.chunks : []) {
@@ -150,14 +138,14 @@ async function languagesOf(audio: Float32Array, allowed: string[]): Promise<Arra
   }
 }
 
-async function transcribeClip(clip: TranscribeClip, allowed: string[], multilingual: boolean, prompt_ids?: number[]): Promise<{ words: TimedWord[]; langs: string[]; mixed: boolean }> {
+async function transcribeClip(clip: TranscribeClip, allowed: string[], multilingual: boolean): Promise<{ words: TimedWord[]; langs: string[]; mixed: boolean }> {
   const scores = multilingual ? await languagesOf(clip.audio, allowed) : [['en', 0] as [string, number]];
   const mixed = scores.length > 1 && clip.phrases.length > 1 && scores[0][1] - scores[1][1] < MIXED_GAP;
   const langs = new Set<string>();
   if (!mixed) {
     const lang = scores[0]?.[0] ?? 'en';
     langs.add(lang);
-    return { words: await transcribePiece(clip.audio, clip.offset, lang, multilingual, prompt_ids), langs: [...langs], mixed };
+    return { words: await transcribePiece(clip.audio, clip.offset, lang, multilingual), langs: [...langs], mixed };
   }
   // Sounds like more than one language: give each phrase its own language.
   let words: TimedWord[] = [];
@@ -166,17 +154,15 @@ async function transcribeClip(clip: TranscribeClip, allowed: string[], multiling
     if (piece.length < RATE * 0.4) continue;
     const lang = (await languagesOf(piece, allowed))[0]?.[0] ?? 'en';
     langs.add(lang);
-    words = words.concat(await transcribePiece(piece, clip.offset + phrase.start, lang, multilingual, prompt_ids));
+    words = words.concat(await transcribePiece(piece, clip.offset + phrase.start, lang, multilingual));
   }
   return { words, langs: [...langs], mixed };
 }
 
 self.onmessage = async (event: MessageEvent<TranscribeJob>) => {
-  const { clips, languages, quality, prompt } = event.data;
+  const { clips, languages, quality } = event.data;
   try {
     let asr = await loadModel(quality);
-    const ids = await promptIds(prompt);
-    if (ids) note('Lyrics reattempt: listening again with the first pass as context (' + ids.length + ' prompt tokens)');
     let heardAny = false;
     let failed = 0;
     for (let index = 0; index < clips.length; index += 1) {
@@ -184,7 +170,7 @@ self.onmessage = async (event: MessageEvent<TranscribeJob>) => {
       const allowed = multilingual ? languages : ['en'];
       let result: { words: TimedWord[]; langs: string[]; mixed: boolean } = { words: [], langs: [], mixed: false };
       try {
-        result = await transcribeClip(clips[index], allowed, multilingual, ids);
+        result = await transcribeClip(clips[index], allowed, multilingual);
       } catch (error) {
         // One bad window shouldn't lose the whole song.
         failed += 1;
@@ -200,7 +186,7 @@ self.onmessage = async (event: MessageEvent<TranscribeJob>) => {
         failed = 0;
         continue;
       }
-      self.postMessage({ stage: 'transcribe', progress: (index + 1) / clips.length, langs: result.langs, mixed: result.mixed, words: result.words });
+      self.postMessage({ stage: 'transcribe', progress: (index + 1) / clips.length, langs: result.langs, mixed: result.mixed, words: result.words, clip: index });
     }
     if (failed === clips.length) throw new Error('Every part of the song failed to transcribe.');
     self.postMessage({ done: true });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   alignToMelody, applyTypedLyrics, bindSyllables, buildLines, rebaseToNoteRuns,
-  syllablesFromRun, type LyricLine, type NoteEvent, type SongAnalysis,
+  syllabify, syllablesFromRun, type LyricLine, type NoteEvent, type SongAnalysis,
 } from '../src/lib/analysis';
 import { pitchVerdict } from '../src/views/practice/karaoke';
 
@@ -14,8 +14,20 @@ const bindingOf = (lines: LyricLine[]) => lines.map(line => ({
   })),
 }));
 
-describe('timestamp-independence (the core invariant)', () => {
-  const notes: NoteEvent[] = [
+describe('syllabify across scripts', () => {
+  it('splits CJK words character by character — every character is one sung syllable', () => {
+    expect(syllabify('사랑')).toEqual(['사', '랑']);
+    expect(syllabify('さくら')).toEqual(['さ', 'く', 'ら']);
+    expect(syllabify('你好')).toEqual(['你', '好']);
+  });
+
+  it('still splits Latin words by vowel groups', () => {
+    expect(syllabify('porque')).toEqual(['por', 'que']);
+    expect(syllabify('casa')).toEqual(['ca', 'sa']);
+  });
+});
+
+describe('timestamp-independence (the core invariant)', () => {  const notes: NoteEvent[] = [
     { start: 1.0, end: 1.4, midi: 60 },
     { start: 1.4, end: 1.8, midi: 62 },
     { start: 1.8, end: 2.2, midi: 64 },

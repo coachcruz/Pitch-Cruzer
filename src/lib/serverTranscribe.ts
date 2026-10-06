@@ -87,14 +87,12 @@ function sungWords(result: ServerResult, offset: number, notes: NoteEvent[], lan
 
 /**
  * Transcribes the lead vocal on the server. Throws if the server model is unavailable or fails, so
- * the caller can fall back to the in-browser model. `prompt` is a reattempt's previous words:
- * Whisper's initial prompt, so the second listen is guided by the first. The old worry (Whisper
- * writing hint text out as if sung) is handled below: `sungWords` keeps only words that line up
- * with detected notes, so prompt echo in intros, solos and silence is dropped.
+ * the caller can fall back to the in-browser model. Every listen is a fresh listen: no previous
+ * words are ever fed back in as a prompt — Whisper transcribes only the audio it is given.
  */
 export async function transcribeOnServer(
   buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions,
-  onProgress: (fraction: number, detail: string) => void, prompt?: string
+  onProgress: (fraction: number, detail: string) => void
 ): Promise<TimedWord[]> {
   const audio = await resampleMono(buffer, RATE);
   const parts = pieces(notes, buffer.duration);
@@ -112,11 +110,8 @@ export async function transcribeOnServer(
     const mp3 = await encodeMp3([samples], RATE, 48);
     const query = new URLSearchParams();
     if (lang) query.set('lang', lang);
-    // A reattempt's previous words ride along as Whisper's initial prompt (the API takes ~224
-    // tokens; ~800 chars stays inside that). Short pieces mean more requests: wait (as long as
-    // the service asks) and retry if it says "too many" or hiccups.
-    const hint = prompt?.trim().slice(0, 800);
-    if (hint) query.set('prompt', hint);
+    // Short pieces mean more requests: wait (as long as the service asks) and retry if it says
+    // "too many" or hiccups.
     const response = await fetchWithRetry(() => apiFetch('/api/transcribe?' + query.toString(), {
       method: 'POST', headers: { 'content-type': 'audio/mpeg' }, body: mp3, signal: AbortSignal.timeout(90000)
     }), { backoffMs: [4000, 12000, 20000], maxWaitMs: 65000 });
@@ -127,7 +122,7 @@ export async function transcribeOnServer(
     }
     const result = (await response.json()) as ServerResult;
     const code = lang || (result.language ? LANGUAGE_CODES[result.language.toLowerCase()] ?? result.language.slice(0, 2).toLowerCase() : undefined);
-    const heard = sungWords(result, part.start, notes, code);
+    const heard = sungWords(result, part.start, notes, code).map(word => ({ ...word, clip: index }));
     diag('Lyrics (server): part ' + (index + 1) + '/' + parts.length + ' · ' + heard.length + ' words' + (result.language ? ' · ' + result.language : ''), 'ok');
     words.push(...heard);
   }

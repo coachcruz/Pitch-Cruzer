@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-10-06 — Lyric integrity: repeats kept, one pitch verdict, strict lyric fit, CJK syllables, karaoke hardening, no Whisper prompts
+
+Six defects fixed, all in the lyrics → notes → display chain. The standing rule is now stated
+plainly in the code: transcription supplies the word sequence and nothing else — no timestamp,
+no prompt, no threshold is ever the authority for timing.
+
+- **Repeated words are never deleted.** The heard-word dedup used to drop any identical word
+  sung within 0.3 s ("love love love" became "love"), and missed real duplicates from
+  overlapping transcription windows. Each missing or ghost word shifted every word after it
+  onto the wrong notes. Words are now tagged with their transcription window, and only the
+  same word heard in the same/adjacent window at an overlapping time is treated as a
+  duplicate. Repeats always survive.
+- **One pitch comparison everywhere.** The karaoke words and the staff trail disagreed: karaoke
+  read the right-note-wrong-octave as blue even with octave forgiveness off, and used a 1.0
+  semitone band where the staff used 1.2. Both now use the same 0.5/1.0 bars and fold the
+  octave exactly when forgiveness is on — the same verdict take scoring uses.
+- **Internet timed lyrics must clearly fit.** Timed lyrics found online were accepted when
+  barely a third of their lines landed near the singer's phrases, and slid ±40 s looking for
+  a fit — enough to shift a whole song seconds off. The bar is now 0.7 over ±15 s; anything
+  doubtful falls back to listening to the singer.
+- **CJK lyrics split into syllables.** Han, Hangul, hiragana and katakana words were kept
+  whole, so a melisma highlighted as one block. Every character is one sung syllable, so
+  they now split character by character.
+- **Karaoke survives bad line data.** One line with a broken time used to freeze the lyric
+  highlight, the pitch colors and the scroll with no error. Broken lines are now skipped and
+  the view falls back to the nearest line instead of going white.
+- **Redo lyrics no longer prompts Whisper.** The reattempt fed the first pass's words back in
+  as Whisper's initial prompt, biasing what it heard. Every listen is now a fresh listen;
+  the two passes are still merged afterwards, deterministically, by `mergeHeard`.
+
 ## 2026-10-01 — YouTube reference video (reference-only)
 
 - **Reference video (listening only).** The Add-a-song card has an optional "Reference video"

@@ -11,9 +11,12 @@ describe('pitchVerdict', () => {
     expect(pitchVerdict(59.5, 60, 0.5)).toBe('perfect');
   });
 
-  it('calls the right note in the wrong octave blue', () => {
-    expect(pitchVerdict(72.1, 60, 0.5)).toBe('blue');
-    expect(pitchVerdict(47.9, 60, 0.5)).toBe('blue');
+  it('calls the right note in the wrong octave blue only when octave forgiveness is on', () => {
+    // One comparison everywhere: without forgiveness a wrong octave is red, like the staff trail.
+    expect(pitchVerdict(72.1, 60, 0.5)).toBe('red');
+    expect(pitchVerdict(47.9, 60, 0.5)).toBe('red');
+    expect(pitchVerdict(72.1, 60, 0.5, true)).toBe('blue');
+    expect(pitchVerdict(47.9, 60, 0.5, true)).toBe('blue');
   });
 
   it('calls almost-on-pitch blue', () => {
