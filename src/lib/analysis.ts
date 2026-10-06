@@ -1,6 +1,7 @@
 import { estimateKey, median, type MusicalKey } from './music';
 import type { Beat } from './beat';
 import type { TimedWord } from './transcribe.worker';
+import { segmentMergedWord } from './segment';
 
 export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSeconds: number }
 
@@ -646,11 +647,27 @@ function linesFromNotes(notes: NoteEvent[]): LyricLine[] {
 }
 
 export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] {
-  if (!timed.length) return linesFromNotes(notes);
+  // Fast singing merges words into one transcription token ("sixfootsix"). Split those back
+  // into real words before anything else, dividing the token's window by character length.
+  // Only all-known-word splits happen; anything else is left exactly as heard.
+  const words = timed.flatMap(word => {
+    const parts = segmentMergedWord(word.text);
+    if (!parts) return [word];
+    const total = parts.reduce((sum, part) => sum + part.length, 0);
+    let start = word.start;
+    return parts.map(part => {
+      const end = start + ((word.end - word.start) * part.length) / total;
+      const split = { ...word, text: part, start, end };
+      start = end;
+      return split;
+    });
+  });
+  const timedWords = words;
+  if (!timedWords.length) return linesFromNotes(notes);
   if (!notes.length) {
     // Degenerate: note detection found no vocal at all, so there is no measured structure to
     // bind to. The raw guess windows stand in — the only signal — so the words still have times.
-    const words = timed.map(word => {
+    const built = timedWords.map(word => {
       const parts = syllabify(word.text);
       const span = Math.max(0.01, word.end - word.start) / parts.length;
       const syllables: Syllable[] = parts.map((part, k) => ({
@@ -658,23 +675,23 @@ export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] 
       }));
       return { text: word.text, start: word.start, end: word.end, syllables, lang: word.lang };
     });
-    return groupLines(words, new Set(), notes);
+    return groupLines(built, new Set(), notes);
   }
   // The guess's times are ignored entirely: each heard word is a raw observation — its text in
   // sung order. Syllables bind to runs of the measured notes (see `bindSyllables`), and every
   // time and pitch below is derived from those runs. Shifting the input times changes nothing.
-  const runs = bindWordRuns(timed.map(word => word.text), notes);
-  const words: Word[] = [];
+  const runs = bindWordRuns(timedWords.map(word => word.text), notes);
+  const builtWords: Word[] = [];
   const flat: Syllable[] = [];
   const indexOf = new Map<NoteEvent, number>(notes.map((note, i) => [note, i]));
-  timed.forEach((word, i) => {
+  timedWords.forEach((word, i) => {
     const built = wordFromRun(word.text, runs[i], indexOf, word.lang);
-    words.push(built);
+    builtWords.push(built);
     flat.push(...built.syllables);
   });
   fillSyllableTimes(flat);
-  finishWordTimes(words);
-  return groupLines(words, new Set(), notes);
+  finishWordTimes(builtWords);
+  return groupLines(builtWords, new Set(), notes);
 }
 
 /** The longest stretch between `from` and `to` with no sung note (a rest in the melody). */
