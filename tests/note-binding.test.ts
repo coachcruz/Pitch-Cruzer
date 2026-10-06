@@ -215,6 +215,38 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
     expect(lines[0].words[0].syllables[0].midi).toBe(60);
     expect(lines[1].words[0].syllables[0].midi).toBe(62);
   });
+
+  it('ignores wildly-off old line times: binds by order alone, trusting no timestamp', () => {
+    const notes: NoteEvent[] = [
+      { start: 10.0, end: 10.5, midi: 60 },
+      { start: 10.5, end: 11.0, midi: 62 },
+      { start: 20.0, end: 20.5, midi: 64 },
+      { start: 20.5, end: 21.0, midi: 65 },
+    ];
+    const word = (text: string, start: number, end: number) => ({
+      text, start, end, syllables: [{ text, start, end, midi: null as number | null, notes: [] as number[] }],
+    });
+    // Old analysis, badly off: line 1's window sits 30 s late (past every note), line 2's 30 s early.
+    // The v1 windowed rebind gave line 1 the wrong notes and left line 2 stale; order-only must
+    // still land every syllable on its note.
+    const lines: LyricLine[] = [
+      { id: 'l1', start: 40.0, end: 41.0, words: [word('hey', 40.0, 40.5), word('you', 40.5, 41.0)] },
+      { id: 'l2', start: 0.0, end: 1.0, words: [word('now', 0.0, 0.5), word('go', 0.5, 1.0)] },
+    ];
+    rebaseToNoteRuns(lines, notes);
+    expect(lines[0].id).toBe('l1');
+    expect(lines[1].id).toBe('l2');
+    const first = lines[0].words.flatMap(w => w.syllables);
+    const second = lines[1].words.flatMap(w => w.syllables);
+    expect(first[0].start).toBeCloseTo(10.0, 6);
+    expect(first[1].start).toBeCloseTo(10.5, 6);
+    expect(second[0].start).toBeCloseTo(20.0, 6);
+    expect(second[1].start).toBeCloseTo(20.5, 6);
+    expect(lines[0].start).toBeCloseTo(10.0, 6);
+    expect(lines[0].end).toBeCloseTo(11.0, 6);
+    expect(lines[1].start).toBeCloseTo(20.0, 6);
+    expect(lines[1].end).toBeCloseTo(21.0, 6);
+  });
 });
 
 describe('alignToMelody note runs', () => {
