@@ -199,7 +199,7 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
       id: 'l1', start: 12.5, end: 16.5,
       words: [{
         text: 'love', start: 12.5, end: 16.5, lang: 'en',
-        syllables: [{ text: 'love', start: 12.5, end: 16.5, midi: 62, notes: [62] }],
+        syllables: [{ text: 'love', start: 12.5, end: 16.5, midi: 62, notes: [62], noteIndex: null, noteEnd: null }],
       }],
     }];
     rebaseToNoteRuns(lines, notes);
@@ -211,13 +211,39 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
     expect(lines[0].start).toBeCloseTo(10, 6);
   });
 
+  it('staples each syllable to its note indices — the karaoke follows structure, not timestamps', () => {
+    const notes: NoteEvent[] = [
+      { start: 10, end: 14, midi: 60 },
+      { start: 14, end: 18, midi: 62 },
+      { start: 18, end: 22, midi: 64 },
+    ];
+    const lines: LyricLine[] = [{
+      id: 'l1', start: 0, end: 0,
+      words: [{
+        text: 'love you', start: 0, end: 0, lang: 'en',
+        syllables: [
+          { text: 'love', start: 0, end: 0, midi: null, notes: [], noteIndex: null, noteEnd: null },
+          { text: 'you', start: 0, end: 0, midi: null, notes: [], noteIndex: null, noteEnd: null },
+        ],
+      }],
+    }];
+    rebaseToNoteRuns(lines, notes);
+    const [love, you] = lines[0].words[0].syllables;
+    // Structural binding: each syllable knows its notes by index. The karaoke follows these —
+    // no timestamp is ever consulted to know what's being sung.
+    expect(love.noteIndex).not.toBeNull();
+    expect(you.noteIndex).not.toBeNull();
+    expect(you.noteIndex).toBeGreaterThan(love.noteIndex!);
+    expect(love.noteEnd).toBeLessThanOrEqual(you.noteIndex!);
+  });
+
   it('moves the monotonic cursor on: lines cannot steal each other’s notes', () => {
     const notes: NoteEvent[] = [
       { start: 1.0, end: 1.4, midi: 60 },
       { start: 5.0, end: 5.4, midi: 62 },
     ];
     const word = (start: number, end: number) => ({
-      text: 'ah', start, end, syllables: [{ text: 'ah', start, end, midi: null as number | null, notes: [] as number[] }],
+      text: 'ah', start, end, syllables: [{ text: 'ah', start, end, midi: null as number | null, notes: [] as number[], noteIndex: null, noteEnd: null }],
     });
     const lines: LyricLine[] = [
       { id: 'l1', start: 1.0, end: 1.4, words: [word(1.0, 1.4)] },
@@ -236,7 +262,7 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
       { start: 20.5, end: 21.0, midi: 65 },
     ];
     const word = (text: string, start: number, end: number) => ({
-      text, start, end, syllables: [{ text, start, end, midi: null as number | null, notes: [] as number[] }],
+      text, start, end, syllables: [{ text, start, end, midi: null as number | null, notes: [] as number[], noteIndex: null, noteEnd: null }],
     });
     // Old analysis, badly off: line 1's window sits 30 s late (past every note), line 2's 30 s early.
     // The v1 windowed rebind gave line 1 the wrong notes and left line 2 stale; order-only must
@@ -326,14 +352,5 @@ describe('unvoiced syllables share the neighbor note', () => {
       expect(sylls[k].start).toBeGreaterThanOrEqual(sylls[k - 1].start);
     }
     expect(sylls[0].start).toBeCloseTo(13.1, 6);
-  });
-});
-
-describe('highlight lead', () => {
-  it('fires the highlight at the acoustic onset, ahead of the pitch onset', async () => {
-    const { highlightStart, HIGHLIGHT_LEAD } = await import('../src/views/practice/karaoke');
-    expect(HIGHLIGHT_LEAD).toBeGreaterThan(0);
-    expect(HIGHLIGHT_LEAD).toBeLessThan(0.15);
-    expect(highlightStart(10.0)).toBeCloseTo(10.0 - HIGHLIGHT_LEAD, 9);
   });
 });

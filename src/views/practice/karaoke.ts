@@ -1,10 +1,13 @@
-import { isTagLine, noteAt, type LyricLine, type NoteEvent, type SongAnalysis } from '../../lib/analysis';
+import { isTagLine, noteIndexAt, nextNoteIndexAt, type LyricLine, type SongAnalysis } from '../../lib/analysis';
 import { foldToOctave } from '../../lib/music';
 import { escapeHtml } from '../../ui/dom';
 import { syllablesHtml } from './text';
 
-/** Live pitch verdict for one syllable, painted while you sing. */
+/** Live pitch verdict for one frame, tallied while you sing — shown once per line, not per word. */
 export type PitchVerdict = 'perfect' | 'blue' | 'red' | 'silent';
+
+/** A finished line's verdict: the whole line's pitch, judged once. */
+export type LineVerdict = 'perfect' | 'good' | 'ok' | 'bad' | 'silent';
 
 /**
  * How the sung pitch compares to the expected note. One comparison, one set of colors, everywhere:
@@ -24,29 +27,19 @@ export function pitchVerdict(sung: number | null, expected: number, intoWord: nu
 }
 
 /**
- * Sung syllables begin with a consonant transition (~30–120 ms) before the pitch stabilizes,
- * but note onsets mark stable pitch. The lyric highlight fires at the acoustic onset — a fixed
- * perceptual lead — so words light up as they're sung, not a consonant late. Grading is
- * untouched: it reads the pitch, which starts at the note.
+ * Judges a finished line from its pitch tally: frames of each verdict while its notes sounded.
+ * Purple only when every voiced frame was perfect; green/blue/red by mean score; yellow when the
+ * line was mostly sung in silence. Null when the mic was off — no judgment without a singer.
  */
-export const HIGHLIGHT_LEAD = 0.07;
-
-/** The moment a syllable's highlight fires: its note onset pulled back to the acoustic onset. */
-export function highlightStart(start: number): number { return start - HIGHLIGHT_LEAD; }
-
-/**
- * Safety net for the word highlight: syllable starts are note onsets by construction now —
- * every syllable is bound to a run of the measured notes — so this usually changes nothing. It
- * stays for songs bound by older versions and odd cases, pulling the highlight to a nearby onset
- * when one is close so the lyrics light up with the singer.
- */
-export function snapToNoteOnset(start: number, end: number, notes: NoteEvent[]): number {
-  let best = start, bestDist = 0.25;
-  for (const note of notes) {
-    const dist = Math.abs(note.start - start);
-    if (dist < bestDist && note.start < end - 0.05) { best = note.start; bestDist = dist; }
-  }
-  return best;
+export function lineVerdict(tally: { perfect: number; blue: number; red: number; silent: number }): LineVerdict | null {
+  const voiced = tally.perfect + tally.blue + tally.red;
+  if (voiced + tally.silent === 0) return null;
+  if (tally.silent > voiced) return 'silent';
+  const mean = (tally.perfect + tally.blue * 0.5) / voiced;
+  if (mean === 1) return 'perfect';
+  if (mean >= 0.75) return 'good';
+  if (mean >= 0.4) return 'ok';
+  return 'bad';
 }
 
 export interface KaraokeState {
@@ -70,19 +63,20 @@ export interface KaraokeState {
 interface SylEntry {
   el: HTMLElement;
   row: HTMLElement;
-  /** Highlight start, snapped to the vocal's note onset. */
-  start: number;
-  end: number;
+  /** Structural binding: first/last note indices this syllable is stapled to (null: unbound). */
+  noteIndex: number | null;
+  noteEnd: number | null;
   /** The note the singer is supposed to sing (null: spoken/aside, no verdict). */
   midi: number | null;
 }
 
 /**
- * The Karaoke view: big lyrics that roll upward on their own at an even speed and light up word by
- * word as they're sung. Scrolling by hand pauses the roll for a few seconds. With the mic on, each
- * word also reacts to the live pitch: green for on pitch, blue for close or the right note in the
- * wrong octave, red for a wrong note, yellow when no voice is heard — and a line sung perfectly
- * all the way through glows purple.
+ * The Karaoke view: big lyrics that roll upward on their own and fill like liquid as they're
+ * sung — the fill follows the sounding note, so longer notes fill slower. Nothing here reads
+ * lyric timestamps: the active line is the line holding the sounding note's syllable, found
+ * through the structural note binding. Pitch is tallied silently while you sing and each line
+ * is judged once when it's done: purple with a shine for a perfect line, green/blue/red for
+ * the rest, yellow when no voice was heard. Scrolling by hand pauses the roll for a few seconds.
  */
 export class Karaoke {
   private current: HTMLElement | null = null;
@@ -92,13 +86,13 @@ export class Karaoke {
   /** While picking lines, the list stays where the person scrolls it. */
   holdScroll = false;
   private syls: SylEntry[] = [];
-  private byEl = new Map<HTMLElement, SylEntry>();
+  /** Note index → the syllable stapled to it. The showtime path follows notes, never timestamps. */
+  private byNoteIndex = new Map<number, SylEntry>();
   private sylsByRow = new Map<HTMLElement, SylEntry[]>();
-  private verdicts = new Map<HTMLElement, PitchVerdict>();
-  private locked = new Set<HTMLElement>();
   private finishedRows = new Set<HTMLElement>();
-  private pitchOn = false;
-  private pitchTime = NaN;
+  /** Pitch frames tallied for the current line's verdict. */
+  private tally = { perfect: 0, blue: 0, red: 0, silent: 0 };
+  private lastNoteTime = NaN;
   private sectionCoach: ((sectionId: string) => void) | undefined;
 
   constructor(
@@ -151,99 +145,67 @@ export class Karaoke {
     this.cueRows = [...state.cues.entries()].flatMap(([id, dots]) => {
       const row = this.list.querySelector<HTMLElement>(`[data-line="${id}"] .cueDots`);
       const line = this.analysis.lines.find(item => item.id === id);
-      return row && line ? [{ row, dots, entry: line.start }] : [];
+      // The line's entry is its first bound note's start — structure, not a stored timestamp.
+      const firstBound = line?.words.flatMap(word => word.syllables).find(syl => syl.noteIndex !== null);
+      const entry = firstBound?.noteIndex !== null && firstBound?.noteIndex !== undefined
+        ? this.analysis.notes[firstBound.noteIndex]?.start ?? NaN : NaN;
+      return row && Number.isFinite(entry) ? [{ row, dots, entry }] : [];
     });
-    // Index the syllables for the pitch layer (fresh slate: new DOM, no verdicts yet).
+    // Index the syllables by note: the showtime path follows notes, never timestamps.
     this.syls = [];
-    this.byEl = new Map();
+    this.byNoteIndex = new Map();
     this.sylsByRow = new Map();
-    this.resetPitch();
+    this.resetJudgment();
     for (const el of this.list.querySelectorAll<HTMLElement>('.syl')) {
       const row = el.closest<HTMLElement>('.lyricLine');
       if (!row) continue;
-      const start = Number(el.dataset.s), end = Number(el.dataset.e);
-      const raw = el.dataset.m;
+      const rawN = el.dataset.n, rawNe = el.dataset.ne, raw = el.dataset.m;
+      const noteIndex = rawN === undefined || rawN === '' ? null : Number(rawN);
+      const noteEnd = rawNe === undefined || rawNe === '' ? null : Number(rawNe);
       const midi = raw === undefined || raw === '' ? null : Number(raw);
-      const entry: SylEntry = { el, row, start: snapToNoteOnset(start, end, this.analysis.notes), end, midi };
+      const entry: SylEntry = { el, row, noteIndex, noteEnd, midi };
       this.syls.push(entry);
-      this.byEl.set(el, entry);
+      if (noteIndex !== null && noteEnd !== null) {
+        for (let i = noteIndex; i <= noteEnd; i += 1) {
+          if (!this.byNoteIndex.has(i)) this.byNoteIndex.set(i, entry);
+        }
+      }
       const group = this.sylsByRow.get(row) ?? [];
       group.push(entry);
       this.sylsByRow.set(row, group);
     }
   }
 
-  private setVerdict(el: HTMLElement, verdict: PitchVerdict | null): void {
-    const prev = this.verdicts.get(el);
-    if (prev === verdict) return;
-    if (prev) el.classList.remove('pitch-' + prev);
-    if (verdict) {
-      el.classList.add('pitch-' + verdict);
-      this.verdicts.set(el, verdict);
-    } else {
-      this.verdicts.delete(el);
-    }
+  /** The line is done: fill it fully and judge it once, from the whole line's pitch. */
+  private finishRow(row: HTMLElement): void {
+    if (this.finishedRows.has(row)) return;
+    this.finishedRows.add(row);
+    for (const entry of this.sylsByRow.get(row) ?? []) entry.el.style.setProperty('--fill', '1');
+    const verdict = lineVerdict(this.tally);
+    if (verdict) row.classList.add('lv-' + verdict);
+    this.tally = { perfect: 0, blue: 0, red: 0, silent: 0 };
   }
 
-  /** A syllable's window has passed: keep its final color and stop judging it. */
-  private lockSyl(entry: SylEntry): void {
-    this.locked.add(entry.el);
-    if (!this.verdicts.has(entry.el) && entry.midi !== null) this.setVerdict(entry.el, 'silent');
-  }
-
-  /** The line is done: lock every syllable, and glow purple if all of them were perfect. */
-  private finishLine(row: HTMLElement): void {
-    let judged = 0, perfect = 0;
-    for (const entry of this.sylsByRow.get(row) ?? []) {
-      if (entry.midi === null) continue;
-      if (!this.locked.has(entry.el)) this.lockSyl(entry);
-      judged += 1;
-      if (this.verdicts.get(entry.el) === 'perfect') perfect += 1;
-    }
-    if (judged > 0 && perfect === judged) row.classList.add('linePerfect');
-  }
-
-  private resetPitch(): void {
-    for (const el of this.verdicts.keys()) {
-      const verdict = this.verdicts.get(el)!;
-      el.classList.remove('pitch-' + verdict);
-    }
-    this.verdicts = new Map();
-    this.locked = new Set();
+  /** Seeked back (or re-rendered): clear every judgment and start the slate fresh. */
+  private resetJudgment(): void {
+    this.list.querySelectorAll('.lv-perfect,.lv-good,.lv-ok,.lv-bad,.lv-silent').forEach(row => {
+      row.classList.remove('lv-perfect', 'lv-good', 'lv-ok', 'lv-bad', 'lv-silent');
+    });
+    for (const entry of this.syls) entry.el.style.setProperty('--fill', '0');
     this.finishedRows = new Set();
-    this.pitchOn = false;
-    this.pitchTime = NaN;
-    this.list.querySelectorAll('.linePerfect').forEach(row => row.classList.remove('linePerfect'));
-  }
-
-  /** Live pitch layer: paint the current line's words from the mic, lock each word as it passes. */
-  private updatePitch(time: number, row: HTMLElement, sung: number | null | undefined, flexibleOctave: boolean): void {
-    if (sung === undefined) {
-      if (this.pitchOn) this.resetPitch();
-      return;
-    }
-    this.pitchOn = true;
-    if (time < this.pitchTime - 0.5) this.resetPitch();   // jumped back: fresh slate
-    this.pitchTime = time;
-    for (const entry of this.sylsByRow.get(row) ?? []) {
-      if (entry.midi === null || this.locked.has(entry.el)) continue;
-      if (time > entry.end + 0.15) { this.lockSyl(entry); continue; }
-      if (time < entry.start - 0.1) continue;
-      // The expected pitch is the artist's note sounding now — the same lookup take scoring
-      // and the staff use — not the note the word's time window overlapped when the lyrics were
-      // written. Lyric timestamps can be off by ~100-200 ms (transcription), which used to pull
-      // the wrong note in here and grade a right note wrong.
-      const target = noteAt(this.analysis.notes, time);
-      if (!target) continue;
-      this.setVerdict(entry.el, pitchVerdict(sung, target.midi, time - entry.start, flexibleOctave));
-    }
+    this.tally = { perfect: 0, blue: 0, red: 0, silent: 0 };
+    this.current = null;
   }
 
   /**
    * Called every frame while the Karaoke view is showing. `sung` is the live mic pitch
    * (vibrato-centered, null when nothing is heard) — undefined when the mic is off, in which
-   * case no pitch colors are painted. `flexibleOctave` is the "Forgive octave" setting, so the
-   * live colors match take scoring.
+   * case nothing is tallied and lines get no verdict. `flexibleOctave` is the "Forgive octave"
+   * setting, so the line verdicts match take scoring.
+   *
+   * The showtime path follows notes, never lyric timestamps: the sounding note's syllable
+   * decides the active line, the note's span drives the liquid fill, and the pitch tally
+   * judges each line once when it's done.
    */
   update(time: number, playing: boolean, sung?: number | null, flexibleOctave = false): void {
     // Silent count-in: the dots over the coming line light up on the beats before it.
@@ -253,64 +215,71 @@ export class Karaoke {
       if (showing) cue.row.querySelectorAll('i').forEach((dot, k) => dot.classList.toggle('on', time >= cue.dots[k]));
     }
     const rows = [...this.list.querySelectorAll<HTMLElement>('.lyricLine')];
-    const lines = this.analysis.lines;
-    if (!rows.length || rows.length !== lines.length) return;
-    // Bad data must never silently kill the view: lines with broken times are skipped, and if
-    // none qualifies, fall back to the nearest line by start instead of leaving every word white.
-    let index = lines.findIndex(line => Number.isFinite(line.end) && time < line.end);
-    if (index < 0) {
-      let best = 0, bestDist = Infinity;
-      lines.forEach((line, i) => {
-        if (!Number.isFinite(line.start)) return;
-        const dist = Math.abs(line.start - time);
-        if (dist < bestDist) { bestDist = dist; best = i; }
-      });
-      index = best;
+    if (!rows.length) return;
+    // Seeked back: fresh slate.
+    if (time < this.lastNoteTime - 0.5) this.resetJudgment();
+    this.lastNoteTime = time;
+
+    // What's being sung: the sounding note → its syllable → its line.
+    const notes = this.analysis.notes;
+    const sounding = noteIndexAt(notes, time);
+    let row: HTMLElement | null = sounding !== null ? this.byNoteIndex.get(sounding)?.row ?? null : null;
+    if (!row) {
+      // Rest: read ahead to the next sung line so the singer sees what's coming.
+      const next = nextNoteIndexAt(notes, time);
+      row = (next !== null ? this.byNoteIndex.get(next)?.row : undefined) ?? this.current;
     }
-    const row = rows[index];
+    if (!row) return;
+
     if (row !== this.current) {
-      if (this.current) {
-        this.finishLine(this.current);
-        this.finishedRows.add(this.current);
-      }
+      if (this.current) this.finishRow(this.current);
+      const index = rows.indexOf(row);
       rows.forEach((node, i) => node.classList.toggle('past', i < index));
-      this.current?.querySelectorAll('.syl').forEach(node => node.classList.remove('now'));
       this.current = row;
     }
-    // Light up the words of the current line as they're sung (snapped to the vocal's note onsets,
-    // firing at the acoustic onset via the highlight lead).
-    row.querySelectorAll<HTMLElement>('.syl').forEach(node => {
-      const entry = this.byEl.get(node);
-      const start = highlightStart(entry?.start ?? Number(node.dataset.s));
-      const end = entry?.end ?? Number(node.dataset.e);
-      node.classList.toggle('sung', time >= start);
-      node.classList.toggle('now', time >= start && time < end + 0.05);
-    });
-    this.updatePitch(time, row, sung, flexibleOctave);
-    // The last line never triggers a line change: finish it once every word is judged.
-    if (!this.finishedRows.has(row)) {
-      const entries = this.sylsByRow.get(row) ?? [];
-      if (entries.length && entries.every(entry => entry.midi === null || this.locked.has(entry.el))) {
-        this.finishLine(row);
-        this.finishedRows.add(row);
+
+    // Liquid fill: past syllables full, the sounding one filling with its note — longer notes
+    // fill slower, exactly as sung.
+    for (const entry of this.sylsByRow.get(row) ?? []) {
+      let fill = 0;
+      if (sounding !== null && entry.noteIndex !== null && entry.noteEnd !== null) {
+        if (entry.noteEnd < sounding) fill = 1;
+        else if (entry.noteIndex <= sounding) {
+          const note = notes[sounding];
+          fill = Math.max(0, Math.min(1, (time - note.start) / Math.max(0.05, note.end - note.start)));
+        }
+      }
+      entry.el.style.setProperty('--fill', fill.toFixed(3));
+    }
+
+    // Pitch tally for the line verdict (mic on only): judged per frame, shown once at line end.
+    // The expected pitch is the artist's note sounding now — the same lookup take scoring and
+    // the staff use.
+    if (sung !== undefined && sounding !== null) {
+      const note = notes[sounding];
+      const entry = this.byNoteIndex.get(sounding);
+      if (entry && entry.midi !== null) {
+        const verdict = pitchVerdict(sung, note.midi, time - note.start, flexibleOctave);
+        if (verdict === 'perfect') this.tally.perfect += 1;
+        else if (verdict === 'blue') this.tally.blue += 1;
+        else if (verdict === 'red') this.tally.red += 1;
+        else if (verdict === 'silent') this.tally.silent += 1;
       }
     }
-    // Stopped: follow only when the position changes, so the list can be browsed.
-    if (performance.now() < this.handScrollUntil || this.holdScroll || (!playing && time === this.lastTime)) return;
-    this.lastTime = time;
-    // Glide at an even speed from one line's start to the next, so the roll never jumps or stalls;
-    // the line being sung sits about a third of the way down. A line with a broken start is
-    // skipped — never a wall the scroll dies on.
-    let from = -1;
-    for (let i = 0; i < lines.length; i += 1) {
-      const start = lines[i].start;
-      if (Number.isFinite(start) && start <= time) from = i;
+
+    // The last line never triggers a row change: finish it once its notes are done.
+    if (row === rows[rows.length - 1] && !this.finishedRows.has(row)) {
+      const lastNote = notes[notes.length - 1];
+      if (!lastNote || time >= lastNote.end) this.finishRow(row);
     }
-    const a = rows[Math.max(0, from)], b = rows[from + 1];
-    const nextStart = b ? lines[from + 1].start : NaN;
-    const progress = from < 0 || !Number.isFinite(nextStart) ? 0 : Math.max(0, Math.min(1, (time - lines[from].start) / Math.max(0.1, nextStart - lines[from].start)));
-    const y = a.offsetTop + (b ? (b.offsetTop - a.offsetTop) * progress : 0);
-    this.list.scrollTop = y - this.list.clientHeight * 0.36;
+
+    // Scroll: the active row eases to a third of the way down. Stopped: follow only when the
+    // position changes, so the list can be browsed.
+    if (performance.now() >= this.handScrollUntil && !this.holdScroll && (playing || time !== this.lastTime)) {
+      const target = row.offsetTop - this.list.clientHeight * 0.36;
+      this.list.scrollTop += (target - this.list.scrollTop) * 0.15;
+    }
+    this.lastTime = time;
   }
 
   /** Forget the scroll position (e.g. after switching views) so the next update re-centers. */

@@ -7,7 +7,16 @@ export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSecon
 /** One sung note of the original vocal: a stable pitch held for a stretch of time. */
 export interface NoteEvent { start: number; end: number; midi: number }
 
-export interface Syllable { text: string; start: number; end: number; midi: number | null; notes: number[] }
+export interface Syllable {
+  text: string; start: number; end: number; midi: number | null; notes: number[];
+  /**
+   * Structural binding: indices into the analysis' note array of the first and last note this
+   * syllable is stapled to (a melisma spans several). Null when unbound. The karaoke view follows
+   * these — never timestamps — to know what's being sung. `notes` (rounded MIDI values) stays for
+   * the note-name labels.
+   */
+  noteIndex: number | null; noteEnd: number | null;
+}
 /**
  * `aside`: text inside [square brackets] — a direction like [Chorus] or [guitar solo], not sung. It's
  * shown differently, has no syllables or notes, and is left out of timing, the staff and scoring.
@@ -33,7 +42,7 @@ export const NOTES_VERSION = 3;   // 3: fewer notes read an octave low (tenor, a
  * the rest stale. V2 binds the whole syllable sequence to the note sequence by order alone —
  * no timestamp is trusted at all.
  */
-export const BINDING_VERSION = 2;
+export const BINDING_VERSION = 3;
 
 export interface SongAnalysis {
   duration: number;
@@ -254,6 +263,32 @@ export function noteAt(notes: NoteEvent[], time: number): NoteEvent | null {
   return null;
 }
 
+/**
+ * Index of the note sounding at `time`, or null in a rest. The karaoke view follows this —
+ * note objects, never lyric timestamps — to know what's being sung.
+ */
+export function noteIndexAt(notes: NoteEvent[], time: number): number | null {
+  let lo = 0, hi = notes.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (time < notes[mid].start) hi = mid - 1;
+    else if (time >= notes[mid].end) lo = mid + 1;
+    else return mid;
+  }
+  return null;
+}
+
+/** Index of the first note starting at or after `time` — the coming phrase during a rest. */
+export function nextNoteIndexAt(notes: NoteEvent[], time: number): number | null {
+  let lo = 0, hi = notes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (notes[mid].start < time) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < notes.length ? lo : null;
+}
+
 export function keyAndRange(notes: NoteEvent[]): { key: MusicalKey | null; range: [number, number] | null } {
   if (!notes.length) return { key: null, range: null };
   const histogram = new Array<number>(12).fill(0);
@@ -404,15 +439,21 @@ export function bindSyllables(syllables: Array<{ text: string }>, notes: NoteEve
  *   midi null, notes [].
  * Each voiced syllable spans its sub-run; its midi is the sub-run's longest note (tie → first).
  */
-export function syllablesFromRun(wordText: string, run: NoteEvent[], lang?: string): Syllable[] {
+export function syllablesFromRun(wordText: string, run: NoteEvent[], lang?: string, indexOf?: Map<NoteEvent, number>): Syllable[] {
   // `lang` is reserved: syllabification is language-agnostic today, but per-word language will
   // matter if that ever changes — kept in the signature so callers don't have to change later.
   void lang;
+  // `indexOf` staples each syllable to its notes structurally (noteIndex/noteEnd). Without it
+  // (tests, old callers) the syllables bind by time as before and the indices stay null.
+  const at = (note: NoteEvent): number | null => indexOf?.get(note) ?? null;
   const parts = syllabify(wordText);
   const voiced = (text: string, sub: NoteEvent[]): Syllable => {
     let best = sub[0];
     for (const note of sub) if (note.end - note.start > best.end - best.start) best = note;
-    return { text, start: sub[0].start, end: sub[sub.length - 1].end, midi: best.midi, notes: distinctRounded(sub) };
+    return {
+      text, start: sub[0].start, end: sub[sub.length - 1].end, midi: best.midi, notes: distinctRounded(sub),
+      noteIndex: at(sub[0]), noteEnd: at(sub[sub.length - 1]),
+    };
   };
   if (run.length >= parts.length) {
     let host = 0;
@@ -423,7 +464,7 @@ export function syllablesFromRun(wordText: string, run: NoteEvent[], lang?: stri
   }
   return parts.map((part, k) => k < run.length
     ? voiced(part, [run[k]])
-    : { text: part, start: NaN, end: NaN, midi: null, notes: [] });
+    : { text: part, start: NaN, end: NaN, midi: null, notes: [], noteIndex: null, noteEnd: null });
 }
 
 /**
@@ -477,8 +518,8 @@ function fillSyllableTimes(syllables: Syllable[]): void {
 }
 
 /** One Word from its note run (unvoiced syllables still need `fillSyllableTimes`). */
-function wordFromRun(text: string, run: NoteEvent[], lang?: string): Word {
-  return { text, start: NaN, end: NaN, syllables: syllablesFromRun(text, run, lang), lang };
+function wordFromRun(text: string, run: NoteEvent[], indexOf: Map<NoteEvent, number>, lang?: string): Word {
+  return { text, start: NaN, end: NaN, syllables: syllablesFromRun(text, run, lang, indexOf), lang };
 }
 
 /** After `fillSyllableTimes`, each word's window is its syllables' span. */
@@ -586,9 +627,9 @@ export function groupLines(words: Word[], hardBreaks: Set<number> = new Set(), n
 
 /** Without lyrics, turn sung phrases into lines of ♪ so notes are still shown in time. */
 function linesFromNotes(notes: NoteEvent[]): LyricLine[] {
-  const words: Word[] = notes.map(note => ({
+  const words: Word[] = notes.map((note, index) => ({
     text: '♪', start: note.start, end: note.end,
-    syllables: [{ text: '♪', start: note.start, end: note.end, midi: note.midi, notes: [Math.round(note.midi)] }]
+    syllables: [{ text: '♪', start: note.start, end: note.end, midi: note.midi, notes: [Math.round(note.midi)], noteIndex: index, noteEnd: index }]
   }));
   const lines: LyricLine[] = [];
   let current: Word[] = [];
@@ -613,7 +654,7 @@ export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] 
       const parts = syllabify(word.text);
       const span = Math.max(0.01, word.end - word.start) / parts.length;
       const syllables: Syllable[] = parts.map((part, k) => ({
-        text: part, start: word.start + span * k, end: word.start + span * (k + 1), midi: null, notes: []
+        text: part, start: word.start + span * k, end: word.start + span * (k + 1), midi: null, notes: [], noteIndex: null, noteEnd: null
       }));
       return { text: word.text, start: word.start, end: word.end, syllables, lang: word.lang };
     });
@@ -625,8 +666,9 @@ export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] 
   const runs = bindWordRuns(timed.map(word => word.text), notes);
   const words: Word[] = [];
   const flat: Syllable[] = [];
+  const indexOf = new Map<NoteEvent, number>(notes.map((note, i) => [note, i]));
   timed.forEach((word, i) => {
-    const built = wordFromRun(word.text, runs[i], word.lang);
+    const built = wordFromRun(word.text, runs[i], indexOf, word.lang);
     words.push(built);
     flat.push(...built.syllables);
   });
@@ -851,7 +893,7 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     const slot = Math.max(0.1, analysis.duration / Math.max(1, typed.length));
     const words = typed.map((word, k) => ({
       text: word, start: slot * k, end: slot * (k + 0.9),
-      syllables: syllabify(word).map(part => ({ text: part, start: slot * k, end: slot * (k + 0.9), midi: null, notes: [] as number[] }))
+      syllables: syllabify(word).map(part => ({ text: part, start: slot * k, end: slot * (k + 0.9), midi: null, notes: [] as number[], noteIndex: null, noteEnd: null }))
     }));
     const withA = withAsides(allTokens, words, 0);
     const lineBreaks = new Set<number>();
@@ -906,8 +948,9 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
   }
   const words: Word[] = [];
   const flat: Syllable[] = [];
+  const indexOf = new Map<NoteEvent, number>(notes.map((note, i) => [note, i]));
   typed.forEach((word, i) => {
-    const built = wordFromRun(word, runs[i]);
+    const built = wordFromRun(word, runs[i], indexOf);
     words.push(built);
     flat.push(...built.syllables);
   });
@@ -1018,6 +1061,7 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
 
   const words: Word[] = [];
   const hardBreaks = new Set<number>();
+  const indexOf = new Map<NoteEvent, number>(notes.map((note, i) => [note, i]));
   withText.forEach((line, index) => {
     const start = line.time + offset;
     const later = withText.slice(index + 1).find((_, k) => tokenLines[index + 1 + k].some(token => !token.aside));
@@ -1041,7 +1085,7 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
         const from = start + (span * k) / texts.length, to = start + (span * (k + 1)) / texts.length;
         run = notes.filter(note => note.end > from && note.start < to);
       }
-      return wordFromRun(text, run);
+      return wordFromRun(text, run, indexOf);
     });
     const flat: Syllable[] = sungWords.flatMap(word => word.syllables);
     fillSyllableTimes(flat);
@@ -1059,7 +1103,9 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
  * around its old times; when those were seconds off, line 1 grabbed the wrong notes and later
  * lines were left stale (karaoke lit the first line, then died). Here the whole sung syllable
  * sequence binds to the whole note sequence by order alone — the same dynamic program fresh
- * prepares use — so badly-off old analyses rebind correctly. Line objects are mutated in place,
+ * prepares use — so badly-off old analyses rebind correctly. Each syllable also records its
+ * notes' indices (noteIndex/noteEnd): the karaoke view follows those structurally, so lyric
+ * timestamps are never consulted at showtime. Line objects are mutated in place,
  * so line ids (and anything keyed by them) survive. Line ids, word order and text, asides and
  * ♪ words are preserved — only times, midis and note lists change.
  */
@@ -1073,10 +1119,15 @@ export function rebaseToNoteRuns(lines: LyricLine[], notes: NoteEvent[]): void {
     }
   if (!flat.length) return;
   const runs = bindSyllables(flat.map(syllable => ({ text: syllable.text })), notes);
+  // Structural binding: each syllable staples to its notes by index, not by time. The karaoke
+  // view follows these indices — lyric timestamps are never consulted at showtime.
+  const indexOf = new Map<NoteEvent, number>();
+  notes.forEach((note, i) => indexOf.set(note, i));
   flat.forEach((syllable, k) => {
     const run = runs[k];
     if (!run.length) {
       syllable.start = NaN; syllable.end = NaN; syllable.midi = null; syllable.notes = [];
+      syllable.noteIndex = null; syllable.noteEnd = null;
     } else {
       let best = run[0];
       for (const note of run) if (note.end - note.start > best.end - best.start) best = note;
@@ -1084,6 +1135,8 @@ export function rebaseToNoteRuns(lines: LyricLine[], notes: NoteEvent[]): void {
       syllable.end = run[run.length - 1].end;
       syllable.midi = best.midi;
       syllable.notes = distinctRounded(run);
+      syllable.noteIndex = indexOf.get(run[0]) ?? null;
+      syllable.noteEnd = indexOf.get(run[run.length - 1]) ?? null;
     }
   });
   fillSyllableTimes(flat);

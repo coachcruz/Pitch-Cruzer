@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-10-06 — Karaoke rewrite: the view follows notes, not timestamps
+
+The karaoke view no longer reads lyric timestamps at all — this finishes the design from
+2026-10-04 instead of patching around it.
+
+- **Structural binding.** Every syllable now records its notes' indices (`noteIndex`/`noteEnd`,
+  binding v3). Old songs re-derive them on open through the existing rebind — no timestamp
+  migration.
+- **Note-following showtime.** The active line is the line holding the sounding note's
+  syllable (`noteIndexAt` → syllable → row). Rests read ahead to the next sung line. Line
+  start/end times are never consulted, so "broken line times" is no longer a failure category.
+- **Liquid fill instead of live word colors.** Each syllable fills left to right with its
+  note — longer notes fill slower, exactly as sung. The fill is progress, not judgment.
+- **One verdict per line.** Pitch is tallied silently while you sing; when the line ends it's
+  judged once from the whole line: purple with a shine sweep for all-perfect, green/blue/red
+  otherwise, yellow when no voice was heard. No mic, no judgment.
+- **Scroll** eases the active row to a third of the way down — no line-time interpolation.
+
 ## 2026-10-06 — Lyric integrity: repeats kept, one pitch verdict, strict lyric fit, CJK syllables, karaoke hardening, no Whisper prompts
 
 Six defects fixed, all in the lyrics → notes → display chain. The standing rule is now stated
