@@ -103,6 +103,8 @@ interface SylEntry {
    */
   fillStart: number;
   fillEnd: number;
+  /** Last fill value written to the DOM (quantized); avoids redundant style writes per frame. */
+  lastFill: number;
 }
 
 /**
@@ -198,7 +200,7 @@ export class Karaoke {
       const noteIndex = rawN === undefined || rawN === '' ? null : Number(rawN);
       const noteEnd = rawNe === undefined || rawNe === '' ? null : Number(rawNe);
       const midi = raw === undefined || raw === '' ? null : Number(raw);
-      const entry: SylEntry = { el, row, noteIndex, noteEnd, midi, fillStart: 0, fillEnd: 0 };
+      const entry: SylEntry = { el, row, noteIndex, noteEnd, midi, fillStart: 0, fillEnd: 0, lastFill: -1 };
       this.syls.push(entry);
       if (noteIndex !== null && noteEnd !== null) {
         for (let i = noteIndex; i <= noteEnd; i += 1) {
@@ -237,7 +239,10 @@ export class Karaoke {
   private finishRow(row: HTMLElement): void {
     if (this.finishedRows.has(row)) return;
     this.finishedRows.add(row);
-    for (const entry of this.sylsByRow.get(row) ?? []) entry.el.style.setProperty('--fill', '1');
+    for (const entry of this.sylsByRow.get(row) ?? []) {
+      entry.el.style.setProperty('--fill', '1');
+      entry.lastFill = 1;
+    }
     const verdict = lineVerdict(this.tally);
     if (verdict) row.classList.add('lv-' + verdict);
     this.tally = { perfect: 0, blue: 0, red: 0, silent: 0 };
@@ -248,7 +253,10 @@ export class Karaoke {
     this.list.querySelectorAll('.lv-perfect,.lv-good,.lv-ok,.lv-bad,.lv-silent').forEach(row => {
       row.classList.remove('lv-perfect', 'lv-good', 'lv-ok', 'lv-bad', 'lv-silent');
     });
-    for (const entry of this.syls) entry.el.style.setProperty('--fill', '0');
+    for (const entry of this.syls) {
+      entry.el.style.setProperty('--fill', '0');
+      entry.lastFill = 0;
+    }
     this.finishedRows = new Set();
     this.tally = { perfect: 0, blue: 0, red: 0, silent: 0 };
     this.current = null;
@@ -278,29 +286,37 @@ export class Karaoke {
     this.lastNoteTime = time;
 
     // What's being sung: the sounding note → its syllable → its line.
+    // The JUDGED row only advances on an actually sounding note — never on a fallback guess.
+    // During gaps (no detected note), the display may read ahead, but rows are not finished early.
     const notes = this.analysis.notes;
     const sounding = noteIndexAt(notes, time);
-    let row: HTMLElement | null = sounding !== null ? this.byNoteIndex.get(sounding)?.row ?? null : null;
+    const soundingRow: HTMLElement | null = sounding !== null ? this.byNoteIndex.get(sounding)?.row ?? null : null;
+    if (soundingRow && soundingRow !== this.current) {
+      if (this.current) this.finishRow(this.current);
+      const index = rows.indexOf(soundingRow);
+      rows.forEach((node, i) => node.classList.toggle('past', i < index));
+      this.current = soundingRow;
+    }
+    // Display row: the sounding row, or read ahead to the next sung line during rests so the
+    // singer sees what's coming. This never triggers a row change or a verdict.
+    let row: HTMLElement | null = soundingRow;
     if (!row) {
-      // Rest: read ahead to the next sung line so the singer sees what's coming.
       const next = nextNoteIndexAt(notes, time);
       row = (next !== null ? this.byNoteIndex.get(next)?.row : undefined) ?? this.current;
     }
     if (!row) return;
 
-    if (row !== this.current) {
-      if (this.current) this.finishRow(this.current);
-      const index = rows.indexOf(row);
-      rows.forEach((node, i) => node.classList.toggle('past', i < index));
-      this.current = row;
-    }
-
     // Liquid fill: one continuous wipe through the whole song. Each syllable fills across
     // its time slice (its note run, or its share of a shared run) — longer slices fill slower,
     // exactly as sung. Past syllables read 1, future ones 0, all from the same clock.
+    // DOM writes are quantized: settled syllables (0 or 1) are never rewritten.
     for (const entry of this.syls) {
-      const fill = entry.noteIndex === null ? 0 : fillForRun(entry.fillStart, entry.fillEnd, time);
-      entry.el.style.setProperty('--fill', fill.toFixed(3));
+      const raw = entry.noteIndex === null ? 0 : fillForRun(entry.fillStart, entry.fillEnd, time);
+      const fill = Math.round(raw * 500) / 500;
+      if (fill !== entry.lastFill) {
+        entry.lastFill = fill;
+        entry.el.style.setProperty('--fill', fill.toFixed(3));
+      }
     }
 
     // Pitch tally for the line verdict (mic on only): judged per frame, shown once at line end.
