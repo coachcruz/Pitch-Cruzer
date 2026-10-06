@@ -27,9 +27,13 @@ export const NOTES_VERSION = 3;   // 3: fewer notes read an octave low (tenor, a
  * Bump when the lyric↔pitch binding changes, so saved songs re-derive every syllable's time and
  * pitch from the measured notes when opened. Version 1 is the note-run rework: no lyric timestamp
  * is the authority for any word/syllable time or pitch — each syllable is bound to a run of the
- * artist's NoteEvents and its start/end/midi are derived from that run.
+ * artist's NoteEvents and its start/end/midi are derived from that run. Version 2 fixes the v1
+ * rebind itself: v1 found each line's notes in a ±0.35 s window around its OLD times, so old
+ * analyses whose line times were seconds off bound the first line to the wrong notes and left
+ * the rest stale. V2 binds the whole syllable sequence to the note sequence by order alone —
+ * no timestamp is trusted at all.
  */
-export const BINDING_VERSION = 1;
+export const BINDING_VERSION = 2;
 
 export interface SongAnalysis {
   duration: number;
@@ -1042,48 +1046,42 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
 // ---------------------------------------------------------------- old-song upgrade
 
 /**
- * Re-derives every syllable's time and pitch from the measured notes, in place, for songs bound
- * before the note-run rework (their syllables trusted transcription timestamps). Line ids, word
- * order and text, asides and ♪ words are preserved — only times, midis and note lists change.
- *
- * Each line searches the notes near its old window (±0.35 s; the window is only a search
- * neighborhood, never the authority), binds its sung syllables to that pool (see
- * `bindSyllables`), and rewrites each syllable from its own run. A monotonic note cursor keeps
- * lines from stealing each other's notes.
+ * Re-derives every syllable's time and pitch from the measured notes, trusting NO timestamp —
+ * not even the old line windows. The v1 rebind found each line's notes in a ±0.35 s window
+ * around its old times; when those were seconds off, line 1 grabbed the wrong notes and later
+ * lines were left stale (karaoke lit the first line, then died). Here the whole sung syllable
+ * sequence binds to the whole note sequence by order alone — the same dynamic program fresh
+ * prepares use — so badly-off old analyses rebind correctly. Line objects are mutated in place,
+ * so line ids (and anything keyed by them) survive. Line ids, word order and text, asides and
+ * ♪ words are preserved — only times, midis and note lists change.
  */
 export function rebaseToNoteRuns(lines: LyricLine[], notes: NoteEvent[]): void {
-  let cursor = 0;
+  if (!notes.length) return;   // no measured singing: nothing to bind to, leave times as they were
+  const flat: Syllable[] = [];
+  for (const line of lines)
+    for (const word of line.words) {
+      if (word.aside || !word.syllables.length) continue;
+      flat.push(...word.syllables);
+    }
+  if (!flat.length) return;
+  const runs = bindSyllables(flat.map(syllable => ({ text: syllable.text })), notes);
+  flat.forEach((syllable, k) => {
+    const run = runs[k];
+    if (!run.length) {
+      syllable.start = NaN; syllable.end = NaN; syllable.midi = null; syllable.notes = [];
+    } else {
+      let best = run[0];
+      for (const note of run) if (note.end - note.start > best.end - best.start) best = note;
+      syllable.start = run[0].start;
+      syllable.end = run[run.length - 1].end;
+      syllable.midi = best.midi;
+      syllable.notes = distinctRounded(run);
+    }
+  });
+  fillSyllableTimes(flat);
   for (const line of lines) {
-    const pool: NoteEvent[] = [];
-    let lastIdx = cursor;
-    for (let i = cursor; i < notes.length && notes[i].start < line.end + 0.35; i += 1) {
-      if (notes[i].end > line.start - 0.35) { pool.push(notes[i]); lastIdx = i; }
-    }
-    if (!pool.length) continue;   // no measured singing near this line: leave it as it was
-    cursor = lastIdx + 1;
-    const sung = line.words.filter(word => !word.aside && word.syllables.length);
-    const flat = sung.flatMap(word => word.syllables.map(text => ({ text: text.text })));
-    const runs = bindSyllables(flat, pool);
-    const rewritten: Syllable[] = [];
-    let k = 0;
-    for (const word of sung) {
-      for (const syllable of word.syllables) {
-        const run = runs[k++];
-        if (!run.length) {
-          syllable.start = NaN; syllable.end = NaN; syllable.midi = null; syllable.notes = [];
-        } else {
-          let best = run[0];
-          for (const note of run) if (note.end - note.start > best.end - best.start) best = note;
-          syllable.start = run[0].start;
-          syllable.end = run[run.length - 1].end;
-          syllable.midi = best.midi;
-          syllable.notes = distinctRounded(run);
-        }
-        rewritten.push(syllable);
-      }
-    }
-    fillSyllableTimes(rewritten);
-    for (const word of sung) {
+    for (const word of line.words) {
+      if (word.aside || !word.syllables.length) continue;
       word.start = word.syllables[0].start;
       word.end = word.syllables[word.syllables.length - 1].end;
     }
