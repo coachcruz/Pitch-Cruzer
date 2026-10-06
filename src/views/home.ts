@@ -63,7 +63,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       <div class="videoSide">
         <strong id="videoTitle" class="videoTitle"></strong>
         <div class="recordRow">
-          <button id="vRecord" class="btn record">● Record the song</button>
+          <button id="vRecord" class="btn record">● Practice run</button>
           <button id="vStop" class="btn danger hidden">■ Stop</button>
           <button id="vRestart" class="btn ghost" title="Back to the start (while recording: throw away the take and start over)">↺ Restart</button>
           <span id="vTime" class="mono">0:00</span>
@@ -80,7 +80,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
           <div class="row"><button id="shareGo" class="btn primary">Got it — record</button><button id="shareCancel" class="btn ghost">Cancel</button></div>
         </div>
         <p id="noTabAudio" class="notice small hidden">This browser can’t record a tab’s sound — Safari, Firefox and phones can’t share it. To record this song, open Pitch Cruzer in Chrome or Edge on a computer. Or download the song and use 📁 Upload a file.</p>
-        <p class="hint small">Plays from the start and stops by itself at the end.</p>
+        <p class="hint small"><b>Practice run</b> — records the song from the video so you can listen first. Plays from the start and stops by itself at the end.</p>
       </div>
     </div>
 
