@@ -61,9 +61,12 @@ export function yin(
   // octave lower. This fixes vowels whose resonance boosts the 2nd harmonic (read an octave high) and
   // catches subharmonic (period-doubled) singing. In a full mix, chords also repeat every few cycles,
   // so there it only applies above the normal voice floor (see minHz).
+  // Floor: never drop below 55 Hz (G1) — below that is room rumble or mic noise, not singing.
+  // Deep baritone voices can trigger false subharmonic drops; the 0.15 threshold alone isn't enough.
   const doubled = lag * 2;
+  const droppedHz = sampleRate / doubled;
   // (Not above ~800 Hz: there a period is only a dozen samples long and the doubled one looks falsely clean.)
-  if (sampleRate / lag < 800 && (subharmonics || sampleRate / doubled >= 65) && doubled + 2 <= maxLag && cmnd[lag] > 0.05) {
+  if (sampleRate / lag < 800 && droppedHz >= 55 && (subharmonics || droppedHz >= 65) && doubled + 2 <= maxLag && cmnd[lag] > 0.05) {
     let best = doubled;
     for (let tau = doubled - 2; tau <= doubled + 2; tau += 1) if (cmnd[tau] < cmnd[best]) best = tau;
     if (cmnd[best] < cmnd[lag] * 0.15) lag = best;   // much cleaner, not just a bit: 0.4 pulled real notes down an octave

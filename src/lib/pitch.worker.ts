@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { yin, rms } from './yin';
-import { frequencyToMidi, MAX_HZ, MIN_HZ } from './music';
+import { frequencyToMidi, MAX_HZ } from './music';
 
 /**
  * Builds a pitch track for a whole (mono, low sample-rate) vocal stem off the main thread.
@@ -29,7 +29,10 @@ self.onmessage = (event: MessageEvent<PitchJob>) => {
     if (energy[index] < 0.004) continue;
     // A full mix of chords "repeats" at very low periods (phantom bass notes), so only an isolated
     // voice gets the full subharmonic range; the full mix stops at C2 like a normal voice.
-    const result = yin(frame, sampleRate, soloVoice ? MIN_HZ : 65, MAX_HZ, 0.2, soloVoice);
+    // Solo voice floor is 55 Hz (G1): below that is room rumble, mic handling, or subharmonic
+    // ghosts — not singing. Deep baritone voices trigger false low detections; the 30 Hz MIN_HZ
+    // was catching C1 (33 Hz) noise. Full mix stays at 65 Hz to avoid phantom bass notes.
+    const result = yin(frame, sampleRate, soloVoice ? 55 : 65, MAX_HZ, 0.2, soloVoice);
     if (result && result.confidence > 0.75) midi[index] = frequencyToMidi(result.frequency);
     if (index % 2000 === 0) self.postMessage({ progress: index / count });
   }
