@@ -926,7 +926,30 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     typedLines[typedLines.length - 1].push(typed[k]);
   }
   const base = alignToMelody(typedLines, notes);
-  const runs: NoteEvent[][] = base.map(placed => placed.to >= placed.from ? notes.slice(placed.from, placed.to + 1) : []);
+  let runs: NoteEvent[][] = base.map(placed => placed.to >= placed.from ? notes.slice(placed.from, placed.to + 1) : []);
+  // If the phrase alignment left any word with no notes (more lines than phrases, or a line
+  // the DP couldn't place), fall back to the structural binder for the whole sequence — every
+  // syllable bound by order to the note sequence, no timestamps involved. A word with an empty
+  // run would render with no note binding and its karaoke fill would never activate.
+  if (runs.length !== typed.length || runs.some(run => !run.length)) {
+    const flatSyls: Array<{ text: string }> = [];
+    const counts: number[] = [];
+    typed.forEach(word => {
+      const parts = syllabify(word);
+      counts.push(parts.length);
+      parts.forEach(part => flatSyls.push({ text: part }));
+    });
+    const bound = bindSyllables(flatSyls, notes);
+    runs = [];
+    let k = 0;
+    for (const count of counts) {
+      const wordRun: NoteEvent[] = [];
+      for (let s = 0; s < count; s += 1) wordRun.push(...bound[k + s]);
+      // De-duplicate while preserving order (a note shared by two syllables of one word).
+      runs.push([...new Set(wordRun)]);
+      k += count;
+    }
+  }
   // The heard words are raw observations: their text and order, never their timestamps. A typed
   // word that really matches a heard word inherits that heard word's note run — anchored by the
   // structural placement above (a from-zero binding would let intro hallucinations shift every
