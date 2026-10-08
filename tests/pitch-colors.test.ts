@@ -107,12 +107,14 @@ describe('live verdict follows the sounding note, not the word window', () => {
   ];
   const lateHeard = [{ text: 'love', start: 12.5, end: 16.5 }];
 
-  it('an offset word no longer attaches the neighbouring note', () => {
-    // The guessed window [12.5, 16.5] overlaps D more than C — the old binding put a D here.
-    // The note-run binding ignores the guess: the syllable binds the C's run instead.
+  it('an offset word attaches the note at its heard time, keeping its onset', () => {
+    // The heard window [12.5, 16.5] starts inside C (10-14) — the syllable binds C's pitch.
     const word = buildLines(lateHeard, notes)[0].words[0];
     expect(word.syllables[0].midi).toBe(60);
-    expect(word.syllables[0].start).toBeCloseTo(10, 6);
+    expect(word.syllables[0].noteIndex).toBe(0);
+    // But the word keeps its vocal onset for highlighting (not snapped to the note start).
+    expect(word.syllables[0].start).toBeCloseTo(12.5, 6);
+    expect(word.start).toBeCloseTo(12.5, 6);
   });
 
   it('a shifted guess grades the same as a correct one', () => {

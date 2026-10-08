@@ -150,15 +150,15 @@ export class PitchLane {
     const minWindow = width < 520 ? 1.8 : 2.4; // never so zoomed in that you can't see what's coming
     this.windowSeconds = Math.max(minWindow, Math.min(defaultWindow, usable / Math.max(1, want)));
     const pxPerSec = usable / this.windowSeconds;
-    let freeAt = -Infinity;
     this.layout = words.map((word, i) => {
       const next = words[i + 1];
       const room = next ? (next.start - word.start) * pxPerSec - 12 : Infinity;
       let size = 24;
       ctx.font = wordFont(size);
       while (size > 16 && ctx.measureText(word.text).width > room) { size -= 2; ctx.font = wordFont(size); }
-      const at = Math.max(word.start, freeAt);
-      freeAt = at + (ctx.measureText(word.text).width + 12) / pxPerSec;
+      // Words stay anchored to their vocal onsets — never displaced right to avoid overlap.
+      // Crowded words may render close together; the playhead hits each at its true time.
+      const at = word.start;
       return { at, size, text: word.text, start: word.start, end: word.end, midi: word.midi };
     });
     this.layoutGutter = gutter;

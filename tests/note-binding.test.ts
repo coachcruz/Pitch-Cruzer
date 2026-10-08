@@ -6,15 +6,6 @@ import {
 import { pitchVerdict } from '../src/views/practice/karaoke';
 import { segmentMergedWord } from '../src/lib/segment';
 
-/** Line ids are random: strip them before comparing bindings for equality. */
-const bindingOf = (lines: LyricLine[]) => lines.map(line => ({
-  start: line.start, end: line.end,
-  words: line.words.map(word => ({
-    text: word.text, start: word.start, end: word.end,
-    syllables: word.syllables.map(s => ({ text: s.text, start: s.start, end: s.end, midi: s.midi, notes: s.notes })),
-  })),
-}));
-
 describe('syllabify across scripts', () => {
   it('splits CJK words character by character — every character is one sung syllable', () => {
     expect(syllabify('사랑')).toEqual(['사', '랑']);
@@ -34,7 +25,7 @@ describe('timestamp-anchored binding (the core invariant)', () => {  const notes
     { start: 1.8, end: 2.2, midi: 64 },
   ];
 
-  it('buildLines with shifted guess times binds identically to correct times', () => {
+  it('buildLines preserves vocal onsets but binds the same notes', () => {
     const correct = [
       { text: 'love', start: 1.0, end: 1.4 },
       { text: 'you', start: 1.4, end: 1.8 },
@@ -43,7 +34,17 @@ describe('timestamp-anchored binding (the core invariant)', () => {  const notes
       { text: 'love', start: 1.25, end: 1.65 },   // 250 ms late, overlapping the D
       { text: 'you', start: 1.65, end: 2.05 },
     ];
-    expect(bindingOf(buildLines(shifted, notes))).toEqual(bindingOf(buildLines(correct, notes)));
+    const correctLines = buildLines(correct, notes);
+    const shiftedLines = buildLines(shifted, notes);
+    const correctSyls = correctLines.flatMap(l => l.words.flatMap(w => w.syllables));
+    const shiftedSyls = shiftedLines.flatMap(l => l.words.flatMap(w => w.syllables));
+    // Times follow the vocal onset (not snapped to note starts).
+    expect(shiftedSyls[0].start).toBeCloseTo(1.25, 6);
+    expect(correctSyls[0].start).toBeCloseTo(1.0, 6);
+    // But the note association (for pitch) is identical.
+    expect(shiftedSyls[0].noteIndex).toBe(correctSyls[0].noteIndex);
+    expect(shiftedSyls[0].midi).toBe(correctSyls[0].midi);
+    expect(shiftedSyls[1].noteIndex).toBe(correctSyls[1].noteIndex);
   });
 
   it('typed words inherit heard note bindings via timestamp-anchored notes', () => {
@@ -66,8 +67,10 @@ describe('timestamp-anchored binding (the core invariant)', () => {  const notes
     const lines = applyTypedLyrics(analysis, 'hello world today');
     const words = lines.flatMap(line => line.words);
     expect(words.map(word => word.text)).toEqual(['hello', 'world', 'today']);
+    // Timing from the heard vocal onset (not snapped to note starts).
     expect(words[0].start).toBeCloseTo(10.0, 6);
-    expect(words[0].end).toBeCloseTo(10.6, 6);
+    expect(words[0].end).toBeCloseTo(10.4, 6);
+    // Pitch from the associated note.
     expect(words[1].syllables[0].midi).toBe(64);
     expect(words[2].start).toBeCloseTo(10.9, 6);
   });
@@ -170,21 +173,21 @@ describe('bindSyllables', () => {
 });
 
 describe('unvoiced interpolation', () => {
-  it('trailing unvoiced syllables share the last note instead of flashing at its end', () => {
+  it('trailing syllables keep the word timing while sharing the note for pitch', () => {
     const lines = buildLines([{ text: 'banana', start: 0.1, end: 0.5 }], [
       { start: 0.0, end: 0.3, midi: 60 },
       { start: 0.3, end: 0.6, midi: 62 },
     ]);
     const word = lines[0].words[0];
     const last = word.syllables[2];
-    // A real span inside the shared note — not a zero-width point at 0.6.
+    // Syllables distribute across the word's own duration (vocal timing).
     expect(last.end - last.start).toBeGreaterThan(0.05);
-    expect(last.end).toBeCloseTo(0.6, 6);
-    // It rides the shared note's pitch, so it gets judged instead of skipped.
+    expect(last.end).toBeCloseTo(0.5, 6);
+    // But the pitch comes from the shared note.
     expect(last.midi).toBe(62);
-    expect(word.end).toBeCloseTo(0.6, 6);
-    // …and the word no longer sits at the guessed time.
-    expect(word.start).toBeCloseTo(0.0, 6);
+    expect(last.noteIndex).toBe(1);
+    expect(word.end).toBeCloseTo(0.5, 6);
+    expect(word.start).toBeCloseTo(0.1, 6);
   });
 });
 
@@ -333,17 +336,19 @@ describe('unvoiced syllables share the neighbor note', () => {
     { text: 'lonesome', start: 13.70, end: 14.00 },
   ];
 
-  it('a trailing syllable with no note splits the previous note instead of flashing at the end', () => {
+  it('a trailing syllable keeps word timing while sharing the note for pitch', () => {
     const lines = buildLines(heard as any, notes);
     const sylls = lines.flatMap(l => l.words.flatMap(w => w.syllables));
     const some = sylls.find(s => s.text === 'some')!;
     const ne = sylls.find(s => s.text === 'ne')!;
-    // Not a zero-width point at the line's end: a real span inside the shared note.
-    expect(some.end - some.start).toBeGreaterThan(0.2);
+    // Syllables distribute across the word's duration (13.70-14.00).
+    expect(some.end - some.start).toBeGreaterThan(0.05);
     expect(some.start).toBeGreaterThanOrEqual(ne.start);
-    expect(some.end).toBeCloseTo(14.9, 6);
-    // It rides the shared note's pitch, so it gets judged instead of skipped.
+    expect(some.end).toBeCloseTo(14.0, 6);
+    // Pitch from the shared note (14.20-14.90, midi 62) — wait, "lonesome" starts at 13.70,
+    // so "lo"->note 2 (13.70-14.20), "ne"->note 3, "some"->note 3. The noteIndex is 3.
     expect(some.midi).toBe(62);
+    expect(some.noteIndex).toBe(3);
     expect(ne.end).toBeCloseTo(some.start, 6);
   });
 
