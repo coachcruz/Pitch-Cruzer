@@ -458,7 +458,6 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const setPicking = (on: boolean) => {
     pickingLines = on;
     pickAnchor = null;
-    karaoke.holdScroll = on;
     $('#pickLines').textContent = on ? 'Cancel picking lines' : 'Pick lines to practice';
     $('#lyricsHint').textContent = on ? 'Tap the first line you want to practice, then the last one.' : lyricsHintText();
     if (on) setView('karaoke');

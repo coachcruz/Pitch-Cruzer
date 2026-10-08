@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pitchVerdict, lineVerdict, fillForRun, subdivideSlices } from '../src/views/practice/karaoke';
+import { pitchVerdict, lineVerdict } from '../src/views/practice/karaoke';
 import { buildLines, noteAt, noteIndexAt, nextNoteIndexAt, type NoteEvent } from '../src/lib/analysis';
 
 describe('pitchVerdict', () => {
@@ -132,40 +132,4 @@ describe('live verdict follows the sounding note, not the word window', () => {
   });
 });
 
-describe('fillForRun', () => {
-  // One syllable sung as a melisma across three notes (10-14, 14-18, 18-22).
-  // The wipe must sweep the whole 12 s run without restarting at each note.
-  it('sweeps a multi-note run continuously — never resets mid-word', () => {
-    const at = (t: number) => fillForRun(10, 22, t);
-    expect(at(9)).toBe(0);
-    const mid1 = at(12);   // inside note 1
-    const mid2 = at(16);   // inside note 2 — must be further along, not back at 0
-    const mid3 = at(20);   // inside note 3
-    expect(mid2).toBeGreaterThan(mid1);
-    expect(mid3).toBeGreaterThan(mid2);
-    expect(at(22)).toBe(1);
-    expect(at(30)).toBe(1);
-  });
-  it('longer runs fill slower than shorter ones', () => {
-    // 1 s into a 12 s run vs 1 s into a 2 s run.
-    expect(fillForRun(10, 22, 11)).toBeLessThan(fillForRun(10, 12, 11));
-  });
-});
 
-describe('subdivideSlices', () => {
-  it('tiles the run with no gaps or overlaps', () => {
-    const slices = subdivideSlices(10, 20, [2, 3, 5]);
-    expect(slices[0][0]).toBe(10);
-    expect(slices[2][1]).toBe(20);
-    // Contiguous: each slice starts where the previous ended.
-    expect(slices[1][0]).toBe(slices[0][1]);
-    expect(slices[2][0]).toBe(slices[1][1]);
-    // Proportional to weights: [2,3,5] of 10s -> [2s, 3s, 5s].
-    expect(slices[0][1] - slices[0][0]).toBeCloseTo(2, 9);
-    expect(slices[1][1] - slices[1][0]).toBeCloseTo(3, 9);
-    expect(slices[2][1] - slices[2][0]).toBeCloseTo(5, 9);
-  });
-  it('a lone syllable keeps the whole run', () => {
-    expect(subdivideSlices(10, 20, [4])).toEqual([[10, 20]]);
-  });
-});

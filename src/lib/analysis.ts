@@ -35,15 +35,13 @@ export const NOTES_VERSION = 3;   // 3: fewer notes read an octave low (tenor, a
 
 /**
  * Bump when the lyric↔pitch binding changes, so saved songs re-derive every syllable's time and
- * pitch from the measured notes when opened. Version 1 is the note-run rework: no lyric timestamp
- * is the authority for any word/syllable time or pitch — each syllable is bound to a run of the
- * artist's NoteEvents and its start/end/midi are derived from that run. Version 2 fixes the v1
- * rebind itself: v1 found each line's notes in a ±0.35 s window around its OLD times, so old
- * analyses whose line times were seconds off bound the first line to the wrong notes and left
- * the rest stale. V2 binds the whole syllable sequence to the note sequence by order alone —
- * no timestamp is trusted at all.
+ * pitch from the measured notes when opened. Version 4 is the timestamp-anchored rewrite: each
+ * heard word's start time (from the time-locked vocal stem) finds the note sounding at that
+ * moment via noteIndexAt — the timestamp is the anchor, the note is the authority. No DP, no
+ * sequence guessing. (V3 and earlier used alignToMelody's dynamic programming, which drifted
+ * words seconds late with no anchor.)
  */
-export const BINDING_VERSION = 3;
+export const BINDING_VERSION = 4;
 
 export interface SongAnalysis {
   duration: number;
@@ -537,28 +535,6 @@ function finishWordTimes(words: Word[]): void {
  * word's syllable runs are joined into the word's run (a slice of `notes`). The shared core of
  * the heard path and the typed path's heard-word binding.
  */
-function bindWordRuns(texts: string[], notes: NoteEvent[]): NoteEvent[][] {
-  const counts: number[] = [];
-  const flat: Array<{ text: string }> = [];
-  texts.forEach(text => {
-    const parts = syllabify(text);
-    counts.push(parts.length);
-    parts.forEach(part => flat.push({ text: part }));
-  });
-  const runs = bindSyllables(flat, notes);
-  const out: NoteEvent[][] = [];
-  let k = 0;
-  counts.forEach(count => {
-    const wordRuns = runs.slice(k, k + count);
-    k += count;
-    const voicedRuns = wordRuns.filter(run => run.length);
-    if (!voicedRuns.length) { out.push([]); return; }
-    const first = voicedRuns[0][0], last = voicedRuns[voicedRuns.length - 1];
-    out.push(notes.slice(notes.indexOf(first), notes.indexOf(last[last.length - 1]) + 1));
-  });
-  return out;
-}
-
 // Chinese and Japanese are written without spaces: two such words sit side by side.
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]/u;
 
@@ -677,20 +653,58 @@ export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] 
     });
     return groupLines(built, new Set(), notes);
   }
-  // The guess's times are ignored entirely: each heard word is a raw observation — its text in
-  // sung order. Syllables bind to runs of the measured notes (see `bindSyllables`), and every
-  // time and pitch below is derived from those runs. Shifting the input times changes nothing.
-  const runs = bindWordRuns(timedWords.map(word => word.text), notes);
+  // Timestamp-anchored binding: the vocal stem preserves the song timeline, so each heard
+  // word's start time is a true anchor. We find the note sounding at that moment — that note
+  // is the authority for the word's timing and pitch. The timestamp finds the note; the note
+  // decides everything else. No sequence guessing, no DP.
   const builtWords: Word[] = [];
-  const flat: Syllable[] = [];
-  const indexOf = new Map<NoteEvent, number>(notes.map((note, i) => [note, i]));
-  timedWords.forEach((word, i) => {
-    const built = wordFromRun(word.text, runs[i], indexOf, word.lang);
-    builtWords.push(built);
-    flat.push(...built.syllables);
+  timedWords.forEach(word => {
+    const parts = syllabify(word.text);
+    // First syllable anchors to the note at word.start; later syllables take following notes.
+    let noteIdx = noteIndexAt(notes, word.start);
+    // If the word starts in a rest, take the next note that sounds (the word's onset).
+    if (noteIdx === null) noteIdx = nextNoteIndexAt(notes, word.start);
+    // Map each syllable to a note index, then split shared notes' durations among their syllables.
+    const sylNoteIdx: Array<number | null> = parts.map((_, k) =>
+      noteIdx !== null ? Math.min(noteIdx + k, notes.length - 1) : null);
+    // Count how many syllables share each note, to split durations.
+    const shareCount = new Map<number, number>();
+    sylNoteIdx.forEach(idx => { if (idx !== null) shareCount.set(idx, (shareCount.get(idx) ?? 0) + 1); });
+    const shareSeen = new Map<number, number>();
+    const syllables: Syllable[] = parts.map((part, k) => {
+      const idx = sylNoteIdx[k];
+      const note = idx !== null ? notes[idx] : null;
+      let start = note ? note.start : word.start;
+      let end = note ? note.end : word.end;
+      if (note && (shareCount.get(idx!) ?? 1) > 1) {
+        // Split the shared note's duration evenly among its syllables.
+        const n = shareCount.get(idx!)!;
+        const seen = shareSeen.get(idx!) ?? 0;
+        shareSeen.set(idx!, seen + 1);
+        const span = (note.end - note.start) / n;
+        start = note.start + span * seen;
+        end = note.start + span * (seen + 1);
+      }
+      return {
+        text: part,
+        start, end,
+        midi: note ? Math.round(note.midi) : null,
+        notes: note ? [Math.round(note.midi)] : [],
+        noteIndex: idx,
+        noteEnd: idx,
+      };
+    });
+    const firstNote = noteIdx !== null ? notes[noteIdx] : null;
+    const lastIdx = noteIdx !== null ? Math.min(noteIdx + parts.length - 1, notes.length - 1) : null;
+    const lastNote = lastIdx !== null ? notes[lastIdx] : null;
+    builtWords.push({
+      text: word.text,
+      start: firstNote ? firstNote.start : word.start,
+      end: lastNote ? lastNote.end : word.end,
+      syllables,
+      lang: word.lang,
+    });
   });
-  fillSyllableTimes(flat);
-  finishWordTimes(builtWords);
   return groupLines(builtWords, new Set(), notes);
 }
 
@@ -886,10 +900,10 @@ function withAsides(tokens: LyricToken[], sung: Word[], fallback: number): Word[
 
 /**
  * Replaces the transcript with lyrics the singer typed/pasted. Words are matched to what was
- * heard (edit-distance alignment, text only) and inherit the heard word's *note run* — never its
- * timestamps. Unmatched words are laid on the singer's notes between their neighbours (see
- * `alignToMelody`); with no hearing at all, on the melody alone. [Bracketed] text is kept as
- * asides, untimed.
+ * heard (edit-distance alignment, text only) and inherit the heard word's note binding — which
+ * was anchored by the heard word's timestamp to the note sounding at that moment. The timestamp
+ * finds the note; the note is the authority for timing and pitch. Unmatched words interpolate
+ * between their matched neighbours' notes. [Bracketed] text is kept as asides, untimed.
  */
 export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLine[] {
   const tokenLines = lyricTokens(text.split(/\n+/).map(line => line.trim()).filter(Boolean));
@@ -918,20 +932,41 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     tokenLines.forEach(line => { if (line.length) lineBreaks.add(count); count += line.length; });
     return groupLines(withA, lineBreaks);
   }
-  // Absolute placement from the melody alone: typed lines laid on the singer's note phrases
-  // (see `alignToMelody`). No timestamps anywhere — heard or guessed.
-  const typedLines: string[][] = [];
-  for (let k = 0; k < typed.length; k += 1) {
-    if (k === 0 || hardBreaks.has(k)) typedLines.push([]);
-    typedLines[typedLines.length - 1].push(typed[k]);
+  // The heard words (from the fixed buildLines) are already bound to notes via their timestamps.
+  // Match typed words to heard words by text; each typed word inherits its heard match's note.
+  let heardWords: Array<{ text: string; noteIndex: number | null; noteEnd: number | null }> =
+    analysis.lines.flatMap(line => line.words).filter(w => !w.aside && w.text !== '♪').map(w => {
+      const first = w.syllables[0];
+      const last = w.syllables[w.syllables.length - 1];
+      return { text: w.text, noteIndex: first?.noteIndex ?? null, noteEnd: last?.noteEnd ?? first?.noteIndex ?? null };
+    });
+  // If lines weren't built from heard words (empty lines, or test fixtures), bind the raw
+  // heard timestamps directly: each heard word's start anchors to its note via noteIndexAt.
+  if (!heardWords.length && analysis.heard?.length) {
+    heardWords = analysis.heard.map(hw => {
+      let idx = noteIndexAt(notes, hw.start);
+      if (idx === null) idx = nextNoteIndexAt(notes, hw.start);
+      return { text: hw.text, noteIndex: idx, noteEnd: idx };
+    });
   }
-  const base = alignToMelody(typedLines, notes);
-  let runs: NoteEvent[][] = base.map(placed => placed.to >= placed.from ? notes.slice(placed.from, placed.to + 1) : []);
-  // If the phrase alignment left any word with no notes (more lines than phrases, or a line
-  // the DP couldn't place), fall back to the structural binder for the whole sequence — every
-  // syllable bound by order to the note sequence, no timestamps involved. A word with an empty
-  // run would render with no note binding and its karaoke fill would never activate.
-  if (runs.length !== typed.length || runs.some(run => !run.length)) {
+  // Fall back to raw heard text if lines aren't built yet (older saves).
+  const heardTexts: string[] = heardWords.length
+    ? heardWords.map(w => w.text)
+    : (analysis.heard?.length ? analysis.heard.map(w => w.text) : []);
+  const pairs = heardTexts.length ? matchHeardWords(typed, heardTexts.map(text => ({ text }))) : [];
+  const typedToNote = new Map<number, { from: number | null; to: number | null }>();
+  const enoughMatches = pairs.length >= Math.max(3, typed.length * 0.1);
+  if (enoughMatches) {
+    pairs.forEach(([ti, hi]) => {
+      const hw = heardWords[hi];
+      if (hw) typedToNote.set(ti, { from: hw.noteIndex, to: hw.noteEnd });
+    });
+  }
+  // If too few words matched (or nothing was heard), fall back to sequential binding:
+  // lay the typed syllables on the notes in order. The timestamps can't anchor what
+  // wasn't heard.
+  let sequentialRuns: NoteEvent[][] | null = null;
+  if (!enoughMatches) {
     const flatSyls: Array<{ text: string }> = [];
     const counts: number[] = [];
     typed.forEach(word => {
@@ -940,62 +975,113 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
       parts.forEach(part => flatSyls.push({ text: part }));
     });
     const bound = bindSyllables(flatSyls, notes);
-    runs = [];
+    sequentialRuns = [];
     let k = 0;
     for (const count of counts) {
       const wordRun: NoteEvent[] = [];
       for (let s = 0; s < count; s += 1) wordRun.push(...bound[k + s]);
-      // De-duplicate while preserving order (a note shared by two syllables of one word).
-      runs.push([...new Set(wordRun)]);
+      sequentialRuns.push([...new Set(wordRun)]);
       k += count;
     }
   }
-  // The heard words are raw observations: their text and order, never their timestamps. A typed
-  // word that really matches a heard word inherits that heard word's note run — anchored by the
-  // structural placement above (a from-zero binding would let intro hallucinations shift every
-  // run), then refined by the actually-sung syllable stream within the line's note span.
-  // (Songs saved before `heard` existed fall back to their own words as the observation sequence.)
-  const heardTexts: string[] = analysis.heard?.length
-    ? analysis.heard.map(word => word.text)
-    : analysis.transcript === 'ok'
-      ? analysis.lines.flatMap(line => line.words).filter(word => word.text !== '♪' && !word.aside).map(word => word.text)
-      : [];
-  if (heardTexts.length) {
-    const pairs = matchHeardWords(typed, heardTexts.map(text => ({ text })));
-    // A handful of chance matches isn't a binding to trust.
-    if (pairs.length >= Math.max(3, typed.length * 0.1)) {
-      const typedToHeard = new Map<number, number>();
-      pairs.forEach(([i, j]) => typedToHeard.set(i, j));
+  // Unmatched words interpolate between matched neighbours' notes.
+  // If we fell back to sequential binding, use those runs directly.
+  const words: Word[] = [];
+  const seqIndexOf = new Map<NoteEvent, number>(notes.map((n, i) => [n, i]));
+  // For unmatched words, distribute them across the notes in their gap:
+  // prefix words -> notes before the first match, suffix -> notes after the last,
+  // middle gaps -> notes between the bracketing matches. Uses bindSyllables per gap.
+  const matchedIdx = new Set(typedToNote.keys());
+  const gapRuns = new Map<number, NoteEvent[]>();
+  if (!sequentialRuns && matchedIdx.size > 0) {
+    // Find gaps of consecutive unmatched words.
+    const gaps: Array<{ from: number; to: number }> = [];
+    let gStart: number | null = null;
+    for (let i = 0; i <= typed.length; i += 1) {
+      const isMatched = i < typed.length && matchedIdx.has(i);
+      if (!isMatched && gStart === null) gStart = i;
+      if ((isMatched || i === typed.length) && gStart !== null) {
+        gaps.push({ from: gStart, to: i - 1 });
+        gStart = null;
+      }
+    }
+    for (const gap of gaps) {
+      // Bracketing notes for this gap.
+      const prevMatch = gap.from > 0 ? typedToNote.get(gap.from - 1) : undefined;
+      const nextMatch = gap.to < typed.length - 1 ? typedToNote.get(gap.to + 1) : undefined;
+      const prevNote = prevMatch?.to ?? prevMatch?.from ?? null;
+      const nextNote = nextMatch?.from ?? null;
+      const noteFrom = prevNote !== null ? prevNote + 1 : 0;
+      const noteTo = nextNote !== null ? nextNote - 1 : notes.length - 1;
+      if (noteTo < noteFrom) continue; // No notes in this gap; leave unbound.
+      const gapNotes = notes.slice(noteFrom, noteTo + 1);
+      const flatSyls: Array<{ text: string }> = [];
+      const counts: number[] = [];
+      for (let i = gap.from; i <= gap.to; i += 1) {
+        const parts = syllabify(typed[i]);
+        counts.push(parts.length);
+        parts.forEach(p => flatSyls.push({ text: p }));
+      }
+      const bound = bindSyllables(flatSyls, gapNotes);
       let k = 0;
-      typedLines.forEach(line => {
-        const indices: number[] = [];
-        line.forEach(() => { indices.push(k); k += 1; });
-        const paired = indices.filter(i => typedToHeard.has(i));
-        if (!paired.length) return;
-        const jFirst = typedToHeard.get(paired[0])!;
-        const jLast = typedToHeard.get(paired[paired.length - 1])!;
-        const spanFrom = Math.min(...paired.map(i => base[i].from));
-        const spanTo = Math.max(...paired.map(i => base[i].to));
-        if (spanTo < spanFrom) return;
-        const spanNotes = notes.slice(spanFrom, spanTo + 1);
-        const heardRuns = bindWordRuns(heardTexts.slice(jFirst, jLast + 1), spanNotes);
-        paired.forEach(i => {
-          const run = heardRuns[typedToHeard.get(i)! - jFirst];
-          if (run.length) runs[i] = run;
-        });
-      });
+      for (let i = 0; i < counts.length; i += 1) {
+        const wordRun: NoteEvent[] = [];
+        for (let s = 0; s < counts[i]; s += 1) wordRun.push(...bound[k + s]);
+        gapRuns.set(gap.from + i, [...new Set(wordRun)]);
+        k += counts[i];
+      }
     }
   }
-  const words: Word[] = [];
-  const flat: Syllable[] = [];
-  const indexOf = new Map<NoteEvent, number>(notes.map((note, i) => [note, i]));
   typed.forEach((word, i) => {
-    const built = wordFromRun(word, runs[i], indexOf);
-    words.push(built);
-    flat.push(...built.syllables);
+    // Sequential fallback: use the precomputed note run for this word.
+    if (sequentialRuns) {
+      const run = sequentialRuns[i] ?? [];
+      const built = wordFromRun(word, run, seqIndexOf);
+      words.push(built);
+      return;
+    }
+    // Gap-distributed run for unmatched words.
+    const gapRun = gapRuns.get(i);
+    if (gapRun) {
+      const built = wordFromRun(word, gapRun, seqIndexOf);
+      words.push(built);
+      return;
+    }
+    let binding = typedToNote.get(i);
+    if (!binding) {
+      binding = { from: null, to: null };
+    }
+    const parts = syllabify(word);
+    const from = binding.from, to = binding.to;
+    const syllables: Syllable[] = parts.map((part, k) => {
+      const idx = from !== null ? Math.min(from + k, to ?? from, notes.length - 1) : null;
+      const note = idx !== null ? notes[idx] : null;
+      return {
+        text: part,
+        start: note ? note.start : 0,
+        end: note ? note.end : 0.08,
+        midi: note ? Math.round(note.midi) : null,
+        notes: note ? [Math.round(note.midi)] : [],
+        noteIndex: idx,
+        noteEnd: idx,
+      };
+    });
+    const firstNote = from !== null ? notes[from] : null;
+    const lastIdx = to !== null ? to : from;
+    const lastNote = lastIdx !== null ? notes[lastIdx] : null;
+    words.push({
+      text: word,
+      start: firstNote ? firstNote.start : 0,
+      end: lastNote ? lastNote.end : 0.08,
+      syllables,
+    });
   });
-  fillSyllableTimes(flat);
-  finishWordTimes(words);
+  // Sequential fallback and gap runs used wordFromRun (NaN times) — derive times from the runs.
+  if (sequentialRuns || gapRuns.size > 0) {
+    const flat = words.flatMap(w => w.syllables);
+    fillSyllableTimes(flat);
+    finishWordTimes(words);
+  }
   const withA = withAsides(allTokens, words, 0);
   // Every typed line (including a line that is only an aside) stays its own line.
   const lineBreaks = new Set<number>();

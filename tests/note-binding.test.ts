@@ -28,7 +28,7 @@ describe('syllabify across scripts', () => {
   });
 });
 
-describe('timestamp-independence (the core invariant)', () => {  const notes: NoteEvent[] = [
+describe('timestamp-anchored binding (the core invariant)', () => {  const notes: NoteEvent[] = [
     { start: 1.0, end: 1.4, midi: 60 },
     { start: 1.4, end: 1.8, midi: 62 },
     { start: 1.8, end: 2.2, midi: 64 },
@@ -46,21 +46,22 @@ describe('timestamp-independence (the core invariant)', () => {  const notes: No
     expect(bindingOf(buildLines(shifted, notes))).toEqual(bindingOf(buildLines(correct, notes)));
   });
 
-  it('typed words inherit heard note runs, never heard timestamps', () => {
+  it('typed words inherit heard note bindings via timestamp-anchored notes', () => {
     const songNotes: NoteEvent[] = [
       { start: 10.0, end: 10.3, midi: 60 }, { start: 10.3, end: 10.6, midi: 62 },
       { start: 10.6, end: 10.9, midi: 64 },
       { start: 10.9, end: 11.2, midi: 65 }, { start: 11.2, end: 11.5, midi: 67 },
     ];
-    // The hearing is absurdly wrong on timing (50 s off) — only the word order matters.
+    // Heard words with correct timestamps (time-locked vocal stem): each anchors to its note.
+    const heard = [
+      { text: 'hello', start: 10.0, end: 10.4 },
+      { text: 'world', start: 10.6, end: 10.8 },
+      { text: 'today', start: 10.9, end: 11.3 },
+    ];
+    const heardLines = buildLines(heard, songNotes);
     const analysis: SongAnalysis = {
-      duration: 60, key: null, range: null, notes: songNotes, lines: [], sections: [],
-      transcript: 'ok', separated: true,
-      heard: [
-        { text: 'hello', start: 50.0, end: 50.4 },
-        { text: 'world', start: 50.5, end: 50.8 },
-        { text: 'today', start: 50.9, end: 51.3 },
-      ],
+      duration: 60, key: null, range: null, notes: songNotes, lines: heardLines, sections: [],
+      transcript: 'ok', separated: true, heard,
     };
     const lines = applyTypedLyrics(analysis, 'hello world today');
     const words = lines.flatMap(line => line.words);
@@ -170,7 +171,7 @@ describe('bindSyllables', () => {
 
 describe('unvoiced interpolation', () => {
   it('trailing unvoiced syllables share the last note instead of flashing at its end', () => {
-    const lines = buildLines([{ text: 'banana', start: 5, end: 6 }], [
+    const lines = buildLines([{ text: 'banana', start: 0.1, end: 0.5 }], [
       { start: 0.0, end: 0.3, midi: 60 },
       { start: 0.3, end: 0.6, midi: 62 },
     ]);
@@ -327,9 +328,9 @@ describe('unvoiced syllables share the neighbor note', () => {
     { start: 14.20, end: 14.90, midi: 62 },
   ];
   const heard = [
-    { text: 'I', start: 0, end: 0.1 },
-    { text: 'was', start: 0, end: 0.1 },
-    { text: 'lonesome', start: 0, end: 0.1 },
+    { text: 'I', start: 13.10, end: 13.20 },
+    { text: 'was', start: 13.40, end: 13.50 },
+    { text: 'lonesome', start: 13.70, end: 14.00 },
   ];
 
   it('a trailing syllable with no note splits the previous note instead of flashing at the end', () => {
