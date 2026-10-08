@@ -35,13 +35,12 @@ export const NOTES_VERSION = 3;   // 3: fewer notes read an octave low (tenor, a
 
 /**
  * Bump when the lyric↔pitch binding changes, so saved songs re-derive every syllable's time and
- * pitch from the measured notes when opened. Version 4 is the timestamp-anchored rewrite: each
- * heard word's start time (from the time-locked vocal stem) finds the note sounding at that
- * moment via noteIndexAt — the timestamp is the anchor, the note is the authority. No DP, no
- * sequence guessing. (V3 and earlier used alignToMelody's dynamic programming, which drifted
- * words seconds late with no anchor.)
+ * pitch from the measured notes when opened. Version 5: vocal-onset timing — each word keeps its
+ * heard start time for highlighting; notes are associated separately for pitch grading. Words no
+ * longer snap to note starts. (V4 introduced timestamp-anchored binding but still snapped words
+ * to their notes' starts, lighting "fighting tooth and nail" together.)
  */
-export const BINDING_VERSION = 4;
+export const BINDING_VERSION = 5;
 
 export interface SongAnalysis {
   duration: number;
@@ -654,53 +653,39 @@ export function buildLines(timed: TimedWord[], notes: NoteEvent[]): LyricLine[] 
     return groupLines(built, new Set(), notes);
   }
   // Timestamp-anchored binding: the vocal stem preserves the song timeline, so each heard
-  // word's start time is a true anchor. We find the note sounding at that moment — that note
-  // is the authority for the word's timing and pitch. The timestamp finds the note; the note
-  // decides everything else. No sequence guessing, no DP.
+  // word's start time is its true vocal onset. That onset is the word's highlighting time.
+  // The note sounding at that moment (via noteIndexAt) is associated separately for pitch
+  // grading — notes never move the word's time. No sequence guessing, no DP.
   const builtWords: Word[] = [];
   timedWords.forEach(word => {
     const parts = syllabify(word.text);
-    // First syllable anchors to the note at word.start; later syllables take following notes.
+    // First syllable anchors to the note at word.start (for pitch); later syllables take
+    // following notes. The noteIndex is for pitch only — timing stays at the vocal onset.
     let noteIdx = noteIndexAt(notes, word.start);
-    // If the word starts in a rest, take the next note that sounds (the word's onset).
+    // If the word starts in a rest, take the next note that sounds (for pitch reference).
     if (noteIdx === null) noteIdx = nextNoteIndexAt(notes, word.start);
-    // Map each syllable to a note index, then split shared notes' durations among their syllables.
     const sylNoteIdx: Array<number | null> = parts.map((_, k) =>
       noteIdx !== null ? Math.min(noteIdx + k, notes.length - 1) : null);
-    // Count how many syllables share each note, to split durations.
-    const shareCount = new Map<number, number>();
-    sylNoteIdx.forEach(idx => { if (idx !== null) shareCount.set(idx, (shareCount.get(idx) ?? 0) + 1); });
-    const shareSeen = new Map<number, number>();
+    // Distribute syllable onsets evenly across the word's own duration (vocal timing),
+    // while each keeps its note association for pitch.
+    const wordSpan = Math.max(0.01, word.end - word.start) / parts.length;
     const syllables: Syllable[] = parts.map((part, k) => {
       const idx = sylNoteIdx[k];
       const note = idx !== null ? notes[idx] : null;
-      let start = note ? note.start : word.start;
-      let end = note ? note.end : word.end;
-      if (note && (shareCount.get(idx!) ?? 1) > 1) {
-        // Split the shared note's duration evenly among its syllables.
-        const n = shareCount.get(idx!)!;
-        const seen = shareSeen.get(idx!) ?? 0;
-        shareSeen.set(idx!, seen + 1);
-        const span = (note.end - note.start) / n;
-        start = note.start + span * seen;
-        end = note.start + span * (seen + 1);
-      }
       return {
         text: part,
-        start, end,
+        start: word.start + wordSpan * k,
+        end: word.start + wordSpan * (k + 1),
         midi: note ? Math.round(note.midi) : null,
         notes: note ? [Math.round(note.midi)] : [],
         noteIndex: idx,
         noteEnd: idx,
       };
     });
-    const firstNote = noteIdx !== null ? notes[noteIdx] : null;
-    const lastIdx = noteIdx !== null ? Math.min(noteIdx + parts.length - 1, notes.length - 1) : null;
-    const lastNote = lastIdx !== null ? notes[lastIdx] : null;
     builtWords.push({
       text: word.text,
-      start: firstNote ? firstNote.start : word.start,
-      end: lastNote ? lastNote.end : word.end,
+      start: word.start,
+      end: word.end,
       syllables,
       lang: word.lang,
     });
@@ -932,13 +917,14 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     tokenLines.forEach(line => { if (line.length) lineBreaks.add(count); count += line.length; });
     return groupLines(withA, lineBreaks);
   }
-  // The heard words (from the fixed buildLines) are already bound to notes via their timestamps.
-  // Match typed words to heard words by text; each typed word inherits its heard match's note.
-  let heardWords: Array<{ text: string; noteIndex: number | null; noteEnd: number | null }> =
+  // The heard words (from buildLines) keep their vocal onset timestamps and note associations.
+  // Match typed words to heard words by text; each typed word inherits both its heard match's
+  // timing (for highlighting) and its note (for pitch).
+  let heardWords: Array<{ text: string; start: number; end: number; noteIndex: number | null; noteEnd: number | null }> =
     analysis.lines.flatMap(line => line.words).filter(w => !w.aside && w.text !== '♪').map(w => {
       const first = w.syllables[0];
       const last = w.syllables[w.syllables.length - 1];
-      return { text: w.text, noteIndex: first?.noteIndex ?? null, noteEnd: last?.noteEnd ?? first?.noteIndex ?? null };
+      return { text: w.text, start: w.start, end: w.end, noteIndex: first?.noteIndex ?? null, noteEnd: last?.noteEnd ?? first?.noteIndex ?? null };
     });
   // If lines weren't built from heard words (empty lines, or test fixtures), bind the raw
   // heard timestamps directly: each heard word's start anchors to its note via noteIndexAt.
@@ -946,7 +932,7 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     heardWords = analysis.heard.map(hw => {
       let idx = noteIndexAt(notes, hw.start);
       if (idx === null) idx = nextNoteIndexAt(notes, hw.start);
-      return { text: hw.text, noteIndex: idx, noteEnd: idx };
+      return { text: hw.text, start: hw.start, end: hw.end, noteIndex: idx, noteEnd: idx };
     });
   }
   // Fall back to raw heard text if lines aren't built yet (older saves).
@@ -954,12 +940,12 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     ? heardWords.map(w => w.text)
     : (analysis.heard?.length ? analysis.heard.map(w => w.text) : []);
   const pairs = heardTexts.length ? matchHeardWords(typed, heardTexts.map(text => ({ text }))) : [];
-  const typedToNote = new Map<number, { from: number | null; to: number | null }>();
+  const typedToNote = new Map<number, { from: number | null; to: number | null; start: number; end: number }>();
   const enoughMatches = pairs.length >= Math.max(3, typed.length * 0.1);
   if (enoughMatches) {
     pairs.forEach(([ti, hi]) => {
       const hw = heardWords[hi];
-      if (hw) typedToNote.set(ti, { from: hw.noteIndex, to: hw.noteEnd });
+      if (hw) typedToNote.set(ti, { from: hw.noteIndex, to: hw.noteEnd, start: hw.start, end: hw.end });
     });
   }
   // If too few words matched (or nothing was heard), fall back to sequential binding:
@@ -1049,30 +1035,30 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     }
     let binding = typedToNote.get(i);
     if (!binding) {
-      binding = { from: null, to: null };
+      binding = { from: null, to: null, start: 0, end: 0.08 };
     }
     const parts = syllabify(word);
     const from = binding.from, to = binding.to;
+    // Timing from the heard vocal onset; note association for pitch only.
+    const wordStart = binding.start, wordEnd = binding.end;
+    const span = Math.max(0.01, wordEnd - wordStart) / parts.length;
     const syllables: Syllable[] = parts.map((part, k) => {
       const idx = from !== null ? Math.min(from + k, to ?? from, notes.length - 1) : null;
       const note = idx !== null ? notes[idx] : null;
       return {
         text: part,
-        start: note ? note.start : 0,
-        end: note ? note.end : 0.08,
+        start: wordStart + span * k,
+        end: wordStart + span * (k + 1),
         midi: note ? Math.round(note.midi) : null,
         notes: note ? [Math.round(note.midi)] : [],
         noteIndex: idx,
         noteEnd: idx,
       };
     });
-    const firstNote = from !== null ? notes[from] : null;
-    const lastIdx = to !== null ? to : from;
-    const lastNote = lastIdx !== null ? notes[lastIdx] : null;
     words.push({
       text: word,
-      start: firstNote ? firstNote.start : 0,
-      end: lastNote ? lastNote.end : 0.08,
+      start: wordStart,
+      end: wordEnd,
       syllables,
     });
   });
