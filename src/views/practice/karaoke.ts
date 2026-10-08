@@ -113,6 +113,8 @@ export class Karaoke {
     this.sectionCoach = state.onSectionCoach;
     this.pageIndex = -1;
     this.lastTime = NaN;
+    // Static centered pages: no scrolling, no tilt.
+    this.list.classList.add('karaokeStatic');
     // Group sung lines into pages.
     const sung = this.analysis.lines.filter(l => !isTagLine(l));
     this.pages = [];
