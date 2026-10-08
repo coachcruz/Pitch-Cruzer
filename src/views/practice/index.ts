@@ -383,6 +383,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button => button.setAttribute('aria-checked', String(button.dataset.view === next)));
     $('#laneWrap').classList.toggle('hidden', next !== 'staff');
     $('#karaoke').classList.toggle('hidden', next !== 'karaoke');
+    // Static karaoke pages use centered layout; remove it when leaving the view.
+    if (next !== 'karaoke') $('#lyricsList').classList.remove('karaokeStatic');
     karaoke.refollow();
   };
   root.querySelectorAll<HTMLButtonElement>('[data-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.view as View)));
