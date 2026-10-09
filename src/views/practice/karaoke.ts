@@ -297,10 +297,11 @@ export class Karaoke {
       for (const line of page) {
         if (this.finishedLines.has(line.id)) continue;
         const words = line.words.filter(w => !w.aside);
-        const allSung = words.every(w => {
-          const el = this.list.querySelector(`[data-line="${line.id}"] .kword[data-n="${w.syllables[0]?.noteIndex ?? ''}"]`);
-          return el?.classList.contains('sung');
-        });
+        // Match word elements by their position within the line, not by noteIndex
+        // (multiple words can share one note).
+        const lineEl = this.list.querySelector<HTMLElement>(`[data-line="${line.id}"]`);
+        const wordEls = lineEl ? [...lineEl.querySelectorAll<HTMLElement>('.kword:not(.aside)')] : [];
+        const allSung = words.every((_, i) => wordEls[i]?.classList.contains('sung'));
         if (allSung && words.length) {
           this.finishedLines.add(line.id);
           const row = this.list.querySelector<HTMLElement>(`[data-line="${line.id}"]`);
