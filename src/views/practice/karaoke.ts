@@ -55,7 +55,9 @@ interface WordEntry {
   el: HTMLElement;
   /** First note index this word is stapled to (null: unbound). */
   noteIndex: number | null;
-  /** The note's start time — when this word fills. */
+  /** The word's vocal onset — when this word fills. */
+  wordStart: number;
+  /** The note's start time (for pitch reference). */
   noteStart: number;
   /** The note's end time. */
   noteEnd: number;
@@ -170,6 +172,7 @@ export class Karaoke {
       const entry: WordEntry = {
         el,
         noteIndex,
+        wordStart: el.dataset.ws !== undefined && el.dataset.ws !== '' ? Number(el.dataset.ws) : NaN,
         noteStart: note ? note.start : NaN,
         noteEnd: note ? note.end : NaN,
         midi: rawM === undefined || rawM === '' ? null : Number(rawM),
@@ -189,7 +192,7 @@ export class Karaoke {
       const first = word.syllables[0];
       const n = first?.noteIndex;
       const m = first?.midi;
-      return `<span class="kword" data-n="${n ?? ''}" data-m="${m ?? ''}">${escapeHtml(word.text)}</span>`;
+      return `<span class="kword" data-n="${n ?? ''}" data-m="${m ?? ''}" data-ws="${word.start}">${escapeHtml(word.text)}</span>`;
     }).join(' ');
   }
 
@@ -240,18 +243,32 @@ export class Karaoke {
 
     const notes = this.analysis.notes;
 
-    // Word fill: a word is filled (1) once its note starts sounding, empty (0) before.
+    // Word fill: a word is filled (1) once its vocal onset passes, empty (0) before.
     // Word-level — the whole word engulfs at once, no letter-by-letter wipe.
+    // Uses word.start (vocal onset), not the note start.
     for (const entry of this.words) {
       if (this.finishedWords.has(entry.el)) continue;
-      const fill = entry.noteIndex === null || Number.isNaN(entry.noteStart)
+      const fill = Number.isNaN(entry.wordStart)
         ? 0
-        : time >= entry.noteStart ? 1 : 0;
+        : time >= entry.wordStart ? 1 : 0;
       if (fill !== entry.lastFill) {
         entry.lastFill = fill;
         entry.el.style.setProperty('--fill', String(fill));
         entry.el.classList.toggle('sung', fill === 1);
       }
+    }
+
+    // Cue dots: light up each dot as its beat time passes (count-in before the line).
+    for (const lineEl of this.list.querySelectorAll<HTMLElement>('.lyricLine[data-line]')) {
+      const lineId = lineEl.dataset.line;
+      if (!lineId) continue;
+      const beats = this.state?.cues.get(lineId);
+      if (!beats) continue;
+      const dots = lineEl.querySelectorAll<HTMLElement>('.cueDots i');
+      beats.forEach((beatTime, i) => {
+        const dot = dots[i];
+        if (dot) dot.classList.toggle('on', time >= beatTime);
+      });
     }
 
     // Pitch tally per line: while a line's notes sound, compare mic pitch to expected.
