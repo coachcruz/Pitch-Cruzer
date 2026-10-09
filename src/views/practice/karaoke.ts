@@ -51,6 +51,15 @@ export interface KaraokeState {
   building?: { current: string; kept: Map<string, number> } | null;
 }
 
+interface LineEntry {
+  id: string;
+  el: HTMLElement;
+  /** Cue dot elements with their beat times. */
+  cues: { el: HTMLElement; beat: number }[];
+  /** Word elements in order (non-aside only). */
+  wordEls: HTMLElement[];
+}
+
 interface WordEntry {
   el: HTMLElement;
   /** First note index this word is stapled to (null: unbound). */
@@ -85,6 +94,8 @@ export class Karaoke {
   private words: WordEntry[] = [];
   /** Note index → the word stapled to it. */
   private byNoteIndex = new Map<number, WordEntry>();
+  /** Cached per-line DOM refs — built once per page, never queried per frame. */
+  private lines: LineEntry[] = [];
   private finishedWords = new Set<HTMLElement>();
   /** Pitch frames tallied per line for verdicts. */
   private tallies = new Map<string, { perfect: number; blue: number; red: number; silent: number }>();
@@ -183,6 +194,21 @@ export class Karaoke {
         this.byNoteIndex.set(noteIndex, entry);
       }
     }
+
+    // Cache per-line DOM refs once — update() must not query the DOM per frame.
+    this.lines = [];
+    for (const lineEl of this.list.querySelectorAll<HTMLElement>('.lyricLine[data-line]')) {
+      const lineId = lineEl.dataset.line;
+      if (!lineId) continue;
+      const beats = this.state?.cues.get(lineId) ?? [];
+      const dots = [...lineEl.querySelectorAll<HTMLElement>('.cueDots i')];
+      this.lines.push({
+        id: lineId,
+        el: lineEl,
+        cues: dots.map((el, i) => ({ el, beat: beats[i] ?? Infinity })),
+        wordEls: [...lineEl.querySelectorAll<HTMLElement>('.kword:not(.aside)')],
+      });
+    }
   }
 
   /** Words as individual fillable spans (word-level fill, not letter-by-letter). */
@@ -258,17 +284,11 @@ export class Karaoke {
       }
     }
 
-    // Cue dots: light up each dot as its beat time passes (count-in before the line).
-    for (const lineEl of this.list.querySelectorAll<HTMLElement>('.lyricLine[data-line]')) {
-      const lineId = lineEl.dataset.line;
-      if (!lineId) continue;
-      const beats = this.state?.cues.get(lineId);
-      if (!beats) continue;
-      const dots = lineEl.querySelectorAll<HTMLElement>('.cueDots i');
-      beats.forEach((beatTime, i) => {
-        const dot = dots[i];
-        if (dot) dot.classList.toggle('on', time >= beatTime);
-      });
+    // Cue dots: light up each dot as its beat time passes (cached refs, no DOM queries).
+    for (const line of this.lines) {
+      for (const cue of line.cues) {
+        cue.el.classList.toggle('on', time >= cue.beat);
+      }
     }
 
     // Pitch tally per line: while a line's notes sound, compare mic pitch to expected.
@@ -292,22 +312,15 @@ export class Karaoke {
     }
 
     // Line verdicts: when all of a line's words have been sung, judge it once.
-    for (const page of [this.pages[this.pageIndex]]) {
-      if (!page) continue;
-      for (const line of page) {
-        if (this.finishedLines.has(line.id)) continue;
-        const words = line.words.filter(w => !w.aside);
-        // Match word elements by their position within the line, not by noteIndex
-        // (multiple words can share one note).
-        const lineEl = this.list.querySelector<HTMLElement>(`[data-line="${line.id}"]`);
-        const wordEls = lineEl ? [...lineEl.querySelectorAll<HTMLElement>('.kword:not(.aside)')] : [];
-        const allSung = words.every((_, i) => wordEls[i]?.classList.contains('sung'));
-        if (allSung && words.length) {
-          this.finishedLines.add(line.id);
-          const row = this.list.querySelector<HTMLElement>(`[data-line="${line.id}"]`);
-          const verdict = lineVerdict(this.tallies.get(line.id) ?? { perfect: 0, blue: 0, red: 0, silent: 0 });
-          if (verdict && row) row.classList.add('lv-' + verdict);
-        }
+    // Uses cached line refs — no DOM queries per frame.
+    for (const line of this.lines) {
+      if (this.finishedLines.has(line.id)) continue;
+      if (!line.wordEls.length) continue;
+      const allSung = line.wordEls.every(el => el.classList.contains('sung'));
+      if (allSung) {
+        this.finishedLines.add(line.id);
+        const verdict = lineVerdict(this.tallies.get(line.id) ?? { perfect: 0, blue: 0, red: 0, silent: 0 });
+        if (verdict) line.el.classList.add('lv-' + verdict);
       }
     }
   }
