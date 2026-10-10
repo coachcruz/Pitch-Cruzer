@@ -917,22 +917,25 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
     tokenLines.forEach(line => { if (line.length) lineBreaks.add(count); count += line.length; });
     return groupLines(withA, lineBreaks);
   }
-  // The heard words (from buildLines) keep their vocal onset timestamps and note associations.
+  // The raw heard words keep the true vocal onset timestamps. Prefer them over analysis.lines,
+  // whose words may already be snapped to note starts from a previous pass — matching against
+  // snapped times loses the vocal onset and re-snaps the retimed words to notes.
   // Match typed words to heard words by text; each typed word inherits both its heard match's
   // timing (for highlighting) and its note (for pitch).
-  let heardWords: Array<{ text: string; start: number; end: number; noteIndex: number | null; noteEnd: number | null }> =
-    analysis.lines.flatMap(line => line.words).filter(w => !w.aside && w.text !== '♪').map(w => {
-      const first = w.syllables[0];
-      const last = w.syllables[w.syllables.length - 1];
-      return { text: w.text, start: w.start, end: w.end, noteIndex: first?.noteIndex ?? null, noteEnd: last?.noteEnd ?? first?.noteIndex ?? null };
-    });
-  // If lines weren't built from heard words (empty lines, or test fixtures), bind the raw
-  // heard timestamps directly: each heard word's start anchors to its note via noteIndexAt.
-  if (!heardWords.length && analysis.heard?.length) {
+  let heardWords: Array<{ text: string; start: number; end: number; noteIndex: number | null; noteEnd: number | null }> = [];
+  if (analysis.heard?.length) {
     heardWords = analysis.heard.map(hw => {
       let idx = noteIndexAt(notes, hw.start);
       if (idx === null) idx = nextNoteIndexAt(notes, hw.start);
       return { text: hw.text, start: hw.start, end: hw.end, noteIndex: idx, noteEnd: idx };
+    });
+  }
+  // Fallback: lines weren't built from heard words (empty heard, or test fixtures).
+  if (!heardWords.length) {
+    heardWords = analysis.lines.flatMap(line => line.words).filter(w => !w.aside && w.text !== '♪').map(w => {
+      const first = w.syllables[0];
+      const last = w.syllables[w.syllables.length - 1];
+      return { text: w.text, start: w.start, end: w.end, noteIndex: first?.noteIndex ?? null, noteEnd: last?.noteEnd ?? first?.noteIndex ?? null };
     });
   }
   // Fall back to raw heard text if lines aren't built yet (older saves).
