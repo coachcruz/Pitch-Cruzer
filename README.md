@@ -1,6 +1,8 @@
 # Pitch Cruzer
 
-A sing-along practice app for shy singers, learners and groups of friends.
+> Because you shouldn't have to be confident enough to sing in front of people before you have somewhere to learn.
+
+See [MISSION.md](MISSION.md) for the full product mission.
 
 1. **Add a song**: upload a file, paste a link (Suno / direct audio links download automatically), or record the song from another browser tab (YouTube, Spotify, Apple Music…).
 2. **Pitch Cruzer prepares it once**: LALAL.AI separates the lead vocal, backing vocals and music; the app then finds every note the singer hits, writes out the lyrics (Whisper, in the browser), and splits the song into intro / verse / pre-chorus / chorus / bridge / outro.
