@@ -26,7 +26,7 @@ export function lineVerdict(tally: { perfect: number; blue: number; red: number;
   const voiced = tally.perfect + tally.blue + tally.red;
   if (voiced + tally.silent === 0) return null;
   if (tally.silent > voiced) return 'silent';
-  const mean = (tally.perfect + tally.blue * 0.5) / voiced;
+  const mean = (tally.perfect + tally.blue * 0.5) / (voiced + tally.silent);
   if (mean === 1) return 'perfect';
   if (mean >= 0.75) return 'good';
   if (mean >= 0.4) return 'ok';
@@ -53,11 +53,27 @@ export interface KaraokeState {
 
 interface LineEntry {
   id: string;
+  start: number;
+  end: number;
+  mine: boolean;
   el: HTMLElement;
   /** Cue dot elements with their beat times. */
   cues: { el: HTMLElement; beat: number }[];
   /** Word elements in order (non-aside only). */
   wordEls: HTMLElement[];
+}
+
+/** Vocal windows are independent of pitch: an unvoiced word must still finish its page. */
+export function vocalWindow(line: LyricLine): { start: number; end: number } {
+  const words = line.words.filter(word => !word.aside && Number.isFinite(word.start) && Number.isFinite(word.end));
+  return words.length ? { start: Math.min(...words.map(w => w.start)), end: Math.max(...words.map(w => w.end)) }
+    : { start: line.start, end: line.end };
+}
+
+export function karaokePageAt(pages: LyricLine[][], time: number): number {
+  let page = 0;
+  while (page < pages.length - 1 && time >= Math.max(...pages[page].map(line => vocalWindow(line).end))) page++;
+  return page;
 }
 
 interface WordEntry {
@@ -163,11 +179,11 @@ export class Karaoke {
         score === undefined ? '' : score >= 70 ? 'good' : score >= 40 ? 'ok' : 'bad',
         who === 'partner' ? 'partner' : '',
         isTagLine(line) ? 'tagLine' : line.words.every(word => word.aside) ? 'asideLine' : ''].filter(Boolean).join(' ');
-      return header + `<div class="${classes}" data-line="${line.id}" role="button" tabindex="0">
+      return header + `<div class="${classes}" data-line="${escapeHtml(line.id)}" role="button" tabindex="0">
         ${state.cues.has(line.id) ? `<span class="cueDots" aria-hidden="true">${'<i></i>'.repeat(state.cues.get(line.id)!.length)}</span>` : ''}
         <span class="lineText">${this.wordsHtml(line)}</span>
         ${who ? `<button class="who" title="Tap to switch who sings this line — now ${escapeHtml(who === 'me' ? names.me : names.partner)}">${escapeHtml(who === 'me' ? names.me : names.partner)}</button>` : ''}
-        ${score === undefined ? '' : `<button class="lineScore" data-coach="${section?.id ?? ''}" title="How this section went — tap for coaching" type="button">${score}%</button>`}
+        ${score === undefined ? '' : `<button class="lineScore" data-coach="${escapeHtml(section?.id ?? '')}" title="How this section went — tap for coaching" type="button">${score}%</button>`}
         ${kept === undefined ? '' : `<span class="keptScore" title="Kept for your song">✓ ${kept}%</span>`}</div>`;
     }).join('') || '<p class="empty">No sung lines were found.</p>';
 
@@ -202,8 +218,11 @@ export class Karaoke {
       if (!lineId) continue;
       const beats = this.state?.cues.get(lineId) ?? [];
       const dots = [...lineEl.querySelectorAll<HTMLElement>('.cueDots i')];
+      const data = page.find(line => line.id === lineId)!;
       this.lines.push({
         id: lineId,
+        ...vocalWindow(data),
+        mine: state.singer?.(data) !== 'partner',
         el: lineEl,
         cues: dots.map((el, i) => ({ el, beat: beats[i] ?? Infinity })),
         wordEls: [...lineEl.querySelectorAll<HTMLElement>('.kword:not(.aside)')],
@@ -222,18 +241,6 @@ export class Karaoke {
     }).join(' ');
   }
 
-  /** The page is done when its last word's note has ended. */
-  private pageDone(time: number): boolean {
-    const page = this.pages[this.pageIndex];
-    if (!page) return false;
-    const lastLine = page[page.length - 1];
-    const lastWord = [...lastLine.words].reverse().find(w => !w.aside);
-    const noteIdx = lastWord?.syllables[0]?.noteIndex;
-    if (noteIdx === null || noteIdx === undefined) return false;
-    const note = this.analysis.notes[noteIdx];
-    return note ? time >= note.end : false;
-  }
-
   /**
    * Called every frame while the Karaoke view is showing. `sung` is the live mic pitch
    * (null when nothing heard) — undefined when the mic is off.
@@ -241,31 +248,21 @@ export class Karaoke {
    * Static pages: words fill whole when their note sounds. The page flips when done.
    * Pitch is tallied per word and each line is judged once when its words are all sung.
    */
-  update(time: number, _playing: boolean, sung?: number | null, flexibleOctave = false): void {
+  update(time: number, playing: boolean, sung?: number | null, flexibleOctave = false): void {
     if (!this.pages.length) return;
     // Seeked back: reset to the page containing this time.
-    if (time < this.lastTime - 0.5) {
+    if (time < this.lastTime - 0.05) {
       this.finishedWords = new Set();
       this.finishedLines = new Set();
       this.tallies = new Map();
-      // Find the page holding the note at this time.
-      const sounding = noteIndexAt(this.analysis.notes, time);
-      let target = 0;
-      if (sounding !== null) {
-        for (let p = 0; p < this.pages.length; p += 1) {
-          const has = this.pages[p].some(line =>
-            line.words.some(w => w.syllables.some(s => s.noteIndex === sounding)));
-          if (has) { target = p; break; }
-        }
-      }
-      this.showPage(target);
+      this.showPage(karaokePageAt(this.pages, time));
     }
+    const elapsed = Number.isFinite(this.lastTime) ? Math.max(0, Math.min(0.1, time - this.lastTime)) : 0;
     this.lastTime = time;
-
-    // Page flip: when the current page's last word is done, show the next page.
-    if (this.pageDone(time) && this.pageIndex < this.pages.length - 1) {
-      this.showPage(this.pageIndex + 1);
-    }
+    // Finish visible rows before replacing their DOM at a page boundary.
+    this.finishLines(time);
+    const page = karaokePageAt(this.pages, time);
+    if (page !== this.pageIndex) this.showPage(page);
 
     const notes = this.analysis.notes;
 
@@ -292,32 +289,29 @@ export class Karaoke {
     }
 
     // Pitch tally per line: while a line's notes sound, compare mic pitch to expected.
-    if (sung !== undefined) {
+    if (playing && sung !== undefined && elapsed > 0) {
       const sounding = noteIndexAt(notes, time);
       if (sounding !== null) {
-        const entry = this.byNoteIndex.get(sounding);
-        const row = entry?.el.closest<HTMLElement>('[data-line]');
-        const lineId = row?.dataset.line;
-        if (entry && lineId && entry.midi !== null && !this.finishedLines.has(lineId)) {
+        const line = this.lines.find(line => line.mine && time >= line.start && time < line.end);
+        const lineId = line?.id;
+        if (lineId && !this.finishedLines.has(lineId)) {
           const note = notes[sounding];
           const verdict = pitchVerdict(sung, note.midi, time - note.start, flexibleOctave);
           const tally = this.tallies.get(lineId) ?? { perfect: 0, blue: 0, red: 0, silent: 0 };
-          if (verdict === 'perfect') tally.perfect += 1;
-          else if (verdict === 'blue') tally.blue += 1;
-          else if (verdict === 'red') tally.red += 1;
-          else if (verdict === 'silent') tally.silent += 1;
+          if (verdict) tally[verdict] += elapsed;
           this.tallies.set(lineId, tally);
         }
       }
     }
 
-    // Line verdicts: when all of a line's words have been sung, judge it once.
-    // Uses cached line refs — no DOM queries per frame.
+    this.finishLines(time);
+  }
+
+  private finishLines(time: number): void {
     for (const line of this.lines) {
       if (this.finishedLines.has(line.id)) continue;
       if (!line.wordEls.length) continue;
-      const allSung = line.wordEls.every(el => el.classList.contains('sung'));
-      if (allSung) {
+      if (time >= line.end) {
         this.finishedLines.add(line.id);
         const verdict = lineVerdict(this.tallies.get(line.id) ?? { perfect: 0, blue: 0, red: 0, silent: 0 });
         if (verdict) line.el.classList.add('lv-' + verdict);
