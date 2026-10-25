@@ -9,6 +9,7 @@ export interface PitchTrack { midi: Float32Array; energy: Float32Array; hopSecon
 export interface NoteEvent { start: number; end: number; midi: number }
 
 export interface Syllable {
+  timing?: 'measured' | 'estimated';
   text: string; start: number; end: number; midi: number | null; notes: number[];
   /**
    * Structural binding: indices into the analysis' note array of the first and last note this
@@ -23,7 +24,7 @@ export interface Syllable {
  * shown differently, has no syllables or notes, and is left out of timing, the staff and scoring.
  * `tag`: the aside is a section tag ([Verse 2], [Chorus]…) — it names the section instead of being shown.
  */
-export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string; aside?: boolean; tag?: boolean }
+export interface Word { text: string; start: number; end: number; syllables: Syllable[]; lang?: string; aside?: boolean; tag?: boolean; timing?: 'measured' | 'estimated' }
 export interface LyricLine { id: string; start: number; end: number; words: Word[] }
 
 /** 'part' only appears in songs saved by older versions (they're relabeled when opened). */
@@ -57,6 +58,7 @@ export interface SongAnalysis {
   lyricsPending?: boolean;
   separated: boolean;
   lyricsOptions?: LyricsOptions;
+  alignment?: { measured: number; total: number };
   /** Tempo, beat grid and meter (for the silent count-in dots); null = no clear beat. Found once, then saved. */
   beat?: Beat | null;
   /** Duet: which voice you sing (the lower or the higher), plus lines you reassigned by hand. */
@@ -71,7 +73,7 @@ export interface SongAnalysis {
   typed?: string;
 }
 
-export interface LyricsOptions { languages: string[]; quality: 'fast' | 'best' }
+export interface LyricsOptions { languages: string[]; quality: 'fast' | 'best'; engine?: 'local' | 'server' }
 
 /** Where to breathe: silences between sung notes long enough to take a breath. */
 export interface BreathMark { time: number; length: number }
@@ -1002,7 +1004,18 @@ export function applyTypedLyrics(analysis: SongAnalysis, text: string): LyricLin
       const nextNote = nextMatch?.from ?? null;
       const noteFrom = prevNote !== null ? prevNote + 1 : 0;
       const noteTo = nextNote !== null ? nextNote - 1 : notes.length - 1;
-      if (noteTo < noteFrom) continue; // No notes in this gap; leave unbound.
+      if (noteTo < noteFrom) {
+        // Several words can share one held pitch. Use the available word-time gap,
+        // never time zero and never move the already matched neighbours.
+        const start = prevMatch?.end ?? notes[0].start;
+        const end = Math.max(start, nextMatch?.start ?? notes[notes.length - 1].end);
+        const slot = (end - start) / (gap.to - gap.from + 1);
+        for (let i = gap.from; i <= gap.to; i++) {
+          typedToNote.set(i, { from: prevNote ?? nextNote, to: prevNote ?? nextNote,
+            start: start + slot * (i - gap.from), end: start + slot * (i - gap.from + 1) });
+        }
+        continue;
+      }
       const gapNotes = notes.slice(noteFrom, noteTo + 1);
       const flatSyls: Array<{ text: string }> = [];
       const counts: number[] = [];
@@ -1225,50 +1238,18 @@ export function alignSyncedLyrics(analysis: SongAnalysis, synced: SyncedLine[]):
  * ♪ words are preserved — only times, midis and note lists change.
  */
 export function rebaseToNoteRuns(lines: LyricLine[], notes: NoteEvent[]): void {
-  if (!notes.length) return;   // no measured singing: nothing to bind to, leave times as they were
-  const flat: Syllable[] = [];
-  for (const line of lines)
-    for (const word of line.words) {
-      if (word.aside || !word.syllables.length) continue;
-      flat.push(...word.syllables);
-    }
-  if (!flat.length) return;
-  const runs = bindSyllables(flat.map(syllable => ({ text: syllable.text })), notes);
-  // Structural binding: each syllable staples to its notes by index, not by time. The karaoke
-  // view follows these indices — lyric timestamps are never consulted at showtime.
-  const indexOf = new Map<NoteEvent, number>();
-  notes.forEach((note, i) => indexOf.set(note, i));
-  flat.forEach((syllable, k) => {
-    const run = runs[k];
-    if (!run.length) {
-      syllable.start = NaN; syllable.end = NaN; syllable.midi = null; syllable.notes = [];
-      syllable.noteIndex = null; syllable.noteEnd = null;
-    } else {
-      let best = run[0];
-      for (const note of run) if (note.end - note.start > best.end - best.start) best = note;
-      syllable.start = run[0].start;
-      syllable.end = run[run.length - 1].end;
-      syllable.midi = best.midi;
-      syllable.notes = distinctRounded(run);
-      syllable.noteIndex = indexOf.get(run[0]) ?? null;
-      syllable.noteEnd = indexOf.get(run[run.length - 1]) ?? null;
-    }
-  });
-  fillSyllableTimes(flat);
-  for (const line of lines) {
-    for (const word of line.words) {
-      if (word.aside || !word.syllables.length) continue;
-      word.start = word.syllables[0].start;
-      word.end = word.syllables[word.syllables.length - 1].end;
-    }
-    // Asides ride on the next sung word's new start (or keep their time when there is none).
-    line.words.forEach((word, wi) => {
-      if (!word.aside) return;
-      const next = line.words.slice(wi + 1).find(candidate => !candidate.aside);
-      if (next) { word.start = next.start; word.end = next.start; }
-    });
-    line.start = line.words[0].start;
-    line.end = line.words[line.words.length - 1].end;
+  // A note-detector upgrade changes pitch associations, not the saved vocal timing.
+  // In particular, it must not overwrite a user's corrections just by opening a song.
+  for (const line of lines) for (const word of line.words) for (const syllable of word.syllables) {
+    const indices = notes.flatMap((note, index) => note.end > syllable.start && note.start < syllable.end ? [index] : []);
+    syllable.noteIndex = indices[0] ?? null;
+    syllable.noteEnd = indices[indices.length - 1] ?? null;
+    const run = indices.map(index => notes[index]);
+    const best = [...run].sort((a, b) =>
+      (Math.min(b.end, syllable.end) - Math.max(b.start, syllable.start)) -
+      (Math.min(a.end, syllable.end) - Math.max(a.start, syllable.start)))[0];
+    syllable.midi = best?.midi ?? null;
+    syllable.notes = distinctRounded(run);
   }
 }
 
