@@ -29,6 +29,35 @@ const sungText = (song: ReturnType<typeof makeSong>) =>
   song.analysis.lines.flatMap(line => line.words).filter(word => !word.aside).map(word => word.text).join(' ');
 
 describe('writing the lyrics', () => {
+  it('keep timing preserves manual boundaries and evidence without calling any service', async () => {
+    const song = makeSong(SONG);
+    const fake = services(song);
+    await writeLyrics(song.analysis, { own: song.text }, fake);
+    song.analysis.lines[0].words[0].start += 0.123;
+    const before = structuredClone(song.analysis);
+    const quiet = services(song);
+    quiet.align = vi.fn(async () => undefined);
+    await writeLyrics(song.analysis, { own: song.text, preserveTiming: true }, quiet);
+    expect(song.analysis).toEqual(before);
+    expect(quiet.hear).not.toHaveBeenCalled();
+    expect(quiet.lookup).not.toHaveBeenCalled();
+    expect(quiet.align).not.toHaveBeenCalled();
+  });
+
+  it('a newer keep request prevents an older in-flight redo from replacing saved timing', async () => {
+    const song = makeSong(SONG);
+    await writeLyrics(song.analysis, { own: song.text }, services(song));
+    let finish!: (value: { words: []; partial: boolean }) => void;
+    const delayed = services(song);
+    delayed.hear = () => new Promise(resolve => { finish = resolve; });
+    const pending = writeLyrics(song.analysis, { own: 'Replacement words', listen: true }, delayed);
+    await writeLyrics(song.analysis, { preserveTiming: true }, services(song));
+    const before = structuredClone(song.analysis);
+    finish({ words: [], partial: false });
+    expect((await pending).source).toBe('kept');
+    expect(song.analysis).toEqual(before);
+  });
+
   it('your own lyrics are used word for word — never replaced by what was heard', async () => {
     const song = makeSong(SONG);
     const fake = services(song);
