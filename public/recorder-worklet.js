@@ -3,12 +3,20 @@ class RecorderProcessor extends AudioWorkletProcessor {
   constructor() {
     super();
     this.recording = false;
-    this.port.onmessage = event => { this.recording = event.data === 'start'; };
+    this.id = 0;
+    this.port.onmessage = event => {
+      const { command, id } = event.data;
+      if (command === 'start') { this.id = id; this.recording = true; }
+      else if (command === 'stop' && id === this.id) {
+        this.recording = false;
+        this.port.postMessage({ stopped: id });
+      }
+    };
   }
   process(inputs) {
     const input = inputs[0];
     if (this.recording && input && input[0]) {
-      this.port.postMessage({ frame: currentFrame, data: input[0].slice(0) });
+      this.port.postMessage({ id: this.id, frame: currentFrame, data: input[0].slice(0) });
     }
     return true;
   }
