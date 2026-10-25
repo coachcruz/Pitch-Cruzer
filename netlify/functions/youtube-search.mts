@@ -18,12 +18,14 @@ interface SearchItem {
 }
 
 export default async (req: Request) => {
-  const blocked = await gate(req, { quota: 'youtube-search', limit: 30 });
+  const blocked = await gate(req);
   if (blocked) return blocked;
   const key = env('YOUTUBE_API_KEY');
   const query = new URL(req.url).searchParams.get('q')?.trim();
   if (!query) return json({ available: Boolean(key) });
   if (!key) return json({ error: 'YOUTUBE_API_KEY is not configured', code: 'missing_key' }, 503);
+  const limited = await gate(req, { quota: 'youtube-search', limit: 30, globalLimit: 80 });
+  if (limited) return limited;
 
   const url = new URL('https://www.googleapis.com/youtube/v3/search');
   url.search = new URLSearchParams({
