@@ -1,5 +1,5 @@
 import { diagEntries, diagReset, onDiag, diag } from '../lib/diag';
-import { deleteSong, exportSong, importSong, keepStoragePersistent, listSongs, saveSong, type StoredSong } from '../lib/library';
+import { completePreparation, deleteSong, exportSong, saveExistingSong, importSong, keepStoragePersistent, listSongs, saveSong, type StoredSong } from '../lib/library';
 import * as lalal from '../lib/lalal';
 import { downloadBlob } from '../lib/audio';
 import { fileProblem, isSongFile, pickSongFile, songNameFromFile } from '../lib/songFile';
@@ -208,7 +208,9 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
    * you choose to) is a song prepared with the singer left in. */
   const start = async (input: SongInput, separate = lalalState !== 'missing' && lalalState !== 'offline') => {
     if (!separate && input.kind === 'link') { toast('Links are downloaded through the vocal separator, which isn’t available right now. Upload the file instead.', 'error'); return; }
-    abort = new AbortController();
+    abort?.abort();
+    const controller = new AbortController();
+    abort = controller;
     addCard.classList.add('busy');
     progressCard.classList.remove('hidden');
     // While the song is prepared: make sure the mic hears you, so it's sorted before the song starts.
@@ -224,6 +226,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
     progressCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     try {
       const prepared = await prepareSong(input, separate, lyricsOptionsFrom(lyricsLang.value, prefs.get('lyricsQuality2', 'fast')), (step, fraction, detail) => {
+        if (controller.signal.aborted || disposed || abort !== controller) return;
         if (step !== currentStep) {
           if (currentStep) diag('Finished: ' + currentStep + ' in ' + ((performance.now() - stepStartedAt) / 1000).toFixed(1) + 's', 'ok');
           currentStep = step;
@@ -232,8 +235,8 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
         }
         states[step] = { fraction, detail: detail ?? states[step]?.detail };
         if (!disposed) renderSteps(states, !separate);
-      }, abort.signal, lyricsSource(input));
-      if (abort.signal.aborted || disposed) return;
+      }, controller.signal, lyricsSource(input));
+      if (controller.signal.aborted || disposed || abort !== controller) return;
       const song = prepared.song;
       if (songTitle && input.kind !== 'link') song.title = songTitle;
       if (refVideoId) song.referenceVideoId = refVideoId;
@@ -242,6 +245,11 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       session.buffers = prepared.buffers;
       // Every song is kept on this device automatically (and can be downloaded as a file from My songs).
       session.saved = await saveSong(song).then(() => true, () => false);
+      const songWasSaved = session.saved;
+      if (songWasSaved && prepared.checkpointId) await completePreparation(prepared.checkpointId, song.id).catch(() => {
+        toast('Song saved; recovery cleanup will be retried next time.');
+      });
+      if (controller.signal.aborted || disposed || abort !== controller) return;
       if (!session.saved) toast('This device is out of space, so the song isn’t saved — you can still practice it now.', 'error');
       keepStoragePersistent();
       // Open the song as soon as the notes are ready; the lyrics finish in the background and appear
@@ -252,7 +260,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       }, error => console.warn('Background lyrics failed', error)).then(async () => {
         song.analysis.lyricsPending = false;
         session.lyricsJobs.delete(song.id);
-        if (session.saved) await saveSong(song).catch(() => undefined);
+        if (songWasSaved) await saveExistingSong(song).catch(() => toast('The completed lyrics could not be saved. Keep this page open and try saving again.', 'error'));
         window.dispatchEvent(new CustomEvent(LYRICS_READY, { detail: song.id }));
       });
       session.lyricsJobs.set(song.id, job);
@@ -264,7 +272,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       refVideoId = null;
       navigate('#/song/' + song.id);
     } catch (error) {
-      if (disposed) return;
+      if (disposed || controller.signal.aborted || abort !== controller) return;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
       diag('Failed during ' + (currentStep ?? 'start') + ': ' + message, 'error');
       el(root, '#progressTitle').textContent = 'That didn’t work';
@@ -278,7 +286,7 @@ export function renderHome(root: HTMLElement, navigate: (hash: string) => void):
       prepError.querySelector('[data-act="nosplit"]')?.addEventListener('click', () => void start(input, false));
       prepError.querySelector('[data-act="close"]')?.addEventListener('click', () => { progressCard.classList.add('hidden'); stopMicCheck(); });
     } finally {
-      addCard.classList.remove('busy');
+      if (abort === controller) addCard.classList.remove('busy');
     }
   };
 
