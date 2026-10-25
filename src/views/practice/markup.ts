@@ -223,7 +223,8 @@ export function practiceMarkup(song: StoredSong, hasMusic: boolean): string {
         <p class="hint">Listens to the singer again, building on the first listen — it mainly goes after words that were missed or misheard. The language is found by itself; pick one only if it gets it wrong (for a bilingual song, pick both).</p>
         <label class="inline">Language <select id="redoLang">${LANGUAGE_CHOICES.map(choice => `<option value="${choice.value}">${choice.label}</option>`).join('')}</select></label>
         <label class="inline">Accuracy <select id="redoQuality"><option value="fast">Faster (≈80 MB, recommended)</option><option value="best">Best (≈250 MB, several times slower)</option></select></label>
-        <label id="redoKeepWrap" class="check small"><input id="redoKeep" type="checkbox" checked> Keep my lyrics — only line them up with the singer again</label>
+        <label class="inline">Listen using <select id="redoEngine"><option value="local">On this device — no transcription charge</option><option value="server">Server — uses transcription quota</option></select></label>
+        <label id="redoKeepWrap" class="check small"><input id="redoKeep" type="checkbox" checked> Keep my lyrics and saved timing — no new transcription</label>
         <p id="redoStatus" class="hint small"></p>
         <div class="row end"><button class="btn ghost" value="cancel" id="redoCancel">Cancel</button><button id="redoStart" class="btn primary" type="button">Redo lyrics</button></div>
       </form>
