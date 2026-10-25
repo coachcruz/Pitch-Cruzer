@@ -241,7 +241,7 @@ export class SongBuilder {
 
   private async finishRecording(): Promise<void> {
     const { player, mic } = this.host;
-    const result = mic.stopRecording();
+    const result = await mic.stopRecording();
     this.host.restoreMix();
     const range = this.recordRange;
     if (this.cancelled || !result || result.samples.length < result.sampleRate * 0.5) {
