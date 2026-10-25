@@ -252,7 +252,7 @@ export function sectionCoaching(take: TakeScore, sections: Section[], lines: Lyr
 export async function mixdown(
   buffers: SongBuffers,
   timeline: Timeline,
-  levels: { lead: number; music: number; voice: number },
+  levels: { lead: number; music: number; voice: number; bass?: number; treble?: number },
   voice: AudioBuffer,
   voiceOffset: number,
   /** Duet: your partner's lines, where the original singer stays at full volume. */
@@ -263,7 +263,13 @@ export async function mixdown(
   const offline = new OfflineAudioContext(2, length, sampleRate);
   const gain = (value: number) => { const node = offline.createGain(); node.gain.value = value; node.connect(offline.destination); return node; };
   const leadGain = gain(levels.lead), partnerGain = gain(1);
-  const stems: Array<[AudioBuffer | null, GainNode]> = [[buffers.backing, gain(levels.music)], [buffers.instrumental, gain(levels.music)]];
+  const musicGain = offline.createGain();
+  musicGain.gain.value = levels.music;
+  const bass = offline.createBiquadFilter(), treble = offline.createBiquadFilter();
+  bass.type = 'lowshelf'; bass.frequency.value = 200; bass.gain.value = levels.bass ?? 0;
+  treble.type = 'highshelf'; treble.frequency.value = 3000; treble.gain.value = levels.treble ?? 0;
+  musicGain.connect(bass).connect(treble).connect(offline.destination);
+  const stems: Array<[AudioBuffer | null, GainNode]> = [[buffers.backing, musicGain], [buffers.instrumental, musicGain]];
   for (const piece of timeline.pieces) {
     if (piece.turn) continue; // Echo: the song is silent while you sing it back, as in playback
     for (const [start, end, isPartner] of splitByRanges(piece.sourceStart, piece.duration, partner)) {
