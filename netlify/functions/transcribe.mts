@@ -24,7 +24,7 @@ interface GroqResult {
 }
 
 export default async (req: Request) => {
-  const blocked = await gate(req, { quota: 'transcribe', limit: 30 });
+  const blocked = await gate(req);
   if (blocked) return blocked;
   const key = env('GROQ_API_KEY');
   if (req.method === 'GET') return json({ available: Boolean(key) });
@@ -34,6 +34,8 @@ export default async (req: Request) => {
   const audio = await req.arrayBuffer();
   if (audio.byteLength < 1024) return json({ error: 'No audio received.' }, 400);
   if (audio.byteLength > MAX_BYTES) return json({ error: 'Audio piece too large.' }, 413);
+  const limited = await gate(req, { quota: 'transcribe', limit: 120, globalLimit: 600 });
+  if (limited) return limited;
 
   const params = new URL(req.url).searchParams;
   const form = new FormData();
