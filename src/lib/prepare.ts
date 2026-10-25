@@ -7,10 +7,11 @@ import { songNameFromFile } from './songFile';
 import * as lalal from './lalal';
 import { diag } from './diag';
 import { fetchWithRetry } from './retry';
-import type { StoredSong } from './library';
+import { getPreparation, preparedStems, savePreparation, type Preparation, type StoredSong } from './library';
 import type { PitchJobResult } from './pitch.worker';
 import { serverTranscriptionAvailable, transcribeOnServer } from './serverTranscribe';
 import type { TimedWord } from './transcribe.worker';
+import { alignVocalOnsets } from './onsets';
 
 export type SongInput =
   | { kind: 'file'; file: Blob; name: string }
@@ -51,7 +52,7 @@ export const STEPS: Array<{ id: StepId; label: string; background?: boolean }> =
 export type Progress = (step: StepId, fraction: number, detail?: string) => void;
 
 /** `named`: the song had no real name (a screen recording…) — it can take the name its lyrics were found under. */
-export interface PreparedSong { song: StoredSong; buffers: SongBuffers; lyricsJob: () => Promise<LyricsResult>; named: boolean }
+export interface PreparedSong { song: StoredSong; buffers: SongBuffers; lyricsJob: () => Promise<LyricsResult>; named: boolean; checkpointId?: string }
 export interface SongBuffers { lead: AudioBuffer; backing: AudioBuffer | null; instrumental: AudioBuffer | null }
 
 const PITCH_RATE = 11025;
@@ -148,7 +149,7 @@ function vocalClips(notes: NoteEvent[], duration: number): Array<{ start: number
  * up — it's much more accurate on singing; otherwise, or if it fails, the in-browser model runs.
  */
 async function transcribe(buffer: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, onProgress: (fraction: number, detail: string) => void): Promise<{ words: TimedWord[]; partial: boolean }> {
-  if (await serverTranscriptionAvailable()) {
+  if (options.engine !== 'local' && await serverTranscriptionAvailable()) {
     try {
       diag('Lyrics: using the server model (Whisper Large v3 Turbo)');
       return { words: await transcribeOnServer(buffer, notes, options, onProgress), partial: false };
@@ -231,6 +232,7 @@ function transcribeInBrowser(buffer: AudioBuffer, notes: NoteEvent[], options: L
 /** The real services behind the lyrics (see lib/lyrics): the singer, the lyrics database, song recognition. */
 export function lyricsServices(lead: AudioBuffer, notes: NoteEvent[], options: LyricsOptions, progress: Progress): LyricsServices {
   return {
+    align: async analysis => alignVocalOnsets(analysis, await resampleMono(lead, 16000), 16000),
     hear: () => transcribe(lead, notes, options, (fraction, detail) => progress('lyrics', 0.05 + fraction * 0.85, detail)),
     lookup: query => findLyricsOnline(query, lead.duration),
     identify: async (heard, hint) => {
@@ -312,16 +314,34 @@ export async function recheckNotes(lead: AudioBuffer, analysis: SongAnalysis): P
 }
 
 export async function prepareSong(input: SongInput, useSeparation: boolean, lyrics: LyricsOptions, progress: Progress, signal?: AbortSignal, lyricsSource: LyricsSource = {}): Promise<PreparedSong> {
+  const check = () => signal?.throwIfAborted();
+  check();
   let source = lyricsSource;
   let title = input.kind === 'link' ? titleFromLink(input.url) : songNameFromFile(input.name);
   let stems: StoredSong['stems'];
+  let job: Preparation | undefined;
 
   if (useSeparation) {
+    const bytes = input.kind === 'link' ? new TextEncoder().encode(input.url.trim()).buffer : await (input.kind === 'file' ? input.file : input.blob).arrayBuffer();
+    const hash = await crypto.subtle.digest('SHA-256', bytes);
+    const id = [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
+    job = await getPreparation(id) ?? { id, createdAt: Date.now() };
+    // Refuse to start paid work if we cannot keep a recovery checkpoint.
+    await savePreparation(job);
+    check();
+    const recovered = await preparedStems(job);
+    if (recovered) {
+      stems = recovered;
+      progress('download', 1, 'Resuming from the saved separated tracks');
+    } else {
     progress('upload', 0);
     let sourceId: string;
-    if (input.kind === 'link') {
-      const imported = await importLinkOrFetchHere(input.url, progress);
+    if (job.sourceId) sourceId = job.sourceId;
+    else if (input.kind === 'link') {
+      const imported = await importLinkOrFetchHere(input.url, progress, signal);
       sourceId = imported.id;
+      job.title = imported.title;
+      job.lyrics = imported.lyrics;
       // A Suno song arrives with its own title and lyrics: use them like pasted lyrics.
       if (imported.title) title = imported.title;
       if (imported.lyrics) {
@@ -334,13 +354,19 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     else {
       progress('upload', 0, 'Compressing…');
       const packed = await compressForUpload(input.kind === 'file' ? input.file : input.blob, input.name);
-      sourceId = await lalal.uploadFile(packed.file, packed.name, f => progress('upload', f, (packed.file.size / 1048576).toFixed(1) + ' MB'));
+      check();
+      sourceId = await lalal.uploadFile(packed.file, packed.name, f => progress('upload', f, (packed.file.size / 1048576).toFixed(1) + ' MB'), signal);
     }
+    job.sourceId = sourceId;
+    await savePreparation(job);
     progress('upload', 1);
-    if (signal?.aborted) throw new lalal.LalalError('Cancelled.');
+    check();
 
     progress('separate', 0);
-    const taskId = await lalal.startSplit(sourceId);
+    const taskId = job.taskId ?? await lalal.startSplit(sourceId);
+    job.taskId = taskId;
+    await savePreparation(job);
+    check();
     const tracks = await lalal.waitForSplit(taskId, f => progress('separate', f), signal);
     const picked = lalal.pickStems(tracks);
     if (!picked.lead || !picked.instrumental) throw new lalal.LalalError('LALAL did not return a vocal and a music track.');
@@ -350,13 +376,19 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     let done = 0;
     const fetchOne = async (track?: lalal.LalalTrack) => {
       if (!track) return undefined;
-      const blob = await lalal.downloadTrack(track.url);
+      const blob = await lalal.downloadTrack(track.url, signal);
+      check();
       done += 1;
       progress('download', done / (picked.backing ? 3 : 2));
       return blob;
     };
     const [lead, instrumental, backing] = await Promise.all([fetchOne(picked.lead), fetchOne(picked.instrumental), fetchOne(picked.backing)]);
     stems = { lead: lead!, instrumental, backing };
+    job.stems = stems;
+    await savePreparation(job);
+    }
+    if (job.title) title = job.title;
+    if (job.lyrics && !source.pasted?.trim()) source = { ...source, pasted: job.lyrics };
   } else {
     if (input.kind === 'link') throw new lalal.LalalError('Links need the LALAL.AI connection. Upload a file instead.');
     const file = input.kind === 'file' ? input.file : input.blob;
@@ -364,13 +396,15 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     stems = { lead: (await compressForUpload(file, input.name)).file };
     ['upload', 'separate', 'download'].forEach(step => progress(step as StepId, 1, 'Skipped'));
   }
-
+  check();
   const buffers: SongBuffers = {
     lead: await decodeAudio(await stems.lead.arrayBuffer()),
     backing: stems.backing ? await decodeAudio(await stems.backing.arrayBuffer()) : null,
     instrumental: stems.instrumental ? await decodeAudio(await stems.instrumental.arrayBuffer()) : null
   };
+  check();
   const { analysis, lyricsJob } = await analyzeLead(buffers.lead, useSeparation, lyrics, progress, source);
+  check();
   const song: StoredSong = {
     id: crypto.randomUUID(),
     title: title || 'Untitled song',
@@ -379,28 +413,31 @@ export async function prepareSong(input: SongInput, useSeparation: boolean, lyri
     analysis,
     stems
   };
-  return { song, buffers, lyricsJob, named: Boolean(title) && title !== 'Suno song' };
+  return { song, buffers, lyricsJob, named: Boolean(title) && title !== 'Suno song', checkpointId: job?.id };
 }
 
 /**
  * Imports a link on the server. Some hosts (Suno) refuse downloads from servers but not from your
  * browser — then the browser downloads the song itself and uploads it like a file.
  */
-async function importLinkOrFetchHere(url: string, progress: Progress): Promise<{ id: string } & lalal.LinkDetails> {
+async function importLinkOrFetchHere(url: string, progress: Progress, signal?: AbortSignal): Promise<{ id: string } & lalal.LinkDetails> {
   try {
-    return await lalal.importLink(url);
+    return await lalal.importLink(url, signal);
   } catch (error) {
+    signal?.throwIfAborted();
     const urls = error instanceof lalal.LalalError && error.code === 'source_blocked' && Array.isArray(error.details.audioUrls)
       ? (error.details.audioUrls as string[]) : [];
     if (!urls.length) throw error;
     diag('The server was blocked from downloading the song — downloading it in this browser instead', 'warn');
     for (const audioUrl of urls) {
-      const response = await fetch(audioUrl, { signal: AbortSignal.timeout(60000) }).catch(() => null);
+      signal?.throwIfAborted();
+      const response = await fetch(audioUrl, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000) }).catch(() => null);
+      signal?.throwIfAborted();
       if (!response?.ok) { diag('Browser download ' + (response ? 'HTTP ' + response.status : 'blocked') + ': ' + audioUrl, 'warn'); continue; }
       const blob = await response.blob();
       if (blob.size < 1024) continue;
       diag('Downloaded the song in this browser (' + (blob.size / 1048576).toFixed(1) + ' MB)', 'ok');
-      const id = await lalal.uploadFile(blob, 'linked-song.mp3', f => progress('upload', f, (blob.size / 1048576).toFixed(1) + ' MB'));
+      const id = await lalal.uploadFile(blob, 'linked-song.mp3', f => progress('upload', f, (blob.size / 1048576).toFixed(1) + ' MB'), signal);
       const details = (error as lalal.LalalError).details as lalal.LinkDetails;
       return { id, title: details.title, lyrics: details.lyrics };
     }
