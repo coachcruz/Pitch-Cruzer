@@ -25,7 +25,7 @@ const COMPARE = ['qwen/qwen3.8-27b', 'groq/compound', 'groq/compound-mini', 'lla
 const searches = (model: string) => model.startsWith('openai/gpt-oss') || model.startsWith('groq/compound');
 
 export default async (req: Request) => {
-  const blocked = await gate(req, { quota: 'identify-song', limit: 30 });
+  const blocked = await gate(req);
   if (blocked) return blocked;
   const key = env('GROQ_API_KEY');
   if (!key) return json({ error: 'GROQ_API_KEY is not configured', code: 'missing_key' }, 503);
@@ -39,7 +39,10 @@ export default async (req: Request) => {
   // Models get retired now and then: try the next one if a model isn't available. Each model has its own
   // free-tier rate limit, so a model that's rate-limited (after a short wait) hands over to the next one too.
   // If every listed model is gone, ask Groq which models it has now and try those.
-  const ask = (model: string) => groqFetch(() => fetch(GROQ_URL, {
+  const ask = (model: string) => groqFetch(async () => {
+    const denied = await gate(req, { quota: 'identify-song', limit: 30, globalLimit: 100 });
+    if (denied) return denied;
+    return fetch(GROQ_URL, {
     method: 'POST',
     headers: { Authorization: 'Bearer ' + key, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -62,7 +65,8 @@ export default async (req: Request) => {
         { role: 'user', content: (hint ? 'File or video name (may be meaningless): ' + hint + '\n\n' : '') + 'Heard lyrics:\n' + heard }
       ]
     })
-  }), 2000);
+    });
+  }, 2000);
 
   let response: Response | null = null;
   let limited: Response | null = null;
