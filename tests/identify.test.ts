@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// Provider fallback tests isolate the provider; quota concurrency is exercised in gate.test.ts.
+vi.mock('../netlify/lib/gate.mts', () => ({ gate: vi.fn(async () => null) }));
 
 // The function reads its key through Netlify's global.
 (globalThis as unknown as { Netlify: unknown }).Netlify = { env: { get: () => 'test-key' } };
