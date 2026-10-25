@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isBluetoothMic, type LiveMic } from '../src/lib/mic';
+import { isBluetoothMic, LiveMic } from '../src/lib/mic';
 import { micWarning } from '../src/ui/micSetup';
 
 /** Just what micWarning reads from a live mic. */
@@ -7,6 +7,19 @@ const mic = (state: { inputLabel?: string; filtering?: string[]; fellBack?: bool
   ({ inputLabel: '', filtering: [], fellBack: false, ...state }) as unknown as LiveMic;
 
 describe('microphone: telling you when the device gets in the way', () => {
+  it('follows sustained octave jumps in both directions without requiring silence', () => {
+    const live = new LiveMic({ sampleRate: 48000 } as AudioContext);
+    let frequency = 110;
+    Object.assign(live, { analyser: { getFloatTimeDomainData(buffer: Float32Array) {
+      for (let i = 0; i < buffer.length; i++) buffer[i] = 0.4 * Math.sin(2 * Math.PI * frequency * i / 48000);
+    } } });
+    const settle = () => { let midi: number | null = null; for (let i = 0; i < 6; i++) midi = live.read().midi; return midi; };
+    expect(settle()).toBeCloseTo(45, 1);
+    frequency = 220;
+    expect(settle()).toBeCloseTo(57, 1);
+    frequency = 110;
+    expect(settle()).toBeCloseTo(45, 1);
+  });
   it('knows a Bluetooth mic by its name', () => {
     expect(isBluetoothMic('AirPods Pro')).toBe(true);
     expect(isBluetoothMic('Galaxy Buds2')).toBe(true);
