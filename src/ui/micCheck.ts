@@ -129,7 +129,7 @@ export function mountMicCheck(host: HTMLElement, changed: () => void = () => und
     const clicks = Array.from({ length: 8 }, (_, k) => first + k * 0.6);
     clicks.forEach((at, k) => click(at, k === 0));
     await new Promise(resolve => window.setTimeout(resolve, (clicks[clicks.length - 1] - ctx.currentTime + 1.2) * 1000));
-    const recording = mic.stopRecording();
+    const recording = await mic.stopRecording();
     syncButton.disabled = false;
     if (stopped) return;
     const found = recording ? measureRoundTrip(recording.samples, recording.sampleRate, recording.startTime, clicks) : null;
