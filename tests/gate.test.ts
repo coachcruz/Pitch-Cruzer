@@ -10,8 +10,11 @@ function fakeStore() {
   const data = new Map<string, { count: number; reset: number }>();
   return {
     data,
-    get: async (key: string) => data.get(key) ?? null,
-    setJSON: async (key: string, value: { count: number; reset: number }) => { data.set(key, value); },
+    getWithMetadata: async (key: string) => data.has(key) ? { data: data.get(key)!, etag: String(data.get(key)!.count) } : null,
+    setJSON: async (key: string, value: { count: number; reset: number }, options: { onlyIfNew?: boolean; onlyIfMatch?: string }) => {
+      if (options.onlyIfNew ? data.has(key) : String(data.get(key)?.count) !== options.onlyIfMatch) return { modified: false };
+      data.set(key, value); return { modified: true };
+    },
   };
 }
 
@@ -53,15 +56,26 @@ describe('gate', () => {
     const store = fakeStore();
     await gate(req({ 'x-nf-client-connection-ip': '203.0.113.7' }), { quota: 'q', limit: 5, store });
     const keys = [...store.data.keys()];
-    expect(keys).toHaveLength(1);
+    expect(keys).toHaveLength(2);
     expect(keys[0]).not.toContain('203.0.113.7');
   });
 
-  it('still allows the request when the quota store is down', async () => {
+  it('refuses paid work when the quota store is down', async () => {
     const broken = {
-      get: async () => { throw new Error('blobs down'); },
+      getWithMetadata: async () => { throw new Error('blobs down'); },
       setJSON: async () => { throw new Error('blobs down'); },
     };
-    expect(await gate(req(), { quota: 'q', limit: 1, store: broken })).toBeNull();
+    expect((await gate(req(), { quota: 'q', limit: 1, store: broken }))?.status).toBe(503);
+  });
+  it('admits only one of twenty simultaneous requests for a one-request limit', async () => {
+    const store = fakeStore();
+    const results = await Promise.all(Array.from({ length: 20 }, () => gate(req(), { quota: 'q', limit: 1, store })));
+    expect(results.filter(result => result === null)).toHaveLength(1);
+  });
+  it('enforces a shared budget across different IP addresses', async () => {
+    const store = fakeStore();
+    const opts = { quota: 'q', limit: 10, globalLimit: 1, store };
+    expect(await gate(req({ 'x-nf-client-connection-ip': '192.0.2.1' }), opts)).toBeNull();
+    expect((await gate(req({ 'x-nf-client-connection-ip': '192.0.2.2' }), opts))?.status).toBe(429);
   });
 });
