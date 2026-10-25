@@ -20,6 +20,7 @@ export interface FoundLyrics { text: string; synced: SyncedLine[] | null; label:
 
 /** The outside services the lyrics come from (replaced by fakes in tests). */
 export interface LyricsServices {
+  align?: (analysis: SongAnalysis) => Promise<void>;
   /**
    * Listens to the singer. Throws if it can't. Every listen is a fresh listen: no previous words
    * are ever passed back in — the audio is what's transcribed, and nothing else gets a say.
@@ -32,6 +33,8 @@ export interface LyricsServices {
 }
 
 export interface LyricsRequest {
+  /** Keep the saved words, boundaries and evidence exactly, without another service request. */
+  preserveTiming?: boolean;
   /** Lyrics the user gave (or the song's own): these words are used as they are. */
   own?: string;
   /** The song's name, to look its lyrics up by. */
@@ -128,7 +131,31 @@ export function mergeHeard(previous: TimedWord[], fresh: TimedWord[], notes: Not
   return inOrder([...fresh, ...kept]);
 }
 
+const lyricJobs = new WeakMap<SongAnalysis, number>();
+
 export async function writeLyrics(analysis: SongAnalysis, request: LyricsRequest, services: LyricsServices, progress: Progress = () => undefined): Promise<LyricsResult> {
+  const job = (lyricJobs.get(analysis) ?? 0) + 1;
+  lyricJobs.set(analysis, job);
+  if (request.preserveTiming) return { source: 'kept' };
+  const originalLines = analysis.lines;
+  const originalSections = analysis.sections;
+  const draft = structuredClone(analysis);
+  const result = await writeDraft(draft, request, services, progress);
+  if (lyricJobs.get(analysis) !== job || analysis.lines !== originalLines) return { source: 'kept' };
+  if (result.source !== 'kept') await services.align?.(draft);
+  // A newer manual edit or lyric job owns the result. Do not overwrite it on late completion.
+  if (lyricJobs.get(analysis) !== job || analysis.lines !== originalLines) return { source: 'kept' };
+  analysis.lines = draft.lines;
+  analysis.heard = draft.heard;
+  analysis.typed = draft.typed;
+  analysis.transcript = draft.transcript;
+  analysis.lyricsPending = false;
+  analysis.alignment = draft.alignment;
+  if (analysis.sections === originalSections && !request.preserveTiming) analysis.sections = draft.sections;
+  return result;
+}
+
+async function writeDraft(analysis: SongAnalysis, request: LyricsRequest, services: LyricsServices, progress: Progress): Promise<LyricsResult> {
   const own = request.own?.trim() ?? '';
   const settle = (result: LyricsResult): LyricsResult => {
     analysis.lyricsPending = false;
