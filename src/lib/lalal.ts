@@ -19,9 +19,10 @@ async function requestJson<T>(url: string, init: RequestInit, timeoutSeconds = 9
     response = await fetch(url, {
       ...init,
       headers: { ...appKeyHeader(), ...(init.headers as Record<string, string> | undefined) },
-      signal: AbortSignal.timeout(timeoutSeconds * 1000),
+      signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutSeconds * 1000)]) : AbortSignal.timeout(timeoutSeconds * 1000),
     });
   } catch (error) {
+    init.signal?.throwIfAborted();
     const timedOut = error instanceof DOMException && error.name === 'TimeoutError';
     diag(name + ' → ' + (timedOut ? 'no answer after ' + timeoutSeconds + 's' : 'network error'), 'error');
     throw new LalalError(timedOut
@@ -47,17 +48,19 @@ export async function minutesLeft(): Promise<number | null> {
   return typeof data.minutes_left === 'number' ? data.minutes_left : null;
 }
 
-export async function uploadFile(file: Blob, filename: string, onProgress: (fraction: number) => void): Promise<string> {
+export async function uploadFile(file: Blob, filename: string, onProgress: (fraction: number) => void, signal?: AbortSignal): Promise<string> {
   const uploadId = crypto.randomUUID();
   const chunks = Math.max(1, Math.ceil(file.size / CHUNK_BYTES));
   if (chunks > 66) throw new LalalError('That file is too large (limit about 200 MB).');
   for (let index = 0; index < chunks; index += 1) {
     const body = file.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES);
-    await requestJson('/api/upload/chunk?upload=' + uploadId + '&index=' + index, { method: 'POST', body });
+    signal?.throwIfAborted();
+    await requestJson('/api/upload/chunk?upload=' + uploadId + '&index=' + index, { method: 'POST', body, signal });
     onProgress((index + 1) / chunks);
   }
   diag('All ' + chunks + ' pieces sent (' + (file.size / 1048576).toFixed(1) + ' MB). Handing the file to LALAL.AI…');
   const data = await requestJson<{ id?: string }>('/api/lalal/upload', {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ upload_id: uploadId, chunks, filename })
@@ -69,8 +72,9 @@ export async function uploadFile(file: Blob, filename: string, onProgress: (frac
 /** The song's own title and lyrics, when the link's source has them (Suno does). */
 export interface LinkDetails { title?: string | null; lyrics?: string | null }
 
-export async function importLink(url: string): Promise<{ id: string } & LinkDetails> {
+export async function importLink(url: string, signal?: AbortSignal): Promise<{ id: string } & LinkDetails> {
   const data = await requestJson<{ id?: string } & LinkDetails>('/api/import-link', {
+    signal,
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ url })
@@ -95,6 +99,7 @@ export async function waitForSplit(taskId: string, onProgress: (fraction: number
   for (let attempt = 0; attempt < 400; attempt += 1) {
     if (signal?.aborted) throw new LalalError('Cancelled.');
     const data = await requestJson<{ result?: Record<string, any> }>('/api/lalal/check', {
+      signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: taskId })
@@ -118,21 +123,23 @@ export async function waitForSplit(taskId: string, onProgress: (fraction: number
 }
 
 /** Stems download straight from LALAL's CDN when allowed, otherwise through our proxy. */
-export async function downloadTrack(url: string): Promise<Blob> {
+export async function downloadTrack(url: string, signal?: AbortSignal): Promise<Blob> {
+  const downloadSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(120_000)]) : AbortSignal.timeout(120_000);
+  signal?.throwIfAborted();
   try {
-    const direct = await fetch(url, { mode: 'cors', signal: AbortSignal.timeout(120_000) });
+    const direct = await fetch(url, { mode: 'cors', signal: downloadSignal });
     if (direct.ok) {
       const blob = await direct.blob();
       diag('Downloaded track directly (' + (blob.size / 1048576).toFixed(1) + ' MB)', 'ok');
       return blob;
     }
     diag('Direct track download → HTTP ' + direct.status + ', trying the proxy', 'warn');
-  } catch { diag('Direct track download blocked, using the proxy', 'info'); }
+  } catch { signal?.throwIfAborted(); diag('Direct track download blocked, using the proxy', 'info'); }
   const proxied = await fetch('/api/lalal/track?url=' + encodeURIComponent(url), {
     headers: appKeyHeader(),
-    signal: AbortSignal.timeout(120_000),
+    signal: downloadSignal,
   })
-    .catch(() => { throw new LalalError('Downloading a separated track timed out.'); });
+    .catch(() => { signal?.throwIfAborted(); throw new LalalError('Downloading a separated track timed out.'); });
   diag('/api/lalal/track → HTTP ' + proxied.status, proxied.ok ? 'ok' : 'error');
   if (!proxied.ok) throw new LalalError('Could not download a separated track.');
   return proxied.blob();
