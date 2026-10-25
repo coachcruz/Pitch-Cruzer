@@ -26,8 +26,8 @@ const QUOTA_STORE = 'pitch-cruzer-ratelimit';
 interface QuotaState { count: number; reset: number }
 
 type StoreLike = {
-  get(key: string, opts?: { type: 'json' }): Promise<QuotaState | null>;
-  setJSON(key: string, value: QuotaState): Promise<void>;
+  getWithMetadata(key: string, opts: { type: 'json'; consistency: 'strong' }): Promise<{ data: QuotaState; etag: string } | null>;
+  setJSON(key: string, value: QuotaState, opts: { onlyIfNew: true } | { onlyIfMatch: string }): Promise<{ modified: boolean }>;
 };
 
 export interface GateOptions {
@@ -35,17 +35,18 @@ export interface GateOptions {
   quota?: string;
   /** Max paid calls per IP per UTC day for this bucket. */
   limit?: number;
+  /** Hard shared cap, independent of the caller's IP. */
+  globalLimit?: number;
   /** Injected in tests; production uses the real Netlify Blobs store. */
   store?: StoreLike;
 }
 
 const asStore = (store: StoreLike | undefined): StoreLike =>
-  store ?? (getStore(QUOTA_STORE) as unknown as StoreLike);
+  store ?? (getStore({ name: QUOTA_STORE, consistency: 'strong' }) as unknown as StoreLike);
 
 function clientIp(req: Request): string {
   return (
     req.headers.get('x-nf-client-connection-ip')?.trim() ||
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     'unknown'
   );
 }
@@ -61,7 +62,7 @@ function today(): string {
 
 /**
  * Returns null when the request may proceed, otherwise the rejection Response.
- * Quota failures (Blobs unavailable) fail OPEN — the app key already did the gating.
+ * Paid operations fail closed if quota storage cannot enforce their budget.
  */
 export async function gate(req: Request, opts: GateOptions = {}): Promise<Response | null> {
   const expected = env(APP_KEY_ENV);
@@ -75,16 +76,29 @@ export async function gate(req: Request, opts: GateOptions = {}): Promise<Respon
 
   if (opts.quota && opts.limit) {
     try {
-      const key = `${opts.quota}/${today()}/${await ipHash(clientIp(req))}`;
       const store = asStore(opts.store);
-      const state: QuotaState = (await store.get(key, { type: 'json' })) ?? { count: 0, reset: 0 };
-      if (state.count >= opts.limit) {
+      const prefix = `${opts.quota}/${today()}/`;
+      const configured = Number(env('PITCH_CRUZER_LIMIT_' + opts.quota.replace(/-/g, '_').toUpperCase()));
+      const globalLimit = Number.isInteger(configured) && configured > 0 ? configured : opts.globalLimit ?? opts.limit * 10;
+      if (!await reserve(store, prefix + await ipHash(clientIp(req)), opts.limit) || !await reserve(store, prefix + 'global', globalLimit)) {
         return json({ error: 'Daily limit reached for this endpoint. Try again tomorrow.' }, 429);
       }
-      await store.setJSON(key, { count: state.count + 1, reset: state.reset });
     } catch (error) {
-      console.error('[gate] quota check failed, allowing request:', error);
+      console.error('[gate] quota check failed, refusing paid request:', error);
+      return json({ error: 'Spending protection is temporarily unavailable. No new paid job was started. Try again shortly.' }, 503);
     }
   }
   return null;
+}
+
+async function reserve(store: StoreLike, key: string, limit: number): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const entry = await store.getWithMetadata(key, { type: 'json', consistency: 'strong' });
+    const count = entry?.data.count ?? 0;
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error('Invalid quota state');
+    if (count >= limit) return false;
+    const result = await store.setJSON(key, { count: count + 1, reset: Date.now() }, entry ? { onlyIfMatch: entry.etag } : { onlyIfNew: true });
+    if (result.modified) return true;
+  }
+  throw new Error('Quota contention');
 }
