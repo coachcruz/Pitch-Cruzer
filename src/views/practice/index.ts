@@ -40,12 +40,14 @@ export function renderPractice(root: HTMLElement, songId: string): () => void {
     let buffers: SongBuffers | null = song ? session.buffers : null;
     if (!song) {
       song = (await getSong(songId).catch(() => undefined)) ?? null;
+      if (disposed) return;
       if (!song) { root.innerHTML = '<div class="card"><p>That song isn’t on this device.</p><a class="btn" href="#/">Back to songs</a></div>'; return; }
       session.song = song;
       session.saved = true;
     }
     if (!buffers) {
       buffers = await decodeStems(song);
+      if (disposed) return;
       session.buffers = buffers;
     }
     if (disposed) return;
@@ -63,8 +65,6 @@ export function renderPractice(root: HTMLElement, songId: string): () => void {
       // and duet overrides are untouched; sections are rebuilt from the rebound lines.
       root.innerHTML = '<div class="card loading">Re-binding this song’s lyrics to its notes…</div>';
       rebaseToNoteRuns(song.analysis.lines, song.analysis.notes);
-      song.analysis.sections = buildSections(song.analysis.lines, song.analysis.notes, song.analysis.duration,
-        song.analysis.lines.some(line => line.words.some(word => word.text !== '♪')));
       song.analysis.bindingVersion = BINDING_VERSION;
       if (session.saved) await saveSong(song).catch(() => undefined);
     }
@@ -77,6 +77,7 @@ export function renderPractice(root: HTMLElement, songId: string): () => void {
     if (disposed) return;
     cleanup = mount(root, song, buffers);
   })().catch(error => {
+    if (disposed) return;
     console.error(error);
     root.innerHTML = '<div class="card"><p>Could not open this song.</p><a class="btn" href="#/">Back to songs</a></div>';
   });
@@ -116,6 +117,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   /** Build my song (line by line): created once the player and mic are ready. */
   let builder: SongBuilder | null = null;
   let recordingOrigin = 0;
+  let recordedSelection: { ranges: Range[]; repeats: number; label: string } | null = null;
   let reviewPlaying = false;
   /**
    * The live mic stays open while a saved take plays back: on phones the capture session can make
@@ -372,6 +374,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       void startPlayback(false, new Timeline(playbackRanges(), repeats()).timelineFor(Math.max(0, line.start - 0.6)) ?? 0);
     },
     toggleSinger: line => {
+      if (recording || recordingBusy || builder?.active) return;
       if (!analysis.duet || !parts) return;
       analysis.duet.overrides[line.id] = parts.get(line.id) === 'me' ? 'partner' : 'me';
       duetChanged();
@@ -499,12 +502,17 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     redoStatus.textContent = '';
     $('#redoKeepWrap').classList.toggle('hidden', !typedLyrics());
     $<HTMLInputElement>('#redoKeep').checked = true;
-    void serverTranscriptionAvailable().then(available => redoQuality.closest('label')!.classList.toggle('hidden', available));
+    void serverTranscriptionAvailable().then(available => {
+      if (!disposed) $<HTMLSelectElement>('#redoEngine').options[1].disabled = !available;
+    });
     redoDialog.showModal();
   });
   redoDialog.addEventListener('cancel', event => { if (redoing) event.preventDefault(); });
   redoStart.addEventListener('click', async () => {
     if (redoing) return;
+    const keepTiming = $<HTMLInputElement>('#redoKeep').checked && Boolean(typedLyrics());
+    const engine = $<HTMLSelectElement>('#redoEngine').value === 'server' ? 'server' : 'local';
+    if (!keepTiming && engine === 'server' && !confirm('Listen again using the server? This uses transcription quota. Choose “On this device” to avoid that charge.')) return;
     redoing = true;
     redoStart.disabled = true;
     $<HTMLButtonElement>('#redoCancel').disabled = true;
@@ -514,6 +522,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     try {
       const keep = $<HTMLInputElement>('#redoKeep').checked ? typedLyrics() : '';
       const options = lyricsOptionsFrom(redoLang.value, redoQuality.value);
+      options.engine = engine;
       analysis.lyricsOptions = options;
       const progress = (_step: string, fraction: number, detail?: string) => {
         if (!disposed) redoStatus.textContent = Math.round(fraction * 100) + '%' + (detail ? ' — ' + detail : '');
@@ -521,13 +530,15 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       // Kept lyrics are only re-timed; otherwise the singer is listened to, and lyrics found by name or by
       // recognising the song are used only if they match what's sung. A redo without kept lyrics is a
       // reattempt: the first listen's words guide the second, which mainly goes after what was missed.
-      const result = await writeLyrics(analysis, keep ? { own: keep } : { lookup: songNameFromFile(song.title) || undefined, listen: true, reattempt: true },
+      const result = await writeLyrics(analysis, keep ? { own: keep, preserveTiming: true } : { lookup: songNameFromFile(song.title) || undefined, listen: true, reattempt: true },
         lyricsServices(buffers.lead, analysis.notes, options, progress), fraction => progress('lyrics', fraction));
       if (result.source === 'kept') { redoStatus.textContent = 'Couldn’t hear clear words — your current lyrics were kept.'; return; }
       lyricsChanged();
       void persist();
       toast(LYRICS_DONE[result.source] + (result.label ? ' (' + result.label + ')' : '') + '.');
       redoDialog.close();
+    } catch (error) {
+      if (!disposed) redoStatus.textContent = error instanceof Error ? error.message : 'Could not redo the lyrics. Your previous lyrics are unchanged.';
     } finally {
       redoing = false;
       redoStart.disabled = false;
@@ -600,6 +611,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
   };
   duetMode.addEventListener('change', () => {
+    if (recording || recordingBusy || builder?.active) { duetMode.value = analysis.duet?.mine ?? ''; return; }
     analysis.duet = duetMode.value ? { mine: duetMode.value as 'low' | 'high', overrides: analysis.duet?.overrides ?? {}, names: analysis.duet?.names } : undefined;
     duetChanged();
     if (analysis.duet) toast('Duet on — your partner’s lines keep the original singer. In Karaoke, tap the name on a line to switch it.');
@@ -815,6 +827,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
   const playButton = $<HTMLButtonElement>('#play');
   const stopButton = $<HTMLButtonElement>('#stop');
   const recordButton = $<HTMLButtonElement>('#record');
+  let recordingBusy = false;
   const countdown = $('#countdown');
   const renderTransport = () => {
     const active = player.state !== 'stopped';
@@ -822,14 +835,17 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     playButton.title = player.state === 'playing' ? 'Pause (Space)' : 'Play (Space)';
     playButton.disabled = recording || Boolean(builder?.active);
     stopButton.disabled = !active;
-    recordButton.disabled = (active && !recording) || Boolean(builder?.active);
+    recordButton.disabled = recordingBusy || (active && !recording) || Boolean(builder?.active);
     recordButton.textContent = recording ? '■ Review' : '●';
     recordButton.title = recording ? 'Stop and see how you did' : 'Record yourself';
     recordButton.classList.toggle('live', recording);
     // Switching the mic mid-take would drop the rest of the recording: the mic settings wait until it's done.
-    const taking = recording || Boolean(builder?.active);
+    const taking = recording || recordingBusy || Boolean(builder?.active);
     $<HTMLButtonElement>('#micCheckBtn').disabled = taking;
     $<HTMLButtonElement>('#practiceBtn').disabled = taking;
+    for (const selector of ['#duetMode', '#voicesMicSelect', '#voicesMic2Select', '#voicesMic2Btn', '#fixLyrics', '#redoLyrics', '#forgiveOctave']) {
+      $<HTMLButtonElement>(selector).disabled = taking;
+    }
   };
 
   const beep = (when: number, accent: boolean) => {
@@ -894,8 +910,13 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       player.setLevel('voice', model ? levels.voice / 100 : 0);
       player.setLevel('lead', levels.lead / 100);
       player.setLevel('music', levels.music / 100);
-      if (withRecording) mic.startRecording();
-      const origin = await player.play(playbackRanges(), repeats(), {
+      const ranges = playbackRanges();
+      const repeatCount = repeats();
+      if (withRecording) {
+        recordedSelection = { ranges: structuredClone(ranges), repeats: repeatCount, label: labelForSelection() };
+        mic.startRecording();
+      }
+      const origin = await player.play(ranges, repeatCount, {
         from, leadIn: useCountIn ? 1.9 : 0.12, model, partner: partnerRanges(analysis, parts)
       });
       if (origin === null || token !== playbackToken) return;   // superseded: the newer call owns playback
@@ -922,6 +943,8 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
       await player.play(take.ranges, take.repeats, { from, voice: { buffer: take.voice, offset: take.offset }, partner: partnerRanges(analysis, parts) });
       renderTransport();
     } catch (error) {
+      setReviewPlaying(false);
+      renderTransport();
       toast(error instanceof Error ? error.message : 'Couldn’t play that take.', 'error');
     }
   };
@@ -967,8 +990,14 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     jumpTo(target);
   });
   recordButton.addEventListener('click', async () => {
+    if (recordingBusy || review.busy) return;
     if (recording) { stopAll(); return; }
+    if (review.current && !review.current.savedId && !confirm('Save or discard your current take before recording again. Discard it now?')) return;
+    recordingBusy = true;
+    renderTransport();
+    try {
     if (!(await enableMic())) return;
+    if (disposed) return;
     if (!mic.canRecord) { toast('This browser can’t record here. Try Chrome, Edge or Safari.', 'error'); return; }
     if (repeats() === 99) { repeatsEl.value = '1'; markPractice(); }
     recording = true;
@@ -976,24 +1005,33 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     review.close();
     closeSettings();
     await startPlayback(true);
-    toast('Recording — sing along! (Headphones give the cleanest take.)');
+    if (player.state === 'playing') toast('Recording — sing along! (Headphones give the cleanest take.)');
+    else recording = false;
+    } finally { recordingBusy = false; if (!disposed) renderTransport(); }
   });
 
   const finishRecording = async () => {
+    recordingBusy = true;
     recording = false;
     renderTransport();
-    const result = mic.stopRecording();
+    try {
+    const result = await mic.stopRecording();
     if (!result || result.samples.length < result.sampleRate * 0.5) { toast('No audio was recorded from the mic.', 'error'); return; }
     // What you sang at clock time T answers music you heard at T − output latency − input latency.
     const latency = roundTrip(player.ctx);   // measured by the Sync check (Bluetooth!), or what the browser reports
     const voice = player.ctx.createBuffer(1, result.samples.length, result.sampleRate);
     voice.copyToChannel(result.samples, 0);
-    await review.fromRecording(voice, result.startTime - recordingOrigin - latency, playbackRanges(), repeats(), labelForSelection());
+    const selection = recordedSelection;
+    if (!selection) throw new Error('The recording’s practice selection is missing.');
+    await review.fromRecording(voice, result.startTime - recordingOrigin - latency, selection.ranges, selection.repeats, selection.label);
+    } catch (error) { toast(error instanceof Error ? error.message : 'Could not finish the recording.', 'error'); }
+    finally { recordingBusy = false; if (!disposed) renderTransport(); }
   };
 
   // ================================================================ review window
   const review = new TakeReview({
     root, song, buffers, player, levels,
+    partner: () => partnerRanges(analysis, parts),
     forgiveOctave: () => forgiveOctave.checked,
     counts: time => !parts || parts.get(analysis.lines.find(line => time >= line.start - 0.2 && time <= line.end + 0.2)?.id ?? '') !== 'partner',
     playTake,
@@ -1085,7 +1123,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     lineStats = null;
     if (frames < 12 || voiced / frames < 0.3) return;
     const percent = Math.round((100 * hits) / frames);
-    lineFlash.innerHTML = `<strong>${percent >= 80 ? '🌟 Perfect!' : percent >= 60 ? 'Great!' : percent >= 40 ? 'Nice!' : '💪 Keep going'}</strong><span>${percent >= 40 ? percent + '% on the note' : 'you’re getting it'}</span>`;
+    lineFlash.innerHTML = `<strong>${percent >= 80 ? '🌟 Strong singing!' : percent >= 60 ? 'Great!' : percent >= 40 ? 'Nice!' : '💪 Keep going'}</strong><span>${percent >= 40 ? percent + '% on the note' : 'you’re getting it'}</span>`;
     lineFlash.classList.remove('show');
     void lineFlash.offsetWidth;
     lineFlash.classList.add('show');
@@ -1147,7 +1185,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     }
 
     if (view === 'staff') lane.draw(now);
-    else karaoke.update(now, playing, mic.active ? sung : undefined, forgiveOctave.checked);
+    else karaoke.update(now, playing, mic.active && !reviewPlaying && (!player.timeline.hasTurns || player.timeline.pieceAt(player.timelineTime())?.turn) ? sung : undefined, forgiveOctave.checked);
     builder?.update(now);
     showLevels(micLevel);
     updateUpNext(now);
@@ -1241,6 +1279,7 @@ function mount(root: HTMLElement, song: StoredSong, buffers: SongBuffers): () =>
     document.removeEventListener('keydown', onEsc);
     window.removeEventListener('keydown', onKey);
     window.removeEventListener(LYRICS_READY, onLyricsReady);
+    micCheck?.stop();
     mic.stop();
     player.onEnded = null;
     player.close();
