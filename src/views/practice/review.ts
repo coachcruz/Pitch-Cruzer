@@ -32,7 +32,8 @@ export interface ReviewHost {
   buffers: SongBuffers;
   player: Player;
   /** voice, takeLead, takeMusic: the listen-back mix (its own, apart from the guide you sang with). */
-  levels: { voice: number; takeLead: number; takeMusic: number };
+  levels: { voice: number; takeLead: number; takeMusic: number; bass: number; treble: number };
+  partner: () => Range[];
   forgiveOctave: () => boolean;
   /** Which song moments are scored (duet: only your lines). */
   counts: (sourceTime: number) => boolean;
@@ -56,6 +57,7 @@ export class TakeReview {
   private track: Awaited<ReturnType<typeof pitchTrackFor>> | null = null;
   private dialog: HTMLDialogElement;
   private panel: HTMLElement;
+  busy = false;
 
   constructor(private host: ReviewHost) {
     this.dialog = el<HTMLDialogElement>(host.root, '#reviewDialog');
@@ -81,10 +83,25 @@ export class TakeReview {
 
   /** Scores a fresh recording and shows it — and keeps it for this visit, even before it's saved. */
   async fromRecording(voice: AudioBuffer, offset: number, ranges: Range[], repeats: number, label: string): Promise<void> {
+    if (this.busy) throw new Error('The previous take is still being saved.');
+    this.busy = true;
+    const recovery: StoredTake = { id: crypto.randomUUID(), songId: this.host.song.id, singer: prefs.get('singer', '') || 'Me',
+      createdAt: Date.now(), score: 0, label: label + ' (unscored)', voice: encodeWav([voice.getChannelData(0)], voice.sampleRate),
+      sampleRate: voice.sampleRate, segments: ranges, repeats, offsetSeconds: offset };
     this.panel.innerHTML = '<p>Scoring your take…</p>';
     this.open(true);
-    await this.build(voice, offset, ranges, repeats, label);
-    await this.keepForVisit();
+    try {
+      // Preserve the raw performance before analysis can fail or the page can be reclaimed.
+      await saveSong(this.host.song);
+      await saveTake(recovery);
+      await this.build(voice, offset, ranges, repeats, label, recovery);
+      await saveTake({ ...recovery, label, score: this.current!.score.score });
+      toast('Recording saved.');
+    } catch (error) {
+      this.panel.innerHTML = '<p>Your recording could not be fully saved or scored. Save the audio now to keep it.</p><button id="recoverVoice" class="btn primary">Save my recording</button>';
+      el(this.panel, '#recoverVoice').addEventListener('click', () => downloadBlob(recovery.voice, safeName(this.host.song.title + ' - my voice') + '.wav'));
+      toast(error instanceof Error ? error.message : 'Could not finish the recording.', 'error');
+    } finally { this.busy = false; }
   }
 
   /**
@@ -103,14 +120,14 @@ export class TakeReview {
           id: review.keptId ?? crypto.randomUUID(), songId: this.host.song.id, singer: prefs.get('singer', '') || 'Me',
           createdAt: Date.now(), score: review.score.score, label: review.label,
           voice: encodeWav([review.voice.getChannelData(0)], review.voice.sampleRate), sampleRate: review.voice.sampleRate,
-          segments: review.ranges, offsetSeconds: review.offset, visit: visitId()
+          segments: review.ranges, repeats: review.repeats, offsetSeconds: review.offset, visit: visitId()
         };
       await saveTake(take);
       this.kept = take;
       review.keptId = take.id;
       if (this.dialog.open) visitStore.set('reviewTake', take.id);
       void this.renderTakes();
-    } catch { /* storage full: the take stays on screen, it just isn't kept past this page */ }
+    } catch { toast('This take has not been saved. Save its audio before leaving this page.', 'error'); }
   }
 
   /** After the page was reloaded (a phone reclaiming it, an update): open the take that was being reviewed. */
@@ -122,7 +139,7 @@ export class TakeReview {
     const voice = await decodeAudio(await take.voice.arrayBuffer());
     this.panel.innerHTML = '<p>Opening your take…</p>';
     this.open(true);
-    await this.build(voice, take.offsetSeconds, take.segments, 1, take.label, take);
+    await this.build(voice, take.offsetSeconds, take.segments, take.repeats ?? 1, take.label, take);
   }
 
   /** Re-scores the current take (after changing octave forgiveness, sync or duet parts). */
@@ -248,7 +265,7 @@ export class TakeReview {
     });
     el(panel, '#downloadMix').addEventListener('click', async () => {
       toast('Mixing your take…');
-      const blob = await mixdown(host.buffers, review.timeline, { lead: separated ? host.levels.takeLead / 100 : 1, music: host.levels.takeMusic / 100, voice: host.levels.voice / 100 }, review.voice, review.offset);
+      const blob = await mixdown(host.buffers, review.timeline, { lead: separated ? host.levels.takeLead / 100 : 1, music: host.levels.takeMusic / 100, voice: host.levels.voice / 100, bass: host.levels.bass, treble: host.levels.treble }, review.voice, review.offset, host.partner());
       downloadBlob(blob, safeName(host.song.title + ' - ' + (el<HTMLInputElement>(panel, '#singerName').value || 'my take')) + '.wav');
     });
     el(panel, '#downloadVoice').addEventListener('click', () => {
@@ -269,6 +286,7 @@ export class TakeReview {
           voice: encodeWav([review.voice.getChannelData(0)], review.voice.sampleRate),
           sampleRate: review.voice.sampleRate,
           segments: review.ranges,
+          repeats: review.repeats,
           offsetSeconds: review.offset
         };
         await saveTake(take);
@@ -324,7 +342,7 @@ export class TakeReview {
       if (this.host.player.state !== 'stopped') this.host.stop();
       const voice = await decodeAudio(await take.voice.arrayBuffer());
       this.panel.classList.remove('hidden');
-      await this.build(voice, take.offsetSeconds, take.segments, 1, take.label, take);
+      await this.build(voice, take.offsetSeconds, take.segments, take.repeats ?? 1, take.label, take);
       this.dialog.scrollTop = 0;
     }));
     list.querySelectorAll<HTMLButtonElement>('[data-delete-take]').forEach(button => button.addEventListener('click', async () => {
