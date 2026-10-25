@@ -33,6 +33,8 @@ export class LiveMic {
   private monitor: GainNode | null = null;
   private chunks: Float32Array[] = [];
   private firstFrame: number | null = null;
+  private recordingId = 0;
+  private flushed: (() => void) | null = null;
   private recent: number[] = [];
   private buffer = new Float32Array(4096);
   echoCancel = false;
@@ -45,6 +47,7 @@ export class LiveMic {
   /** Duet: a second live mic. Its audio joins the level meter, the "hear myself" monitor and the recording. */
   private secondStream: MediaStream | null = null;
   private secondSource: MediaStreamAudioSourceNode | null = null;
+  private secondToken = 0;
 
   constructor(private ctx: AudioContext) {}
 
@@ -106,7 +109,9 @@ export class LiveMic {
     if (workletLoaded.has(this.ctx)) {
       try {
         this.recorder = new AudioWorkletNode(this.ctx, 'recorder-processor', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
-        this.recorder.port.onmessage = (event: MessageEvent<{ frame: number; data: Float32Array }>) => {
+        this.recorder.port.onmessage = (event: MessageEvent<{ id: number; frame: number; data: Float32Array; stopped?: number }>) => {
+          if (event.data.stopped === this.recordingId) { this.flushed?.(); return; }
+          if (event.data.id !== this.recordingId || !event.data.data) return;
           if (this.firstFrame === null) this.firstFrame = event.data.frame;
           this.chunks.push(event.data.data);
         };
@@ -136,13 +141,20 @@ export class LiveMic {
   async addSecondMic(choice: MicChoice | null = null): Promise<void> {
     if (!this.stream || !this.analyser || !this.monitor) throw new Error('Start the first mic before adding a second.');
     this.removeSecondMic();
+    const token = ++this.secondToken;
     const audio: MediaTrackConstraints = {
       echoCancellation: this.echoCancel, noiseSuppression: false, autoGainControl: false, channelCount: 1
     };
     const mics = choice ? await listMics() : [];
     const id = choice ? (mics.find(mic => mic.id === choice.id) ?? mics.find(mic => mic.label === choice.label))?.id : undefined;
-    this.secondStream = await navigator.mediaDevices.getUserMedia(
+    if (token !== this.secondToken || !this.stream) return;
+    const stream = await navigator.mediaDevices.getUserMedia(
       { audio: id ? { ...audio, deviceId: { exact: id } } : audio, video: false });
+    if (token !== this.secondToken || !this.stream || !this.analyser || !this.monitor) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    this.secondStream = stream;
     this.secondSource = this.ctx.createMediaStreamSource(this.secondStream);
     this.secondSource.connect(this.analyser);
     this.secondSource.connect(this.monitor);
@@ -151,6 +163,7 @@ export class LiveMic {
 
   /** Drops the second mic; the first keeps running. */
   removeSecondMic(): void {
+    ++this.secondToken;
     this.secondSource?.disconnect();
     this.secondSource = null;
     this.secondStream?.getTracks().forEach(track => track.stop());
@@ -181,12 +194,17 @@ export class LiveMic {
   startRecording(): void {
     this.chunks = [];
     this.firstFrame = null;
-    this.recorder?.port.postMessage('start');
+    this.recorder?.port.postMessage({ command: 'start', id: ++this.recordingId });
   }
 
   /** Returns the recorded samples and the audio-clock time (seconds) of the first sample. */
-  stopRecording(): { samples: Float32Array<ArrayBuffer>; startTime: number; sampleRate: number } | null {
-    this.recorder?.port.postMessage('stop');
+  async stopRecording(): Promise<{ samples: Float32Array<ArrayBuffer>; startTime: number; sampleRate: number } | null> {
+    if (this.recorder) await new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, 1000);
+      this.flushed = () => { clearTimeout(timer); resolve(); };
+      this.recorder!.port.postMessage({ command: 'stop', id: this.recordingId });
+    });
+    this.flushed = null;
     if (this.firstFrame === null || !this.chunks.length) return null;
     const length = this.chunks.reduce((sum, chunk) => sum + chunk.length, 0);
     const samples = new Float32Array(length);
@@ -215,13 +233,11 @@ export class LiveMic {
     if (level < 0.04) { this.recent = []; return { midi: null, level }; }
     const result = yin(decimated, this.ctx.sampleRate / factor, MIN_HZ, MAX_HZ, 0.18);
     if (!result || result.confidence < 0.7) { this.recent = []; return { midi: null, level }; }
-    let midi = frequencyToMidi(result.frequency);
-    const last = this.recent[this.recent.length - 1];
-    // Octave-jump guard, symmetric: YIN sometimes locks an octave high — or low — for a frame.
-    if (last !== undefined && Math.abs(midi - last - 12) < 0.7) midi -= 12;
-    else if (last !== undefined && Math.abs(midi - last + 12) < 0.7) midi += 12;
+    const midi = frequencyToMidi(result.frequency);
+    // Median-filter raw observations: one glitch is rejected, a sustained interval is retained.
+    // Feeding octave-corrected values back into this history permanently locked real jumps out.
     this.recent.push(midi);
-    if (this.recent.length > 4) this.recent.shift();
+    if (this.recent.length > 3) this.recent.shift();
     const sorted = [...this.recent].sort((a, b) => a - b);
     return { midi: sorted[Math.floor(sorted.length / 2)], level };
   }
@@ -229,6 +245,7 @@ export class LiveMic {
   stop(): void {
     ++this.startToken;   // an in-flight start() must not finish into a stopped mic
     this.removeSecondMic();
+    this.flushed?.();
     this.recorder?.disconnect();
     this.recorder = null;
     this.monitor?.disconnect();
