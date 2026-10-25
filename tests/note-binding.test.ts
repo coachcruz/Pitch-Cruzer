@@ -192,7 +192,7 @@ describe('unvoiced interpolation', () => {
 });
 
 describe('rebaseToNoteRuns (old-song upgrade)', () => {
-  it('re-derives a guess-shifted line from the notes, keeping ids and order', () => {
+  it('refreshes pitch associations without overwriting saved timing', () => {
     // Integer times: the two notes are exactly the same length, so the longest-note tie
     // genuinely breaks toward the first.
     const notes: NoteEvent[] = [
@@ -210,13 +210,13 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
     rebaseToNoteRuns(lines, notes);
     expect(lines[0].id).toBe('l1');
     const syllable = lines[0].words[0].syllables[0];
-    expect(syllable.start).toBeCloseTo(10, 6);
-    expect(syllable.midi).toBe(60);   // from its own run, not the old window
+    expect(syllable.start).toBeCloseTo(12.5, 6);
+    expect(syllable.midi).toBe(62);
     expect(syllable.notes).toEqual([60, 62]);
-    expect(lines[0].start).toBeCloseTo(10, 6);
+    expect(lines[0].start).toBeCloseTo(12.5, 6);
   });
 
-  it('staples each syllable to its note indices — the karaoke follows structure, not timestamps', () => {
+  it('leaves words without a valid timing window unbound instead of inventing a location', () => {
     const notes: NoteEvent[] = [
       { start: 10, end: 14, midi: 60 },
       { start: 14, end: 18, midi: 62 },
@@ -236,10 +236,8 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
     const [love, you] = lines[0].words[0].syllables;
     // Structural binding: each syllable knows its notes by index. The karaoke follows these —
     // no timestamp is ever consulted to know what's being sung.
-    expect(love.noteIndex).not.toBeNull();
-    expect(you.noteIndex).not.toBeNull();
-    expect(you.noteIndex).toBeGreaterThan(love.noteIndex!);
-    expect(love.noteEnd).toBeLessThanOrEqual(you.noteIndex!);
+    expect(love.noteIndex).toBeNull();
+    expect(you.noteIndex).toBeNull();
   });
 
   it('moves the monotonic cursor on: lines cannot steal each other’s notes', () => {
@@ -259,7 +257,7 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
     expect(lines[1].words[0].syllables[0].midi).toBe(62);
   });
 
-  it('ignores wildly-off old line times: binds by order alone, trusting no timestamp', () => {
+  it('does not silently retime old lyrics whose windows have no measured pitch', () => {
     const notes: NoteEvent[] = [
       { start: 10.0, end: 10.5, midi: 60 },
       { start: 10.5, end: 11.0, midi: 62 },
@@ -281,14 +279,10 @@ describe('rebaseToNoteRuns (old-song upgrade)', () => {
     expect(lines[1].id).toBe('l2');
     const first = lines[0].words.flatMap(w => w.syllables);
     const second = lines[1].words.flatMap(w => w.syllables);
-    expect(first[0].start).toBeCloseTo(10.0, 6);
-    expect(first[1].start).toBeCloseTo(10.5, 6);
-    expect(second[0].start).toBeCloseTo(20.0, 6);
-    expect(second[1].start).toBeCloseTo(20.5, 6);
-    expect(lines[0].start).toBeCloseTo(10.0, 6);
-    expect(lines[0].end).toBeCloseTo(11.0, 6);
-    expect(lines[1].start).toBeCloseTo(20.0, 6);
-    expect(lines[1].end).toBeCloseTo(21.0, 6);
+    expect(first.map(s => s.start)).toEqual([40, 40.5]);
+    expect(second.map(s => s.start)).toEqual([0, 0.5]);
+    expect([...first, ...second].every(s => s.noteIndex === null)).toBe(true);
+    expect(lines.map(l => [l.start, l.end])).toEqual([[40, 41], [0, 1]]);
   });
 });
 
