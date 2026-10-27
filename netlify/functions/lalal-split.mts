@@ -6,7 +6,7 @@ import { gate } from '../lib/gate.mts';
 export async function splitRequest(key: string, sourceId: string): Promise<Response> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('pitch-cruzer:lead-back:mp3:v1:' + sourceId));
   const hex = [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
-  const idempotencyKey = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  const idempotencyKey = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
   return fetch(LALAL_BASE + '/split/stem_separator/', {
     method: 'POST',
     headers: { 'X-License-Key': key, 'Content-Type': 'application/json' },
